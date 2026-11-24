@@ -306,10 +306,10 @@ from a button in the page pane, as a list in a popup is (the pane is a place for
 ## PipeWire config
 
 `core/popups/setup/` is the config check's popup (popup id `setup`, row *PipeWire config…*): the
-sink, the summary and the seven lines in the daemon's words (`path.config` of the card), with the
-limit sentence. It prints and judges nothing; the words come from `svolder-ipc`
-([host-config-check.md](host-config-check.md)). With no config on the card it says `config not
-read`.
+sink, then `From player` and `To DAC` (`data-io`, none from an older daemon), the summary and the
+seven lines in the daemon's words (`path.config` of the card), the `What changes the sound` section
+(`path.row.changes`) and the limit sentence. It prints and judges nothing; the words come from
+`svolder-ipc` ([host-config-check.md](host-config-check.md)). With no config: `config not read`.
 
 ## Sound
 

@@ -1034,12 +1034,14 @@ its sound takes to the default sink:
 `{"result":"host","available":true,"playing":{"title":…,"artist":…,"album":…,"player":…,"status":"playing","length_us":…,"progress":{"position_us":…,"rate_milli":1000,"read_at_ms":…},"cover":"<hash>"},"route":{"sink":{…},"player":{…},"player_match":"pid","others_mixing":0,"host_eq":true,"stages":{"eq":true,"crossfeed":false,"speakers":false}},"now_ms":…}`.
 `available` is `false` (and nothing else but `now_ms` follows) when the host side is off: `[host]
 enabled = false`, `SVOLDER_HOST=off` in the daemon's environment, or no session bus. `playing` is
-absent while there is no player. `route.stages` (`eq`, `crossfeed`, `speakers`) says which stages of
-the computer's filter chain play when `host_eq` is true and the daemon's EQ view can vouch for them;
-it is `null` otherwise, and a client then says only that a chain is on. The daemon reads the
-PipeWire graph for `route` while a front end that shows the path is connected (a `subscribe` that
-asked for the host, the event stream of a DAC's web page: every two seconds), every 30 s while the
-MQTT client is connected, and once, within one second, for a plain `host` request (a script,
+absent while there is no player. `route.player_match` says how the stream was found: `pid`, `name`,
+`assumed`, `elsewhere`, `not_found`, `no_player` or `no_mpris` (no MPRIS player is followed and one
+running stream into the sink is taken). `route.stages` (`eq`, `crossfeed`, `speakers`) says which
+stages of the computer's filter chain play when `host_eq` is true and the daemon's EQ view can vouch
+for them; it is `null` otherwise, and a client then says only that a chain is on. The daemon reads
+the PipeWire graph for `route` while a front end that shows the path is connected (a `subscribe`
+that asked for the host, the event stream of a DAC's web page: every two seconds), every 30 s while
+the MQTT client is connected, and once, within one second, for a plain `host` request (a script,
 `svolder host check`, `svolder doctor`, MCP `get_host`; requests that arrive together share the
 read). See [host-config-check.md](../design/host-config-check.md#reads). Lengths and positions are
 in microseconds, the rate in thousandths (1000 is the normal rate), `read_at_ms` and `now_ms` in
@@ -1234,7 +1236,7 @@ $ svolder daemon status
 svolderd.socket: installed, enabled, active
 svolderd.socket listens on /run/user/1000/svolder.sock
 svolderd.service: installed, enabled, active
-daemon: 0.39.0 on /run/user/1000/svolder.sock
+daemon: 0.39.4 on /run/user/1000/svolder.sock
 mqtt: connected to 192.168.1.10:1883 (read-only)
 mcp: listening on 127.0.0.1:8737 (token, read-only)
 mcp clients: 0 connections open; 2 clients in the past hour, 3 in the past day

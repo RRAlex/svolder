@@ -18,6 +18,7 @@ import {
 } from './computer-steps.js';
 import { holdTone } from './keep.js';
 import { REACH, grab } from '../../core/tone-drag.js';
+import { CROSSFEED, LOUDNESS, SOUND, SPEAKERS } from '../../core/popups/listed.js';
 
 /** Draws the parts whose swap waited (live.js's), given to [`installComputer`]. */
 let readWaiting = () => {};
@@ -28,6 +29,15 @@ let table = null;
 let hovered = null;
 
 const core = () => ember.core;
+
+/** The Sound popup's page for a stage word of the strip: the EQ library is the popup's first tab
+ * (no page), and Space is the virtual speakers' tab while they play, else the crossfeed's. */
+function soundPage(stage) {
+  if (stage === 'loudness') return LOUDNESS;
+  if (stage !== 'space') return null;
+  return core().computer.levelsOf(core().model.page())?.stages.find((s) => s.key === 'space')?.kind
+    === 'speakers' ? SPEAKERS : CROSSFEED;
+}
 const act = () => ember.core.actions.computer;
 
 const plotOf = (target) => target.closest?.('.eqg.pts .plot') ?? null;
@@ -194,6 +204,12 @@ function clicked(event) {
   switch (control.dataset.comp) {
     case 'mode':
       if (control.getAttribute('aria-pressed') !== 'true') act().setMode(control.dataset.mode);
+      break;
+    case 'bypass':
+      act().setBypass(control.getAttribute('aria-pressed') !== 'true');
+      break;
+    case 'stage':
+      core().router.open(SOUND, soundPage(control.dataset.stage));
       break;
     case 'preset':
       // the question's focus goes back to this chip, found again by its id after a redraw

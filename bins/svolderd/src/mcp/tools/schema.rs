@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use super::{host, scenes};
 
 /// The tool names, each with whether it changes a device.
-pub(super) const TOOLS: [(&str, bool); 20] = [
+pub(super) const TOOLS: [(&str, bool); 21] = [
     ("list_devices", false),
     ("get_state", false),
     ("get_link_history", false),
@@ -28,6 +28,7 @@ pub(super) const TOOLS: [(&str, bool); 20] = [
     ("set_host_crossfeed", true),
     ("set_host_speakers", true),
     ("set_host_loudness", true),
+    ("set_host_bypass", true),
     ("load_scene", true),
     ("save_scene", true),
     ("rename_scene", true),
@@ -110,6 +111,9 @@ pub(super) fn definition(name: &'static str, write: bool) -> Tool {
     }
     if name == "set_host_loudness" {
         return host::loudness_definition();
+    }
+    if name == "set_host_bypass" {
+        return host::bypass_definition();
     }
     if name == "set_host_speakers" {
         return host::speakers_definition();

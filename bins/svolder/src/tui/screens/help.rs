@@ -44,6 +44,9 @@ const RULES: [&str; 3] = [
     "Symbols and navigation keys are the same on every screen.",
 ];
 
+/// What the overlay calls the section of the keys that act where the keys are now.
+const THIS_SCREEN: &str = "This screen";
+
 /// What the overlay calls the section holding the keys that work on every screen.
 const EVERYWHERE: &str = "Everywhere";
 
@@ -424,7 +427,19 @@ fn sections(app: &App) -> Vec<Vec<Entry>> {
         does: CTRL_C.1.to_string(),
         reason: None,
     });
-    let mut sections = vec![everywhere];
+    let mut sections = Vec::new();
+    // Where the keys are on the computer side's tone screen comes first: the keys they have there.
+    let here = keys::this_screen(app);
+    if !here.is_empty() {
+        let mut group = vec![Entry::Heading(THIS_SCREEN)];
+        group.extend(here.into_iter().map(|(label, does, _)| Entry::Key {
+            label,
+            does: does.to_string(),
+            reason: None,
+        }));
+        sections.push(group);
+    }
+    sections.push(everywhere);
     // The Settings box heads the sections while it is open, over whichever screen is under it.
     let first = if app.overlays.settings.is_some() {
         Screen::Settings
@@ -470,14 +485,19 @@ fn sections(app: &App) -> Vec<Vec<Entry>> {
 /// How many leading sections fill the first column alone: Everywhere and, when it is not the
 /// screen being shown, Telemetry after it; the shown screen then heads the next column.
 fn lead(app: &App, sections: &[Vec<Entry>]) -> usize {
+    // The group of the keys where the keys are now, where there is one, leads everything.
+    let offset = usize::from(matches!(
+        sections.first().and_then(|section| section.first()),
+        Some(Entry::Heading(heading)) if *heading == THIS_SCREEN
+    ));
     let telemetry_second = matches!(
-        sections.get(1).and_then(|section| section.first()),
+        sections.get(1 + offset).and_then(|section| section.first()),
         Some(Entry::Heading(heading)) if *heading == name(Screen::Telemetry)
     );
     if telemetry_second && (app.overlays.settings.is_some() || app.screen != Screen::Telemetry) {
-        2
+        2 + offset
     } else {
-        1
+        1 + offset
     }
 }
 
@@ -559,6 +579,8 @@ fn reason(hint: &KeyHint, app: &App) -> Option<&'static str> {
         When::CanIdentify => "this device offers no identify",
         When::HasComputer => "needs the computer's controls",
         When::OnComputer => "on the computer side only",
+        When::DacEq if app.profile.eq.is_none() => "needs an EQ",
+        When::DacEq => "on the device's side only",
         When::HasLoudness => "on the computer side, with loudness",
         When::HasCrossfeed => "on the computer side, with crossfeed",
         When::HasSpace => "on the computer side, with virtual speakers",

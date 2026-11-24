@@ -1,5 +1,5 @@
  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀
- ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    Gungnir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
+ ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    Gungnir 2 · fw 3 · 0102030405060708  ● connected                        mouse:on 14:02
 ─ Controls ── EQ ── Telemetry ──┤ Devices ├───────────────────────────────────────────────────────── ? help ─ esc back ─
 ┌ Devices ───────────────────────────────────────────────────────────── new ─ update ─ b identify ─ x remove ─ refresh ┐
 │                                                                                                                      │

@@ -337,7 +337,7 @@ ok('wire_hud_holds_the_fade_for_every_trouble_word', () => {
   let t = 0;
   const timers = [];
   const classes = new Set();
-  const el = () => ({ textContent: '', className: '', innerHTML: '', hidden: false, classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) } });
+  const el = () => ({ textContent: '', className: '', innerHTML: '', hidden: false, addEventListener() {}, classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) } });
   const parts = { '.nd-left': el(), '.nd-right': el(), '.nd-vol': el(), '.nd-eq': el(), '#nightdrive': el() };
   const root = { querySelector: (sel) => parts[sel] };
   const doc = { addEventListener() {}, removeEventListener() {} };
@@ -746,6 +746,97 @@ ok('the_eq_line_reads_off_or_eq_and_the_preset', () => {
   assert.equal(line(modelOf({ eq: null })), null);
   const dacSide = computerRig({ side: 'dac', device: { ...RIG_DAC, tone: toneOf() } });
   assert.deepEqual(eqLine(dacSide.core.model.page(), dacSide.core.computer.view()).gains.length, 5);
+});
+
+const LEVELS = {
+  eq_db: -7.8, space_db: -7, total_db: -14.8, climb_to_db: null, passthrough: false, untouched: false,
+  words: 'plays −14.8 dB in all',
+};
+const HELD = { eq: false, loudness: false, crossfeed: false, speakers: false };
+const chained = (over = {}, bypass = { on: false, held: HELD }) => modelOf({
+  eq: {
+    ...modelOf().eq, preset: 'Bass', loudness: { on: true, strength_pct: 60 }, crossfeed: { on: false },
+    speakers: { on: true }, levels: LEVELS, bypass, ...over,
+  },
+});
+const chainOf = (computer, opts = {}) => {
+  const r = computerRig({ computer, ...opts });
+  const page = r.core.model.page();
+  return { r, page, comp: r.core.computer.view(), levels: r.core.computer.levelsOf(page), bypass: r.core.computer.bypassOf(page) };
+};
+
+ok('the_eq_line_adds_the_space_stage_and_the_total', () => {
+  const c = chainOf(chained());
+  const line = eqLine(c.page, c.comp, c.levels);
+  assert.deepEqual([line.lead, line.name], ['EQ', 'BASS']);
+  assert.deepEqual(line.levels.map((l) => l.text), ['SPACE −7.0', '−14.8 dB']);
+  // the brief's line: `EQ Bass · SPACE −7.0 · −14.8 dB`, one nowrap piece each
+  assert.equal(eqMarkup(line).replace(/<[^>]*>/g, ''), 'EQ BASS · SPACE −7.0 · −14.8 dB');
+  assert.ok(eqMarkup(line).includes('<span class="nd-lv">SPACE −7.0</span> · <span class="nd-lv">−14.8 dB</span>'));
+  // a state only a file says reads on before the stages
+  const unsure = eqMarkup({ ...line, gains: ['unconfirmed'] }).replace(/<[^>]*>/g, '');
+  assert.equal(unsure, 'EQ BASS unconfirmed · SPACE −7.0 · −14.8 dB');
+  // a viewer who may write taps the stage words; a guest reads text
+  const tap = eqMarkup(line, true);
+  const buttons = [...tap.matchAll(/<button[^>]*data-stage="([^"]+)"([^>]*)>([^<]*)<\/button>/g)].map((m) => [m[1], m[3]]);
+  assert.deepEqual(buttons, [['eq', 'BASS'], ['space', 'SPACE −7.0']]);
+  assert.ok(tap.includes('data-kind="speakers"') && tap.includes('aria-label="SPACE −7.0: open its settings"'));
+  assert.ok(!eqMarkup(line, false).includes('<button'));
+  // crossfeed is the Space stage too, with its own level
+  const xf = chainOf(chained({ speakers: { on: false }, crossfeed: { on: true }, levels: { ...LEVELS, space_db: -3.1, total_db: -10.9 } }));
+  assert.deepEqual(eqLine(xf.page, xf.comp, xf.levels).levels.map((l) => [l.text, l.kind]), [['SPACE −3.1', 'crossfeed'], ['−10.9 dB', undefined]]);
+  // no Space stage: only the total; no total words (no chain): nothing added
+  const bare = chainOf(chained({ speakers: { on: false } }));
+  assert.deepEqual(eqLine(bare.page, bare.comp, bare.levels).levels.map((l) => l.text), ['−14.8 dB']);
+  const none = chainOf(chained({ levels: { ...LEVELS, words: '' } }));
+  assert.equal('levels' in eqLine(none.page, none.comp, none.levels), false);
+  // a host without levels, or the DAC side: the line is as it was
+  const old = chainOf(modelOf());
+  assert.equal('levels' in eqLine(old.page, old.comp, old.levels), false);
+  const dac = chainOf(chained(), { side: 'dac', device: { ...RIG_DAC, tone: toneOf() } });
+  assert.equal('levels' in eqLine(dac.page, dac.comp, dac.levels), false);
+});
+
+ok('a_bypassed_line_reads_off_with_the_pass_through_total', () => {
+  const held = { eq: true, loudness: true, crossfeed: false, speakers: true };
+  const c = chainOf(chained({
+    on: false, loudness: { on: false }, speakers: { on: false },
+    levels: { ...LEVELS, eq_db: 0, space_db: 0, total_db: -7.6, passthrough: true, words: 'pass-through −7.6 dB until the music pauses' },
+  }, { on: true, held }));
+  const line = eqLine(c.page, c.comp, c.levels);
+  // the pass-through says the daemon's own words in place of the total
+  assert.deepEqual([line.name, line.levels.map((l) => l.text)], ['OFF', ['pass-through −7.6 dB until the music pauses']]);
+  // a climb under way (a stage went off, the chain still plays) says the daemon's words too
+  const climbing = chainOf(chained({ levels: { ...LEVELS, climb_to_db: 0, words: 'climbing to 0.0 dB' } }));
+  assert.equal(eqLine(climbing.page, climbing.comp, climbing.levels).levels.slice(-1)[0].text, 'climbing to 0.0 dB');
+  const said = chainOf(chained({ levels: { ...LEVELS, passthrough: true, untouched: true, words: 'pass-through, untouched' } }));
+  assert.deepEqual(eqLine(said.page, said.comp, said.levels).levels.map((l) => l.text).slice(-1), ['pass-through, untouched']);
+});
+
+ok('the_bypass_key_sits_beside_the_eq_key_and_is_a_toggle', () => {
+  const html = (c, opts = {}) => drawDash(c.page, { phone: () => false }, 1000, c.comp, c.bypass, opts.inert);
+  const off = chainOf(chained());
+  const keys = html(off);
+  assert.deepEqual(acts(keys).slice(0, 5), ['volume-down', 'mute', 'volume-up', 'eq', 'bypass']);
+  const key = /<button[^>]*id="nd-bypass-key"[^>]*>BYPASS<\/button>/.exec(keys)?.[0];
+  assert.ok(key, keys);
+  assert.ok(key.includes('aria-pressed="false"') && key.includes('data-comp="bypass"') && !key.includes('quiet'));
+  const held = { eq: true, loudness: true, crossfeed: false, speakers: true };
+  const by = chainOf(chained({ on: false }, { on: true, held }));
+  const lit = /<button[^>]*id="nd-bypass-key"[^>]*>/.exec(html(by))[0];
+  assert.ok(lit.includes('aria-pressed="true"') && lit.includes('cy on'), lit);
+  // nothing plays and nothing is held: the key is dim, a writer's press still goes to the daemon (its words answer)
+  const idle = chainOf(chained({ on: false, loudness: { on: false }, speakers: { on: false } }));
+  const quiet = /<button[^>]*id="nd-bypass-key"[^>]*>/.exec(html(idle))[0];
+  assert.ok(quiet.includes('quiet') && !quiet.includes('aria-disabled') && !quiet.includes('title='), quiet);
+  // a guest's key is inert; a host without a bypass, or the DAC side, draws none
+  const guest = chainOf(chained(), { viewer: GUEST });
+  assert.ok(/id="nd-bypass-key"[^>]*aria-disabled="true"/.test(drawDash(guest.page, {}, 1000, guest.comp, guest.bypass)));
+  const old = chainOf(modelOf());
+  assert.ok(!html(old).includes('nd-bypass-key'));
+  const dac = chainOf(chained(), { side: 'dac' });
+  assert.ok(!html(dac).includes('nd-bypass-key'));
+  assert.ok(!/computer/i.test(keys.replace(/<[^>]*>/g, ' ')) && !/computer/i.test([...keys.matchAll(/aria-label="([^"]*)"/g)].map((m) => m[1]).join(' ')));
 });
 
 console.log(`nightdrive-hud.mjs: ${n} passed`);

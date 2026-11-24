@@ -130,6 +130,7 @@ export function createPending({ store, fetch }) {
     if (key === 'volume') return computer.volume?.pct === value;
     if (key === 'mute') return computer.volume?.muted === value;
     if (key === 'mode') return computer.eq?.on === value;
+    if (key === 'bypass') return computer.eq?.bypass?.on === value;
     if (key === 'crossfeed') {
       const now = computer.eq?.crossfeed;
       return Boolean(now) && Object.entries(value).every(([field, v]) => now[field] === v);
@@ -489,6 +490,62 @@ export function createComputer({ store, storage, pending }) {
         on: pending.get('mode')?.value ?? eq.on,
         preset: eq.preset ?? null,
         verified: !eq.running_unknown,
+      };
+    },
+
+    /**
+     * The stages and levels of the chain, all from the model's `eq.levels` (its words are the
+     * daemon's; nothing here works a level out): `{ stages, total, totalText, words, passthrough,
+     * untouched, climbTo }` (`climbTo` the dB a climb is going to, else `null`), or `null` with no EQ or from a host that sends no levels. `stages` is EQ,
+     * Loudness and Space in that order, each `{ key, name, on, level, text }`: `level` is the dB
+     * (EQ's and Space's share) or the strength in percent (Loudness), `null` while the stage is
+     * off; Space also carries `kind` (`crossfeed`, `speakers` or `off`). The EQ's `on` has the
+     * mode this viewer is changing laid over it.
+     */
+    levelsOf(page) {
+      if (!drawable(page)) return null;
+      const eq = modelOf(page).eq;
+      const levels = eq?.levels;
+      if (!eq || !levels) return null;
+      const eqOn = pending.get('mode')?.value ?? eq.on;
+      const loud = eq.loudness;
+      const kind = eq.speakers?.on ? 'speakers' : (eq.crossfeed?.on ? 'crossfeed' : 'off');
+      const stage = (key, name, on, level, text, extra = {}) => ({
+        key, name, on, level: on ? level : null, text: on ? text : '', ...extra,
+      });
+      return {
+        stages: [
+          stage('eq', 'EQ', eqOn, levels.eq_db, dbText(levels.eq_db)),
+          stage('loudness', 'Loudness', Boolean(loud?.on), loud?.strength_pct ?? null,
+            `${loud?.strength_pct ?? 0} %`),
+          stage('space', 'Space', kind !== 'off', levels.space_db,
+            dbText(levels.space_db), { kind }),
+        ],
+        total: levels.total_db,
+        totalText: dbText(levels.total_db),
+        words: levels.words ?? '',
+        passthrough: Boolean(levels.passthrough),
+        untouched: Boolean(levels.untouched),
+        climbTo: typeof levels.climb_to_db === 'number' ? levels.climb_to_db : null,
+      };
+    },
+
+    /**
+     * The bypass as drawn: `{ on, can, held }`, or `null` from a host that has none (no bypass
+     * is offered then). `on` has the bypass this viewer is changing laid over it; `can` is
+     * whether turning it is possible now: it is on (a restore), or the EQ or a stage plays;
+     * `held` is the stages it brings back (`eq`, `loudness`, `crossfeed`, `speakers`).
+     */
+    bypassOf(page) {
+      if (!drawable(page)) return null;
+      const eq = modelOf(page).eq;
+      if (!eq?.bypass) return null;
+      const on = pending.get('bypass')?.value ?? eq.bypass.on;
+      const plays = Boolean(eq.on || eq.loudness?.on || eq.crossfeed?.on || eq.speakers?.on);
+      return {
+        on,
+        can: !modelOf(page).unavailable && (on || plays),
+        held: { eq: false, loudness: false, crossfeed: false, speakers: false, ...eq.bypass.held },
       };
     },
 

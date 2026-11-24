@@ -25,6 +25,9 @@ const raw = {
   'switch.pc_loudness': ['off'], 'number.pc_loudness_strength': ['64', { min: 0, max: 127, step: 1 }],
   'switch.pc_crossfeed': ['on'], 'select.pc_crossfeed_preset': ['mild', { options: ['mild', 'strong'] }],
   'switch.pc_virtual_speakers': ['off'], 'select.pc_virtual_speakers_set': ['near', { options: ['near', 'far'] }],
+  'switch.pc_bypass': ['off'],
+  'sensor.pc_chain_level': ['-14.8', { unit_of_measurement: 'dB', words: 'plays \u221214.8 dB in all' }], 'sensor.pc_eq_level': ['-7.8', { unit_of_measurement: 'dB' }],
+  'sensor.pc_space_level': ['-7', { unit_of_measurement: 'dB' }],
   'sensor.pc_path': ['direct'], 'binary_sensor.pc_pipewire_config': ['off'],
   'select.pc_scene': ['Late night', {
     options: ['Late night', 'Desk', 'Movie', 'custom'], known: true,
@@ -42,6 +45,9 @@ const raw = {
   raw[`number.desk_band_${n}_gain`] = [String(g), { min: -12, max: 12, step: 0.1 }];
   raw[`number.desk_band_${n}_q`] = [String(qq), { min: 0.1, max: 10, step: 0.1 }];
 });
+
+// ?nochain=1: no chain runs, the daemon's words are empty
+if (q.get('nochain') === '1') raw['sensor.pc_chain_level'] = ['0.0', { unit_of_measurement: 'dB', words: '' }];
 
 // ?wide=1: the widest values a real device has in band 1 (5-digit fractional Hz, gain down to -20, Q 10)
 if (q.get('wide') === '1') {
@@ -89,7 +95,8 @@ const cards = {
       eq: e('switch.pc_eq'), eq_preset: 'sensor.pc_eq_preset', loudness: e('switch.pc_loudness'),
       loudness_strength: e('number.pc_loudness_strength'), crossfeed: e('switch.pc_crossfeed'),
       crossfeed_preset: e('select.pc_crossfeed_preset'), speakers: e('switch.pc_virtual_speakers'),
-      speakers_set: e('select.pc_virtual_speakers_set'), path: 'sensor.pc_path', config: 'binary_sensor.pc_pipewire_config',
+      speakers_set: e('select.pc_virtual_speakers_set'), bypass: e('switch.pc_bypass'), level_chain: 'sensor.pc_chain_level',
+      level_eq: 'sensor.pc_eq_level', level_space: 'sensor.pc_space_level', path: 'sensor.pc_path', config: 'binary_sensor.pc_pipewire_config',
     },
   },
   'svolder-scenes-card': { entities: { scene: e('select.pc_scene'), ...(off ? {} : { save: 'text.pc_scene_save' }) } },

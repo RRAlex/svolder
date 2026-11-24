@@ -5,6 +5,7 @@
 //! one pass, fail or unknown line per condition, whatever plays. The one judge of these lines:
 //! every front end shows the words it is given.
 
+use super::io::{IoLines, io_lines};
 use super::path::sink_name;
 use super::sample::{AlsaName, HwJudge, Sample, alsa_name, hw_judge, pipewire_name, sample_of};
 use serde::{Deserialize, Serialize};
@@ -126,6 +127,9 @@ pub struct SetupCheck {
     pub lines: Vec<SetupLine>,
     /// What the lines add up to.
     pub summary: SetupSummary,
+    /// The two lines under the sink: what comes in from the player and what the card is open at.
+    #[serde(default)]
+    pub io: IoLines,
 }
 
 impl SetupCheck {
@@ -183,6 +187,7 @@ pub fn setup_check(route: &RouteFacts) -> SetupCheck {
                 (Some(_), None) => SetupSummary::OtherVersion,
                 _ => SetupSummary::NotRead,
             },
+            io: io_lines(route),
         };
     };
     let lines = vec![
@@ -207,6 +212,7 @@ pub fn setup_check(route: &RouteFacts) -> SetupCheck {
         sink: sink_name(sink),
         lines,
         summary,
+        io: io_lines(route),
     }
 }
 

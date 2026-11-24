@@ -44,7 +44,9 @@ function stage(first) {
     model: {
       page: () => current, device: () => current.device, shown: () => 'D', part: () => null, on: () => () => {},
     },
-    computer: { view: () => null, side: () => 'device', on: () => () => {}, flip() {} },
+    computer: {
+      view: () => null, side: () => 'device', on: () => () => {}, flip() {}, bypassOf: () => null, levelsOf: () => null,
+    },
     actions: { canWrite: () => true },
     eq: { bands: { wheelSteps: () => 0 } },
     frame: { covered: () => false },

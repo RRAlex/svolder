@@ -199,6 +199,7 @@ impl Tools {
             "set_host_crossfeed" => self.set_host_crossfeed(&request).await,
             "set_host_speakers" => self.set_host_speakers(&request).await,
             "set_host_loudness" => self.set_host_loudness(&request).await,
+            "set_host_bypass" => self.set_host_bypass(&request).await,
             "list_scenes" => self.list_scenes(&request).await,
             "load_scene" => self.load_scene(&request, caller).await,
             "save_scene" => self.save_scene(&request, caller).await,

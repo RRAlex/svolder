@@ -44,6 +44,7 @@ use svolder_profiles::tone::preset::{from_computer, host_correction};
 
 use super::HostEqState;
 use super::crossfeed::{CrossfeedSettings, CrossfeedView, OffReason, Stage};
+use super::levels::{BypassView, ChainLevels, HeldStages};
 use super::live::{
     CONFIG_RATE_HZ, NodeKey, OutputSink, SHAPE, SLOTS, SlotShape, crossfeed_params, preamp_params,
     slot_params, speakers_params,
@@ -73,15 +74,16 @@ pub const PASSTHROUGH_NOTE: &str = "chain kept as a pass-through until idle";
 
 /// What the view says while a recall plays with the preamp held at the running chain's cap: the
 /// chain is applied again, with the curve's own preamp, once nothing has played through it for the
-/// idle time (30 s).
+/// idle time (3 s).
 pub const LEVEL_HELD_NOTE: &str = "level held until the music pauses";
 
-/// How many ticks (30 s at 50 ms) nothing has to play through a pass-through chain before it is
-/// removed, and through a chain whose level is held before it is applied again.
-const IDLE_KEEP: u64 = 600;
+/// How many ticks (3 s at 50 ms: three looks in a row, a look a second) nothing has to play
+/// through a pass-through chain before it is removed, and through a chain whose level is held
+/// before it is applied again.
+const IDLE_KEEP: u64 = 60;
 
 /// The environment variable that sets the idle time in ticks, for the end-to-end run only (a
-/// run cannot wait 30 s at every step).
+/// run cannot wait 3 s at every step).
 pub const IDLE_TICKS_ENV: &str = "SVOLDER_EQ_IDLE_TICKS";
 
 /// The name of a curve a hand has changed.
@@ -120,6 +122,11 @@ const REVERT_LIMIT: usize = 4;
 /// death is ridden out and a second inside the window is not.
 const FAIL_WINDOW: u64 = 100;
 const FAIL_LIMIT: usize = 30;
+
+/// How many ticks after a hand's change (an edit, a preset load, a scene recall, a stage or the EQ
+/// turned on) a rise in the level it makes is no climb: the line of a drag goes out on the next
+/// tick.
+const RISE_OK_TICKS: u64 = 3;
 
 /// Where the points are kept between runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,6 +200,14 @@ pub struct EqView {
     /// controller; `None` from a peer that has none, and then no front end offers it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loudness: Option<LoudnessView>,
+    /// What the chain plays at, in dB, and the words for it. Always there from a controller;
+    /// `None` from a peer that has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub levels: Option<ChainLevels>,
+    /// The bypass: whether it is on and which stages it brings back. Always there from a
+    /// controller; `None` from a peer that has none, and then no front end offers it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bypass: Option<BypassView>,
 }
 
 /// One change of the points.
@@ -359,6 +374,33 @@ pub struct EqControl {
     foreign: bool,
     /// The presets loaded and the state files read again so far, for [`EqView::loads`].
     loads: u64,
+    /// The stages the bypass turned off, while it holds (see `bypass.rs`).
+    bypass: Option<HeldStages>,
+    /// The running chain's config is the identity (see [`ApplyRequest::identity`]), and holds
+    /// this preamp: the curve and the stages reached it live, and a rebuild of its graph puts
+    /// back a flat chain.
+    conf_written: Option<f64>,
+    /// The preamp the chain plays at while a climb runs (see `climb.rs`), always under the
+    /// target.
+    climb: Option<f64>,
+    /// The level heard before a change that may start a climb and the tick it was armed at, until
+    /// its first line (or [`ARM_TICKS`] ticks).
+    climb_from: Option<(f64, u64)>,
+    /// The tick of the last look that read the chain's ports.
+    looked_at: Option<u64>,
+    /// A hand's change that may raise the level at once is being made (an edit, a preset load, a
+    /// scene recall, a stage or the EQ turned on): its lines are no climb.
+    rise_ok_until: u64,
+    /// The chain was applied from an identity config and the first look at its graph run sends
+    /// the curve: nothing goes to a graph that has not run.
+    curve_owed: bool,
+    /// The first live line of a chain applied from an identity config goes out: its rise in the
+    /// preamp (the speakers' level given back as the mixers turn wet) is no climb.
+    first_line: bool,
+    /// A test's chain applied with the curve in its config, as a chain the command line applied
+    /// and the daemon adopted is.
+    #[cfg(test)]
+    curve_in_conf: bool,
     /// The wait for the chain's end.
     exit: exit::ExitWatch,
     /// A type change or a point added or removed waits for the end of the drag (a chain whose
@@ -430,6 +472,8 @@ pub struct EqControl {
     resend_stage: bool,
     /// The tick of the last send that went through.
     sent_at: u64,
+    /// The tick of the last send that went through and was not a repeat.
+    fresh_at: u64,
     /// The ticks on which a look found the chain's values gone back to its config's, newest last.
     reverts: VecDeque<u64>,
     /// The next send looks at the node afresh first: a stage that is turned on, changed or
@@ -559,6 +603,16 @@ impl EqControl {
             resend: false,
             foreign: false,
             loads: 0,
+            bypass: None,
+            conf_written: None,
+            climb: None,
+            climb_from: None,
+            looked_at: None,
+            rise_ok_until: 0,
+            curve_owed: false,
+            first_line: false,
+            #[cfg(test)]
+            curve_in_conf: false,
             exit: exit::ExitWatch::default(),
             rebuild: false,
             ticks: 0,
@@ -591,6 +645,7 @@ impl EqControl {
             stage_on_node: false,
             resend_at: None,
             resending: false,
+            fresh_at: 0,
             resend_stage: false,
             reverts: VecDeque::new(),
             gain_cache: Mutex::new(None),
@@ -653,6 +708,9 @@ impl EqControl {
         self.adopt_loudness(&state);
         self.adopt_crossfeed(&state);
         self.adopt_speakers(&state);
+        // The bypass holds on only while nothing plays: a state with a stage on (at start, or
+        // changed from outside) ends it.
+        self.bypass = state.bypass.filter(|_| !self.any_stage_on());
         // The stage the running chain's config holds (`crossfeed_loaded`), and the one the
         // config on disk holds while crossfeed plays (`crossfeed_on`). The state does not say
         // the rate either was worked out at: each is paid for at whichever usual rate costs the
@@ -699,6 +757,7 @@ impl EqControl {
         self.kept_xf = stage;
         self.loaded_stage_db = stage_db;
         self.kept_stage_db = stage_db;
+        self.conf_written = None;
         *crate::locked(&self.cap) = None;
     }
 
@@ -733,6 +792,8 @@ impl EqControl {
         self.node_cap = None;
         self.not_run = false;
         self.own_chain = true;
+        self.climb = None;
+        self.looked_at = None;
     }
 
     /// The preamp the points play with.
@@ -748,18 +809,27 @@ impl EqControl {
         let rate = self.sent.rate.unwrap_or(CONFIG_RATE_HZ);
         // The caps bound the whole preamp, the config's stage included.
         self.wanted_preamp(rate)
-            .min(self.cap_at(rate) + self.loaded_stage_db)
+            .min(self.climb_ceiling(rate) + self.loaded_stage_db)
     }
 
     /// The preamp the chain plays: the EQ's (0 dB while it plays flat, never above what the
     /// chain's loaded config allows) less the crossfeed stage's worst gain, so that nothing
     /// plays above unity with the stage on either.
     fn preamp(&self) -> f64 {
+        let target = self.preamp_target();
+        match self.climb {
+            Some(level) => level.min(target),
+            None => target,
+        }
+    }
+
+    /// The preamp the chain is to reach: what [`EqControl::preamp`] is once no climb lags behind.
+    fn preamp_target(&self) -> f64 {
         if let (true, Some(base)) = (self.legacy, &self.base) {
             return base.preamp_db;
         }
         let rate = self.sent.rate.unwrap_or(CONFIG_RATE_HZ);
-        (self.wanted_total(rate)).min(self.cap_at(rate))
+        self.wanted_total(rate).min(self.climb_ceiling(rate))
     }
 
     /// The preamp the points (or the flat EQ) and the stage need at `rate`, before any cap.
@@ -870,7 +940,7 @@ impl EqControl {
             // the curve alone is held again once it is off: the lift is dropped only when the
             // curve fits under the cap without the stage.
             let rate = self.sent.rate.unwrap_or(CONFIG_RATE_HZ);
-            if self.wanted_preamp(rate) - self.loaded_stage_db <= self.cap_at(rate) + 1e-9 {
+            if self.wanted_preamp(rate) - self.loaded_stage_db <= self.climb_ceiling(rate) + 1e-9 {
                 self.lift = false;
                 self.stage_hold = None;
             }
@@ -892,6 +962,13 @@ impl EqControl {
             Err(_) => self.played_at = (self.ticks + WATCH_EVERY).saturating_sub(self.idle_keep),
         }
         self.publish();
+    }
+
+    /// The next applies write the curve into the config, as the command line does: the chain's
+    /// loaded curve then caps every preamp sent, and a rebuild puts that curve back.
+    #[cfg(test)]
+    pub(crate) fn curve_in_conf(&mut self) {
+        self.curve_in_conf = true;
     }
 
     /// Set the idle time, in ticks, for a test that cannot wait [`IDLE_KEEP`].
@@ -1021,7 +1098,7 @@ impl EqControl {
     /// Whether the preamp is held below what the points need by the loaded curve.
     fn capped(&self) -> bool {
         let rate = self.sent.rate.unwrap_or(CONFIG_RATE_HZ);
-        self.wanted_total(rate) > self.cap_at(rate) + 1e-9
+        self.wanted_total(rate) > self.climb_ceiling(rate) + 1e-9
     }
 
     fn name(&self) -> String {
@@ -1035,6 +1112,7 @@ impl EqControl {
 
     /// The computer EQ as a screen shows it.
     pub fn view(&self) -> EqView {
+        let speakers = self.speakers_view();
         EqView {
             on: self.eq_on(),
             points: self
@@ -1069,8 +1147,13 @@ impl EqControl {
             running_unknown: self.unknown,
             loads: self.loads,
             crossfeed: Some(self.crossfeed_view()),
-            speakers: self.speakers_view(),
+            speakers: speakers.clone(),
             loudness: Some(self.loudness_view()),
+            levels: Some(self.levels(speakers.as_ref())),
+            bypass: Some(BypassView {
+                on: self.bypass.is_some(),
+                held: self.bypass.unwrap_or_default(),
+            }),
         }
     }
 
@@ -1105,7 +1188,40 @@ impl EqControl {
             flat: self.flat,
             crossfeed: self.stage_in_conf().then(|| self.xf.clone()),
             speakers: self.speakers_conf(),
+            identity: self.identity_preamp(),
         }
+    }
+
+    /// The preamp of an identity config for an apply now (see [`ApplyRequest::identity`]): the
+    /// one the first live line would carry, `None` when the chain cannot be set live, so its
+    /// config has to hold the curve and the stages.
+    fn identity_preamp(&self) -> Option<f64> {
+        #[cfg(test)]
+        if self.curve_in_conf {
+            return None;
+        }
+        let live = self.live_now() && SHAPE == SlotShape::Raw;
+        let in_conf = self.stage_in_conf() || self.speakers_conf().is_some_and(|conf| conf.on);
+        (live && !in_conf).then(|| {
+            let rate = self.known_rate.unwrap_or(CONFIG_RATE_HZ);
+            // The stage of the line before this chain's first (it starts with none: the old node's
+            // `stage_sent` is not on it) costs what its settings cost at the rate it will play at.
+            let eq = match self.flat {
+                true => 0.0,
+                false => self.wanted_preamp(rate),
+            };
+            let stage = match self.xf_on {
+                true => config_stage_cost_db(&self.xf, rate),
+                false => 0.0,
+            };
+            // The speakers' mixers are dry in the config and wet after the first line: the config's
+            // preamp is lower by the set's level, which that line then gives back.
+            let space = match self.sp.on {
+                true => self.chosen_set_level_db(),
+                false => 0.0,
+            };
+            (eq - stage).min(0.0) + space
+        })
     }
 
     /// The request that keeps the config on disk: as [`EqControl::request`], and a config that
@@ -1113,6 +1229,8 @@ impl EqControl {
     /// starts again must not play a different level than this one).
     fn keep_request(&self) -> ApplyRequest {
         let mut request = self.request();
+        // A config a chain restarts from holds the points.
+        request.identity = None;
         if self.xf_on && self.xf_conf {
             request.crossfeed = Some(self.xf.clone());
         }
@@ -1139,6 +1257,7 @@ impl EqControl {
         // without the stage, and the choice goes Off.
         let turned_off = self.check_set_for_apply();
         let request = self.request();
+        let identity = request.identity;
         let conf = request.speakers.clone();
         let state = match self.chain.apply(request).await {
             Ok(state) => state,
@@ -1157,13 +1276,13 @@ impl EqControl {
             false => 0.0,
         };
         self.set_confs(
-            Some(match self.flat {
+            Some(match (self.flat, identity) {
                 // The config holds the identity slots and no EQ preamp.
-                true => Correction {
+                (true, _) | (false, Some(_)) => Correction {
                     preamp_db: 0.0,
                     filters: Vec::new(),
                 },
-                false => Correction {
+                (false, None) => Correction {
                     preamp_db: state.preamp_db,
                     filters: state.filters.clone(),
                 },
@@ -1186,6 +1305,11 @@ impl EqControl {
         self.unavailable = None;
         self.failed.clear();
         self.fresh_chain(self.known_rate.unwrap_or(CONFIG_RATE_HZ));
+        // An identity config holds no curve: it goes live with the first line, under the preamp
+        // the config already holds.
+        self.conf_written = identity;
+        self.curve_owed = identity.is_some();
+        self.first_line = identity.is_some();
         // The new node holds its config's identity loudness stage, and no look after an apply
         // sends everything again: the stage that plays goes with the next line. Off, the
         // identity is where it was going.
@@ -1287,6 +1411,7 @@ impl EqControl {
                 speakers_on: self.sp.on,
                 speakers_loaded: self.sp.loaded.clone(),
                 loudness: self.ld.kept.then_some(self.ld.settings),
+                bypass: self.bypass,
                 ..base.clone()
             };
             state
@@ -1317,7 +1442,15 @@ impl EqControl {
     /// (the kept points, or the one point); off saves the points as they stand, removes the
     /// chain and keeps them.
     pub async fn set_on(&mut self, on: bool) -> Result<(), EqFailure> {
+        if !on {
+            self.arm_climb();
+        }
+        if on {
+            self.rise_ok_until = self.ticks + RISE_OK_TICKS;
+        }
         let result = self.set_on_inner(on).await;
+        self.disarm_climb();
+        self.end_bypass_if_on();
         self.publish();
         result
     }
@@ -1434,6 +1567,7 @@ impl EqControl {
         self.xf_for = None;
         self.xf_conf = false;
         self.stage_dirty = false;
+        self.climb = None;
         self.unknown = false;
         self.legacy = false;
         self.dirty.clear();
@@ -1517,10 +1651,12 @@ impl EqControl {
         origin: Option<String>,
         correction: Correction,
     ) -> Result<(), EqFailure> {
+        self.rise_ok_until = self.ticks + RISE_OK_TICKS;
         let result = self.load_inner(name, origin, correction).await;
         if result.is_ok() {
             self.loads += 1;
         }
+        self.end_bypass_if_on();
         self.publish();
         result
     }
@@ -1593,7 +1729,9 @@ impl EqControl {
 
     /// Change the points. An edit while the EQ is off turns it on first.
     pub async fn edit(&mut self, edit: Edit) -> Result<(), EqFailure> {
+        self.rise_ok_until = self.ticks + RISE_OK_TICKS;
         let result = self.edit_inner(edit).await;
+        self.end_bypass_if_on();
         self.publish();
         result
     }
@@ -1786,7 +1924,7 @@ impl EqControl {
     /// applied at `rate`, as `pw-dump` prints it (f32, 6 decimals), within the tolerance
     /// [`Self::holds_sent_preamp`] uses.
     fn holds_conf_preamp(&self, held: &HashMap<String, f64>, rate: u32) -> bool {
-        let wanted = preamp_params(self.conf_preamp(rate));
+        let wanted = preamp_params(self.conf_written.unwrap_or_else(|| self.conf_preamp(rate)));
         wanted.iter().all(|(name, wanted)| match held.get(name) {
             Some(held) => (wanted - held).abs() <= 1e-4 * wanted.abs() + 1e-6,
             None => true,
@@ -1924,10 +2062,16 @@ impl EqControl {
                 false => params.extend(ports),
             }
         }
+        // A change that raises the level starts its climb with this line.
+        self.start_climb();
+        self.climb_unless_hands();
         // A preamp that falls goes before the slots and one that rises after them, so an update
         // that is not applied in one piece never plays a boost the preamp has not caught up with.
         let preamp = preamp_params(self.preamp());
-        let applied = self.base.as_ref().map(|base| preamp_params(base.preamp_db));
+        let applied = match (self.conf_written, self.base.as_ref()) {
+            (Some(db), _) => Some(preamp_params(db)),
+            (None, base) => base.map(|base| preamp_params(base.preamp_db)),
+        };
         let rises = preamp.first().is_some_and(|(name, db)| {
             let applied = applied
                 .as_ref()
@@ -1963,6 +2107,7 @@ impl EqControl {
             return false;
         }
         self.dirty.clear();
+        self.first_line = false;
         if let Some((depth, _)) = ld_line {
             self.ld_sent(depth);
         }
@@ -1972,10 +2117,20 @@ impl EqControl {
         }
         // One repeat per send, a second later, and none for the repeat itself: PipeWire may not
         // play what is sent while the chain's stream is being replaced, and nothing reads that.
-        self.resend_at = match std::mem::take(&mut self.resending) {
-            true => None,
-            false => Some(self.ticks + WATCH_EVERY),
+        // A line that carries no stage does not put back the repeat that is owed for one: a climb
+        // sends a line every tick, and would hold the stage's repeat back until it ended.
+        let stage_owed = !sent_stage && self.resend_stage;
+        // The repeat that falls due on a kept deadline may land under a second after the last
+        // line; it then owes one more, a second after that line.
+        let repeating = std::mem::take(&mut self.resending);
+        self.resend_at = match (repeating, self.resend_at) {
+            (true, _) => Some(self.fresh_at + WATCH_EVERY).filter(|at| *at > self.ticks),
+            (false, Some(at)) if stage_owed => Some(at),
+            (false, _) => Some(self.ticks + WATCH_EVERY),
         };
+        if !repeating {
+            self.fresh_at = self.ticks;
+        }
         self.sent_at = self.ticks;
         // A config whose stage costs more than the one that plays holds the preamp down by the
         // difference: the chain is applied again once nothing has played for the idle time, as
@@ -2050,6 +2205,7 @@ impl EqControl {
             .rate_hz
             .is_some_and(|rate| self.sent.rate.is_some_and(|sent| sent != rate));
         let before = std::mem::replace(&mut self.seen, node.params.clone());
+        self.looked_at = Some(self.ticks);
         if node.playing && (self.passthrough() || self.lift) {
             self.played_at = self.ticks;
         }
@@ -2114,6 +2270,9 @@ impl EqControl {
         // its config when it runs: such a look bounds no preamp and checks nothing, and the first
         // look at it run does, and sends everything again.
         let ran = graph_ran(&node.params);
+        if ran && std::mem::take(&mut self.curve_owed) {
+            self.dirty.extend(1..=SLOTS as u8);
+        }
         let first_run = ran && std::mem::take(&mut self.not_run);
         self.not_run |= !ran;
         if ran && std::mem::take(&mut self.unvouched) {
@@ -2124,6 +2283,15 @@ impl EqControl {
             // preamp bounds, a chain this controller did not start always does. Nor does a
             // preamp at the floor: that chain plays nothing, and it plays the view's preamp.
             let rate = node.rate_hz.or(self.sent.rate).unwrap_or(CONFIG_RATE_HZ);
+            if self.conf_written.is_some() && !self.slots_are_identity_or_sent(&node.params) {
+                // A node that started again between the apply and this first look reads the
+                // config on disk, which holds the curve: that is what a rebuild puts back.
+                self.loaded = self.kept.clone();
+                self.conf_written = None;
+                self.loaded_stage_db = self.kept_stage_db;
+                self.loaded_xf = self.kept_xf.clone();
+                *crate::locked(&self.cap) = None;
+            }
             let own_send = self.own_chain
                 && ((first_run && self.holds_sent_preamp(&node.params))
                     || self.holds_conf_preamp(&node.params, rate));
@@ -2164,6 +2332,10 @@ impl EqControl {
             self.resend = true;
         }
         let resend = std::mem::take(&mut self.resend);
+        if rate_changed && !restarted {
+            // The curve's preamp is worked out again at the new rate: a rise in it climbs.
+            self.arm_climb();
+        }
         if restarted || rate_changed || self.held || resend {
             // The rebuilt graph re-opens the set's WAV: one that cannot be read leaves the chain
             // silent with no exit, so the chain is applied again without the stage.
@@ -2178,6 +2350,7 @@ impl EqControl {
                 self.check = None;
                 self.misses = 0;
                 self.loaded = self.kept.clone();
+                self.conf_written = None;
                 self.loaded_stage_db = self.kept_stage_db;
                 self.loaded_xf = self.kept_xf.clone();
                 *crate::locked(&self.cap) = None;
@@ -2331,9 +2504,27 @@ impl EqControl {
                     self.live = false;
                     self.dirty.clear();
                     self.note = Some(LIVE_NOTE.to_string());
+                    self.apply_for_no_live().await;
                 }
             }
         }
+    }
+
+    /// Whether every slot port `held` lists is the identity's or the value last sent to it: the
+    /// node holds what an identity config and this controller's lines make.
+    fn slots_are_identity_or_sent(&self, held: &HashMap<String, f64>) -> bool {
+        let same = |wanted: f64, held: f64| (wanted - held).abs() <= 1e-4 * wanted.abs() + 1e-6;
+        (1..=SLOTS as u8)
+            .flat_map(|slot| slot_params(slot, None, CONFIG_RATE_HZ))
+            .all(|(name, identity)| {
+                held.get(&name).is_none_or(|held| {
+                    same(identity, *held)
+                        || self
+                            .last_values
+                            .get(&name)
+                            .is_some_and(|sent| same(*sent, *held))
+                })
+            })
     }
 
     /// Whether the chain's graph went back to its config at the same node and rate (PipeWire
@@ -2453,6 +2644,7 @@ impl EqControl {
     /// now and then look at the chain.
     pub async fn tick(&mut self) {
         self.step().await;
+        self.expire_climb_arming();
         self.publish();
     }
 
@@ -2487,6 +2679,8 @@ impl EqControl {
             return;
         }
         // A step of the loudness's glide goes as an ordinary full line.
+        // The climb's step first: a step of the loudness's glide marks every slot due too.
+        self.climb_step();
         self.ld_follow();
         if self.resend_at.is_some_and(|at| self.ticks >= at) {
             // Everything goes once more, with the latest values (so never above what the points
@@ -2523,6 +2717,29 @@ impl EqControl {
             self.unavailable = Some(format!("computer controls unavailable: {why}"));
             self.dirty.clear();
             self.failed.clear();
+            self.apply_for_no_live().await;
+        }
+    }
+
+    /// Live changes are given up on a chain that started from an identity config: the curve and
+    /// the stages never reached it, so the chain is applied again with them in its config.
+    async fn apply_for_no_live(&mut self) {
+        if self.conf_written.is_none() || !self.runs {
+            return;
+        }
+        let (note, unavailable) = (self.note.clone(), self.unavailable.clone());
+        match self.apply().await {
+            Ok(()) => {
+                // The apply clears what it is not told to keep: the note and the state that
+                // live changes cannot be sent stay.
+                self.note = note;
+                self.unavailable = unavailable;
+                let _ = self.save().await;
+            }
+            Err(failure) => {
+                self.note = Some(failure.to_string());
+                self.unavailable = unavailable;
+            }
         }
     }
 
@@ -2618,6 +2835,7 @@ fn points_of(filters: Vec<SourceFilter>) -> Points {
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     })
 }
 
@@ -2625,12 +2843,15 @@ fn refuse_edit(why: String) -> EqFailure {
     refusal(why, "Edit a point that is there")
 }
 
+mod bypass;
+mod climb;
 mod exit;
 mod ld;
 mod scene;
 mod vs;
 mod xf;
 
+pub use climb::LEVEL_CLIMB_DB_PER_TICK;
 pub use ld::{LevelHint, LoudnessEdit};
 pub use scene::Recalled;
 pub use vs::SpeakersEdit;

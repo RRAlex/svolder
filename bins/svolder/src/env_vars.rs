@@ -214,6 +214,8 @@ const ENV_VARS: &[EnvVar] = &[
                way a route can (the player at 91 % and 44.1 kHz into a sink at 48 kHz and 54 %, \
                the host EQ on, two other sounds mixing, a 16-bit sink under a 32-bit stream and \
                triangular dither), so a check can see a changed path line and a failing config. \
+               `no-mpris` keeps the one stream playing after the player is gone (see \
+               `SVOLDER_FAKE_PLAYER_GONE_AFTER_MS`), as a sound with no MPRIS player behind it. \
                Unset by default: the route is untouched.",
     },
     EnvVar {
@@ -469,7 +471,8 @@ const ENV_VARS: &[EnvVar] = &[
         dev_only: true,
         what: "How many 50 ms ticks nothing must play through the computer EQ's chain, kept as \
                a pass-through after the last of the EQ and crossfeed went off, before the \
-               chain is removed. Default 600 (30 s); the end-to-end run sets it shorter.",
+               chain is removed (three looks in a row that find nothing playing, a look a second). \
+               Default 60 (3 s).",
     },
     EnvVar {
         name: "SVOLDER_PW_RECORD",
@@ -603,6 +606,14 @@ const ENV_VARS: &[EnvVar] = &[
         what: "`N` makes `make gnome-extension-check` load the GNOME Shell extension on a \
                3840x2160 virtual monitor at scale N, for the pictures of the indicator. Unset by \
                default.",
+    },
+    EnvVar {
+        name: "SVOLDER_HEADLESS_TEXT_SCALE",
+        read_by: "make, scripts",
+        dev_only: true,
+        what: "`N` makes the extension's headless load set the headless shell's own \
+               text-scaling-factor to N (a scratch GSettings, never the user's) before it \
+               checks the Path line. Unset by default.",
     },
     EnvVar {
         name: "SVOLDER_TMP_BASE",

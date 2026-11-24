@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The computer's crossfeed in the real TUI, over the demo daemon's simulated host: the Tone
-//! pane's row under the EQ, the tone screen's folded section, and a change that goes through
+//! pane's row under the EQ, the tone screen's Space panel, and a change that goes through
 //! the daemon and comes back in the view.
 
 use crate::harness::*;
@@ -25,14 +25,15 @@ fn row_of(tui: &Tui, needle: &str) -> u16 {
     tui.find(needle).1
 }
 
-/// Press `e` and wait for the tone screen to be drawn whole: the screen is read in chunks, so
-/// `(X)` can show while the device screen's rows and its hint box still stand under it.
+/// Press `e` and wait for the tone screen to be drawn whole: the screen is read in chunks, so the
+/// EQ panel's top border can show while the device screen's rows and its hint box still stand
+/// under it. The keys open in the EQ panel.
 fn open_tone_screen(tui: &Tui) {
     tui.send_keys("e");
     tui.wait_for("the tone screen, drawn whole", WAIT, |s| {
         let text = s.contents();
-        text.contains("(X)")
-            && text.contains("Points · computer")
+        text.contains("┏ EQ")
+            && text.contains("Esc strip")
             && !text.contains("Level from")
             && !text.contains("tui --join")
     });
@@ -64,50 +65,54 @@ fn the_tone_panes_crossfeed_row_sits_under_the_eq() {
 
 #[test]
 #[ignore = "runs the real binary in a pty: make tui-harness"]
-fn tab_and_x_unfold_and_fold_the_tone_screens_section_and_the_graph_keeps_its_height() {
+fn tab_and_x_open_and_leave_the_tone_screens_space_panel_and_the_graph_keeps_its_height() {
     for (cols, rows) in SIZES {
         let tui = on_computer(cols, rows);
         open_tone_screen(&tui);
-        let graph = row_of(&tui, "(X)") - row_of(&tui, "Response");
+        // the strip is the row over the panel's top border: the graph is what is above it
+        let graph = row_of(&tui, "┏") - row_of(&tui, "Response");
         assert!(
             !has(&tui, "Level"),
-            "{cols}x{rows}: folded:\n{}",
+            "{cols}x{rows}: the EQ panel:\n{}",
             tui.screen_text()
         );
-        // The keys open on the points: Tab goes to the header, the next into the section,
-        // which unfolds
-        tui.send_keys("\t\t");
+        // X puts the keys in the Space panel: its rows replace the Points, the graph stays
+        tui.send_keys("X");
         tui.wait_for_text("Level");
-        let open = row_of(&tui, "Space ") - row_of(&tui, "Response");
-        // the Space row leads the section: the Crossfeed row is under it whole, and in the narrow
-        // tier the three value rows too, from the graph's rows
-        match cols >= 120 {
-            true => assert_eq!(
-                open + 1,
-                graph,
-                "{cols}x{rows}: the Space row's second line"
-            ),
-            false => assert_eq!(
-                open + 4,
-                graph,
-                "{cols}x{rows}: the rows come from the graph"
-            ),
-        }
-        // Tab on leaves it and folds it
+        assert_eq!(
+            row_of(&tui, "┏") - row_of(&tui, "Response"),
+            graph,
+            "{cols}x{rows}"
+        );
+        // Tab goes on to the next stage's panel
         tui.send_keys("\t");
-        tui.wait_for("folded", WAIT, |s| !s.contents().contains("Level"));
-        assert_eq!(row_of(&tui, "(X)") - row_of(&tui, "Response"), graph);
-        // X jumps in, X again folds
+        tui.wait_for("the Bypass panel", WAIT, |s| {
+            s.contents().contains("┏ Bypass")
+        });
+        assert!(!has(&tui, "Level"));
+        assert_eq!(
+            row_of(&tui, "┏") - row_of(&tui, "Response"),
+            graph,
+            "{cols}x{rows}"
+        );
+        // X jumps back in; X again goes to the strip, the panel staying (thin border)
         tui.send_keys("X");
         tui.wait_for_text("Level");
         tui.send_keys("X");
-        tui.wait_for("folded again", WAIT, |s| !s.contents().contains("Level"));
-        // Esc folds before it leaves the screen
-        tui.send_keys("X");
-        tui.wait_for_text("Level");
+        tui.wait_for("the keys on the strip", WAIT, |s| {
+            s.contents().contains("┌ Space")
+        });
+        assert_eq!(
+            row_of(&tui, "┌ Space") - row_of(&tui, "Response"),
+            graph,
+            "{cols}x{rows}"
+        );
+        // Esc on the strip leaves the screen
         tui.send_keys("\x1b");
-        tui.wait_for("Esc folds", WAIT, |s| !s.contents().contains("Level"));
-        assert!(has(&tui, "(X)"), "still on the tone screen");
+        tui.wait_for("the device screen", WAIT, |s| {
+            let text = s.contents();
+            text.contains("┤ Controls ├") && !text.contains("┌ Space") && !text.contains("┏ Space")
+        });
         tui.quit();
     }
 }
@@ -118,18 +123,18 @@ fn a_crossfeed_change_goes_through_the_daemon_and_comes_back_in_the_view() {
     for (cols, rows) in SIZES {
         let tui = on_computer(cols, rows);
         open_tone_screen(&tui);
-        let folded = tui.screen_text();
-        assert!(folded.contains("Space      off"), "{folded}");
-        // Space in the section turns it on; the folded line then reads the numbers
+        let start = tui.screen_text();
+        assert!(start.contains("Space ○"), "{start}");
+        // Right highlights Crossfeed on the Plays row and Enter plays it; the strip then says so
         tui.send_keys("X");
         tui.wait_for_text("Level");
-        tui.send_keys(" ");
+        tui.send_keys("\x1b[C\r");
         tui.wait_for("on in the view", WAIT, |s| {
-            s.contents().contains("Crossfeed on ")
+            s.contents().contains("Space ● crossfeed")
         });
         // a step of Level goes through the daemon and comes back as exactly one step (1 %); the
-        // Crossfeed row is the stop under the Space row
-        tui.send_keys("\x1b[B\x1b[B");
+        // Level row is the third under Plays
+        tui.send_keys("\x1b[B\x1b[B\x1b[B");
         tui.wait_for("the cursor on Level", WAIT, |s| {
             s.contents().contains("▶ Level")
         });
@@ -138,9 +143,6 @@ fn a_crossfeed_change_goes_through_the_daemon_and_comes_back_in_the_view() {
         tui.wait_for("one step up", WAIT, |s| s.contents().contains("‹ 38 %"));
         tui.send_keys("\x1b[D");
         tui.wait_for("one step back", WAIT, |s| s.contents().contains("‹ 37 %"));
-        tui.send_keys("X");
-        tui.wait_for("folded", WAIT, |s| !s.contents().contains("Level"));
-        assert!(has(&tui, "Space      Crossfeed"), "{}", tui.screen_text());
         tui.quit();
     }
 }
@@ -156,15 +158,22 @@ fn the_crossfeed_focus_stays_on_the_tone_screen() {
     tui.send_keys("t");
     tui.wait_for_text("┤ Telemetry ├");
     tui.send_keys(" ");
-    open_tone_screen(&tui);
-    // a write the old bug sent would be answered by now: unfold and fold twice, each a round trip
+    // the tone screen comes back with the Space panel it was left on, the keys on the header
+    tui.send_keys("e");
+    tui.wait_for("the Space panel, drawn whole", WAIT, |s| {
+        let text = s.contents();
+        text.contains("Space · off") && text.contains("Esc strip") && !text.contains("tui --join")
+    });
+    // a write the old bug sent would be answered by now: go into the panel and out to the strip
+    // twice; each wait is for a change the key itself makes (the heavy border, then the thin one)
     for _ in 0..2 {
         tui.send_keys("X");
-        tui.wait_for_text("Level");
+        tui.wait_for("the keys in the panel", WAIT, |s| {
+            s.contents().contains("┏ Space")
+        });
         tui.send_keys("X");
-        tui.wait_for("folded", WAIT, |s| !s.contents().contains("Level"));
+        tui.wait_for("the strip", WAIT, |s| s.contents().contains("┌ Space"));
     }
-    assert!(has(&tui, "Space      off"), "{}", tui.screen_text());
-    assert!(!has(&tui, "Level"), "folded on the way back");
+    assert!(has(&tui, "Space ○"), "{}", tui.screen_text());
     tui.quit();
 }

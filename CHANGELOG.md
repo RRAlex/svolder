@@ -8,6 +8,126 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.39.4
+
+- **The computer's chain shows its stages and what it plays at.** Everywhere the computer's side is
+  shown, each stage (EQ, Loudness, Space) now reads with its level and ends on the daemon's own
+  words for the whole chain: `plays −14.8 dB in all`, `climbing to 0.0 dB`, `pass-through 0.0 dB`,
+  `pass-through, untouched`, or `pass-through −7.6 dB until the music pauses` for a cut that is
+  held.
+  The TUI's tone screen has a strip, `EQ · Loudness · Space · Bypass`, with one panel under it in
+  the place of the Points pane (the Points table, the Loudness rows, the Space rows or the Bypass
+  row); `Tab` and `⇧Tab` step the stages, `␣` turns one on or off, `L` and `X` open the Loudness and
+  Space panels, and `f` is the bypass. The four web themes draw the same line under the mode (a
+  stage word opens the Sound popup at its tab), Ember and Paper with a `Bypass` toggle, Signal with
+  a `Bypass` chip, Night drive with `SPACE −7.0 · −14.8 dB` on its EQ line and a `BYPASS` key. In
+  the TUI the panels replace the old Loudness and Crossfeed sections, the crossfeed model is a row
+  of its own, and `←→` on Plays only highlight (`Enter` plays the choice).
+- **A bypass for the whole computer.** One change turns the EQ, loudness, crossfeed and virtual
+  speakers off and, turned off again, brings back exactly the ones that were on, with their config
+  as it is now. It is `svolder host bypass on|off` (bare `svolder host bypass` says where it stands,
+  `--json` gives it with the levels), the TUI's `f`, the web themes' Bypass control, a Bypass switch
+  in Home Assistant, the MCP tool `set_host_bypass` (listed only while `[mcp] writes` is on) and the
+  GNOME indicator's Computer EQ switch, which now means "the computer changes the sound". Turning
+  any stage on from anywhere ends it, and it is kept across a restart. `api/v1/host` carries the
+  bypass and the levels. An older daemon is told so in words, and an older indicator or card keeps
+  what it had.
+- **Turning a stage off no longer jumps the sound.** Crossfeed off, the virtual speakers off, the EQ
+  off into a pass-through, the bypass, and a stage that goes off by itself start at the level you
+  were hearing and climb to 0 dB at 6.4 dB a second (the pace the DAC's own volume rises at), so the
+  speakers' roughly 7 dB no longer arrive at once. A hand edit, a preset load or a scene recall
+  still plays at its own level at once. Loudness turned off as the last stage glides to flat instead
+  of snapping.
+- **A pass-through can be called untouched.** A chain svolder starts is now written from an identity
+  config (every filter flat, no stage) and gets its curve and stages live, so a change of the
+  output's sample rate can only put back a flat chain: a pass-through can climb to 0 dB, and a
+  softer preset plays at its own level at once while music plays (`level held until the music
+  pauses` remains for a chain the command line applied or an output that takes no live changes). A
+  pass-through that reached exactly 0 dB on such a chain, with every port read at its identity
+  value, is `pass-through, untouched` and the Path's computer hop is green; anything else stays
+  yellow. A daemon that restarts over a chain it did not start never says untouched until its next
+  apply.
+- **The idle pass-through goes sooner.** A pass-through kept for a stream goes after 3 s of nothing
+  playing (three looks in a row), not 30 s; a seek, a track change or a pause of two seconds keeps
+  it. `SVOLDER_EQ_IDLE_TICKS` is kept.
+- **Home Assistant.** The computer's device gains a Bypass switch (a binary sensor while commands
+  are off) and three dB sensors, Chain level, EQ level and Space level, while the daemon serves
+  them. The Chain level sensor carries the daemon's words as an attribute, and the chain card shows
+  them over its modules beside a Bypass key; the dashboard has a Bypass badge.
+- **The GNOME indicator** shows the chain's words on the Computer EQ row and flips its switch with
+  the bypass; an older `svolder` keeps the EQ-only switch.
+- **For contributors**: `ChainLevels`, `BypassView`, `HeldStages` (svolder-host `eq::levels`),
+  `EqView.levels` and `.bypass`, `EqControl::bypass`, `HostEqOp::Bypass`, `HostEqState.bypass`
+  (`[bypass]` in host-eq.toml, kept by a daemon's own apply), `ApplyRequest.identity`,
+  `EqControl::{preamp_target, climb_ceiling, start_climb, climb_unless_hands, untouched}`
+  (`eq/control/climb.rs`), `ChainStages.untouched`. The preamp lab has a seventh profile,
+  `generate_climb`, and a level rule (never up by more than 0.5 dB between two states); host-e2e has
+  phases P0 to P5 (`make host-e2e`). Web core: `levelsOf`, `bypassOf`, `actions.computer.setBypass`
+  and a `{computer: 'bypass'}` contract target. `PanelComputerEq.level` and `.switch` are additive
+  (panel `v` stays 1). The TUI's `app/stages.rs`, `screens/tone/stages.rs` and the design page
+  `docs/design/tui-stages.md`; Home Assistant's `computer::bypass` and the Chain level sensor's
+  `attributes` topic.
+
+## 0.39.3
+
+- **The Path works with a player that has no MPRIS name.** mpv without its MPRIS plugin used to
+  leave the Path row on `nothing playing` while the music played. With one stream playing into the
+  DAC's sink, the path is now judged from that stream on, and the player hop reads
+  `player (no MPRIS)` with a dim `?` (it cannot be named or controlled). With several streams and
+  no MPRIS player nothing is judged and the row says `no MPRIS player`; `nothing playing` is left
+  for when no stream plays at all. The TUI, the web page (all four themes), the GNOME indicator
+  (`Player (no MPRIS)`), `svolder host check`, MCP and Home Assistant all show it. The daemon also
+  reads the route again at once when an MPRIS player appears or goes. On its own (no daemon, no
+  `--player`) `svolder host check` takes a lone stream as the player's (`player assumed`). With
+  nothing playing the path words in MCP, Home Assistant and `--json` now read `nothing playing`
+  (was `no player`).
+- **The PipeWire config box shows what goes in and what comes out.** Under `Sink`, two new lines:
+  `From player`, the player stream's format as PipeWire negotiated it (`44.1 kHz · S16LE ·
+  stereo`), and `To DAC`, what the card is actually open at (`44.1 kHz · 32-bit (S32_LE) · stereo ·
+  hw:2`, or `not open`). They are in the TUI's `k` box, the web page's config popup, `svolder host
+  check` (text and `--json`) and MCP. In the GNOME indicator, hovering the DAC segment ends with the
+  same words (`DAC: untouched · 44.1 kHz · 32-bit · stereo`); a long line wraps at its dots to two
+  lines instead of being cut, and the menu no longer changes width as the pointer moves.
+- **The TUI's clock has room.** One blank cell now follows the `mouse: on HH:MM` corner, so the
+  clock no longer touches the window's right edge.
+- **For contributors**: `PlayerMatch::NoMpris`, `Hop.unnamed`, `svolder_ipc::host::{NOTHING_PLAYING,
+  NO_MPRIS_PLAYER, plays_without_player, IoLines, io_lines}`, `SetupCheck.io` and
+  `StreamFacts.channels`; the host check JSON's `config` gains `from_player` and `to_dac`. The fake
+  daemon takes `SVOLDER_FAKE_ROUTE=no-mpris`. `scripts/gnome-extension.sh only FIXTURE [SCALE]`
+  runs one headless load.
+
+## 0.39.2
+
+- **The GNOME indicator's Path strip says what it means.** Beside the three segments of the popup's
+  Path strip, a green line reads `untouched end to end` when nothing on the way changes the sound;
+  what is off still shows there in yellow (`DAC: volume −24.1 dB · tone control`). Hovering a
+  segment shows that segment's status on the same line, in its colour (`Player: untouched`,
+  `Computer: resampled · sink filter`, `DAC: not read`), and the line goes back when the pointer
+  leaves. The words are the Path row's own, so the strip, the Path row and the config box always
+  agree. An extension of this version still draws a 0.39.1 `svolder`'s stream as 0.39.1 did.
+- **For contributors**: `svolder panel --json` gives every Path segment its `words` and the path its
+  `rest` (`{text, tone}`); both are additive and `v` stays 1. `off` is built from the Path row's
+  `changes`. `make gnome-extension-check` also loads the extension at text scale 1.25
+  (`SVOLDER_HEADLESS_TEXT_SCALE`).
+
+## 0.39.1
+
+- **The PipeWire config box says why the Path row is yellow.** The box (`k` or a click on the Path
+  row in the terminal; on the web page the `PipeWire config…` menu row, the `config` chip, or
+  Ember's `Path` label) judges only the computer's PipeWire config, so a row turned yellow by
+  something else (the DAC's tone control or lowered volume, the player's or the computer's volume,
+  another sound mixing in, the computer's EQ, a resample) used to open on seven green lines. It now
+  has a `What changes the sound` section naming each hop that changes it (`player`, `computer`,
+  `DAC USB 1`) with the same yellow words as the row: under the summary in the terminal, under the
+  seven lines on the web page. An untouched path shows no section, and a config that fails alone is
+  still explained by its own lines.
+- **GNOME indicator install message.** `make install-gnome-extension` now says plainly that
+  `gnome-extensions enable` reports that the extension "does not exist" until you log out and back
+  in (GNOME Shell on Wayland finds new extensions only at login); the GNOME guide says the same.
+- **For contributors**: `PathRow` gains `changes`, one entry per hop with a yellow word, built by
+  `path_row` in svolder-ipc; the TUI box and the web popup only draw it. Each `RowHop` carries a
+  stable `key` (`player`, `computer`, `dac`).
+
 ## 0.39.0
 
 - **A GNOME top-bar indicator** (GNOME Shell 50 and 51; off until you enable it). The DAC sits in

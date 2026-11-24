@@ -247,7 +247,10 @@ fn draw_list(
     lines.extend(keys);
     let height = u16::try_from(lines.len() + 2).unwrap_or(u16::MAX);
     let box_area = boxed(area, width, height);
-    let title = format!(" Presets · {} bands ", eq.bands.len());
+    let title = match app.on_computer() {
+        true => " Presets · computer ".to_string(),
+        false => format!(" Presets · {} bands ", eq.bands.len()),
+    };
     let mut block = widgets::surfaces::modal_block(Block::bordered(), &title, app, theme);
     if top > 0 {
         block = block.title(Line::from(MORE_UP).right_aligned());

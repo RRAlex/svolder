@@ -21,6 +21,7 @@ use svolder_host::eq::{CrossfeedView, EqView, SpeakersView};
 use crate::discovery::DiscoveryEntry;
 use crate::topics;
 
+pub mod bypass;
 pub mod crossfeed;
 pub mod loudness;
 pub mod path;
@@ -101,6 +102,14 @@ pub const CUSTOM: &str = svolder_profiles::tone::preset::CUSTOM;
 /// Every discovery topic the computer's entities can have for `commands`, whatever the view
 /// holds, for clearing what an earlier run announced.
 pub fn topics_of(computer: &Computer, discovery_prefix: &str, commands: bool) -> Vec<String> {
+    let mut all = earlier_topics_of(computer, discovery_prefix, commands);
+    all.extend(bypass::topics_of(computer, discovery_prefix, commands));
+    all
+}
+
+/// The topics of the entities that existed before the bypass and the levels: what the legacy
+/// unit announced.
+fn earlier_topics_of(computer: &Computer, discovery_prefix: &str, commands: bool) -> Vec<String> {
     if discovery_prefix.is_empty() {
         return Vec::new();
     }
@@ -120,7 +129,7 @@ pub fn topics_of(computer: &Computer, discovery_prefix: &str, commands: bool) ->
 /// `computer`), for `commands`: cleared once when a bridge starts, so Home Assistant keeps no
 /// `This computer` device beside the named one.
 pub fn legacy_topics_of(discovery_prefix: &str, commands: bool) -> Vec<String> {
-    topics_of(&Computer::legacy(), discovery_prefix, commands)
+    earlier_topics_of(&Computer::legacy(), discovery_prefix, commands)
 }
 
 /// The retained availability, state and attributes topics the releases before per-computer ids
@@ -222,7 +231,8 @@ pub fn entries(
 /// Every entry the computer announces for `eq`: [`entries`] with the crossfeed's and the
 /// speakers' views the controller serves, then, when it serves loudness, the loudness switch and
 /// strength number ([`loudness`]), then the path sensor and the config problem sensor ([`path`]),
-/// which are read-only whatever `commands` says.
+/// which are read-only whatever `commands` says, then, while the view carries them, the bypass
+/// switch and the level sensors ([`bypass`]).
 pub fn entries_of(
     computer: &Computer,
     base_topic: &str,
@@ -252,6 +262,13 @@ pub fn entries_of(
         ));
     }
     all.extend(path::entries(computer, base_topic, discovery_prefix));
+    all.extend(bypass::entries(
+        computer,
+        base_topic,
+        discovery_prefix,
+        commands,
+        eq,
+    ));
     all
 }
 

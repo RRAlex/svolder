@@ -33,7 +33,7 @@ an animation argument, a synchronous `disable()`).
    extensions.gnome.org needs no rename.
 2. **One model, built in Rust: `PanelView`** (in `svolder-ipc`), printed as JSON by `svolder panel
    --json`. The extension never re-judges (the same rule as the Path row in the TUI and the web
-   page): the Path strip's tones and the off-only text come from the Path judge (`path_row` and
+   page): the Path strip's tones and words come from the Path judge (`path_row` and
    `PathLine`), the signal's bars, weak and old flags from one rule in `svolder-ipc`, and every
    choice list comes with the CLI arguments that select it. The JavaScript keeps only drawing, the
    sample-rate tint table and the timer that turns `heard_at_ms` into "3 min ago" when the popup
@@ -71,8 +71,15 @@ an animation argument, a synchronous `disable()`).
      with a line naming `--yes`; that shows one line in the popup, `needs a confirmation: open
      svolder`. Exit 4, the device not confirming in time, shows the CLI's own line.
    - Mute toggles from the current state (`set mute on|off`).
-   - The computer EQ switch and preset use `host eq on`, `host eq off` and `host eq preset NAME`,
-     which map onto the daemon's host EQ operations, the same ones the TUI uses.
+   - The computer EQ preset uses `host eq preset NAME`, the daemon's host EQ operation the TUI
+     uses. The switch is "the computer changes the sound": the row's `switch {on, args, name}` is
+     built in Rust. `on` is true while any stage plays and the bypass is off; `args` flips it
+     (`host bypass on` while a stage plays, `host bypass off` while the bypass holds a set, else
+     `host eq on`); `name` is its accessible name. A toggle back to the state the line shows runs
+     nothing, so a quick second click never repeats the call. The row's `level` is the daemon's
+     `levels.words`, drawn after the preset's name. An older svolder's line has no `switch` and no
+     `level`: the switch is then the EQ's own (`on`), named `Computer EQ on or off`, and runs
+     `host eq on|off`, as it did before.
    - The DAC preset row is the list the TUI's DAC preset row uses: tone presets (`eq load NAME`)
      on a profile with a tone control, otherwise the preset slots (`set recall N`) and the
      built-in settings (`preset apply NAME`).
@@ -134,12 +141,47 @@ an animation argument, a synchronous `disable()`).
 - **The volume row**: the speaker button (the mute toggle), the slider (it shrinks), and the value
   `−24.1 dB` right-aligned, tabular, at least 72 px, never wrapping.
 - **The rows**: Input, DAC preset, Computer EQ with its preset and a switch, then the Path row.
-- **The Path row**: three 22 by 12 segments (player, computer, DAC; green, yellow or grey) and the
-  off-only text in yellow.
+- **The Path row**: three 22 by 12 segments (player, computer, DAC; green, yellow or grey) and a
+  line beside them. Each segment sits in a reactive area as tall as the row, so the pointer finds
+  it just above and below the drawing, and its accessible name is its `words`. The line at rest is
+  the panel's `path.rest`: `untouched end to end` in green when the Path label is good, otherwise
+  the off words in yellow, or nothing. The line takes its colour inline from the model's colour
+  table. While the pointer is on a segment the line shows that segment's `words` (escaped plain
+  text; no floating tooltip), in the segment's own tone, and it returns to `path.rest` when the
+  pointer leaves and when the menu closes. `stripLine` in `model.js` picks the text and tone; the
+  indicator only wires hover to it.
+- **The Path words** (model fields, all built from the Path row's `changes`, so the panel, the
+  Path row and the config box cannot drift): each segment's `words` is `<Name>: <status>` with
+  `Player`, `Computer`, `DAC`: the hop's yellow words joined ` · ` when it changes the sound,
+  `untouched` for a green hop, `not read` for a grey hop of a three-hop path. A path with no hops
+  (another sink, another input, no route, or several streams with no MPRIS player) gives all
+  three segments the `off` words. A stream with no MPRIS player names the player segment `Player (no
+  MPRIS)`, in its words and in the `off` groups. The DAC segment's words end with what the card is
+  open at (`DAC: untouched · 44.1 kHz · 32-bit · stereo`, `· not open` for a closed card, nothing
+  when the card is not read; `to_dac_short`). `off` is the
+  changing hops' groups joined `; ` plus `config N`. `rest` is `{text, tone}`: `untouched end to
+  end` in `good` when the label is good (the config check does not fail), else the `off` text in
+  `warn` when it has words, else empty in `plain`. The Computer EQ row's `level` and `switch` are
+  additive the same way (an older line without them is drawn as before). The fields are additive,
+  so `PANEL_VERSION` stays 1: the extension checks only that `v` equals the version it reads. An
+  older extension ignores the new fields; a newer extension reading an older svolder's line takes a
+  missing `rest` as the `off` words in yellow (what the older extension drew) and a missing `words`
+  as empty, so
+  hovering keeps the rest line instead of failing. The line keeps its place in the row
+  (drawn clear when empty) and every line leads with an invisible mark of the dB unit's size, so
+  all lines are as tall as the one with the unit at any text scale and hovering never moves the
+  rows below it. The line is drawn over a clear twin sized for the widest, and at that width the
+  tallest, of the lines the state can say, so neither changes as the pointer moves; the line is
+  capped at 340 px and wraps at its ` · ` separators to two lines at most. While the menu is open
+  the twin never shrinks (it grows when new words are longer) and is measured again when the menu
+  closes. The accessible name is the words alone, without the non-breaking spaces and wrap marks.
+  The 2 px between segments is padding inside each reactive area, so moving from one
+  segment to the next never shows the rest line.
 - **Then** a separator, `Scenes` with the scene that is on at the right (it is marked with a green
   dot in the list), and `Open svolder`.
 
-No hover tooltips (not a top-bar idiom), no now-playing, no transport and no graphs.
+No floating tooltips (not a top-bar idiom; the Path strip's hover text goes on the line beside
+it), no now-playing, no transport and no graphs.
 
 ## What it leaves out
 

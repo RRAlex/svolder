@@ -30,6 +30,10 @@ export function computerSection(title, entities) {
     crossfeed_preset: get(['select', 'sensor'], 'crossfeed_preset'),
     speakers: get(['switch', 'binary_sensor'], 'virtual_speakers'),
     speakers_set: get(['select', 'sensor'], 'virtual_speakers_set'),
+    bypass: get(['switch', 'binary_sensor'], 'bypass'),
+    level_chain: get('sensor', 'chain_level'),
+    level_eq: get('sensor', 'eq_level'),
+    level_space: get('sensor', 'space_level'),
     path: get('sensor', 'path'),
     config: get(['binary_sensor', 'sensor'], ['pipewire_config', 'config']),
   });

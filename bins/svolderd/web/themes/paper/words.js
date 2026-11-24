@@ -46,6 +46,9 @@ export const WORDS = {
   /** The tone: its label, the preset when none is on, the loudness strength and the band table's
    * heads. */
   toneLabel: 'Tone',
+  /** The chain line's heading and its toggle. */
+  chain: 'Chain',
+  bypass: 'bypass',
   noPreset: 'no preset',
   strength: 'strength',
   bandHeads: ['band', 'frequency', 'gain', 'Q'],
@@ -101,6 +104,8 @@ export const WORDS = {
   /** Now playing: the heading, the transport's words and what it says with no player. */
   playingLabel: 'Playing',
   nothingPlaying: 'nothing playing',
+  /** What it says when a sound plays that no MPRIS player is behind. */
+  noMpris: 'no MPRIS player',
   back: 'back',
   pause: 'pause',
   play: 'play',

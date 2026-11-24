@@ -32,6 +32,7 @@ fn state(filters: Vec<SourceFilter>, slots: Vec<u8>) -> HostEqState {
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     }
 }
 

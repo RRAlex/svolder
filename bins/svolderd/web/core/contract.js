@@ -69,11 +69,11 @@ export function targetsOf(device) {
 /**
  * Every control and action the computer's side offers on `page` (the page's model, whose
  * `host.computer` holds it), in the order they are listed: the switch (`flip`), then, while the
- * computer can be used, its volume, mute and mode, `add` while the table has room, each point's
- * `type`, `f`, `g` and `q`, `remove` for each point (the lone point is set flat), and every preset
- * the computer can play. `[]` where the page has no switch (no device shown, or no computer).
+ * computer can be used, its volume, mute and mode, `bypass` while the model has one, `add` while
+ * the table has room, each point's `type`, `f`, `g` and `q`, `remove` for each point (the lone
+ * point is set flat), and every preset the computer can play. `[]` where the page has no switch (no device shown, or no computer).
  *
- *   { computer: 'flip' | 'volume' | 'mute' | 'mode' | 'add' }
+ *   { computer: 'flip' | 'volume' | 'mute' | 'mode' | 'bypass' | 'add' }
  *   { computer: 'point', n, param }     n is 1-based; param is `type`, `f`, `g` or `q`
  *   { computer: 'remove', n }
  *   { computer: 'preset', name }
@@ -85,6 +85,7 @@ export function computerTargetsOf(page) {
   targets.push({ computer: 'flip' });
   if (model.unavailable) return targets;
   for (const control of ['volume', 'mute', 'mode']) targets.push({ computer: control });
+  if (model.eq?.bypass) targets.push({ computer: 'bypass' });
   const count = Math.max(model.eq?.points?.length ?? 0, 1);
   if (count < (model.eq?.max ?? 16)) targets.push({ computer: 'add' });
   for (let n = 1; n <= count; n++) {

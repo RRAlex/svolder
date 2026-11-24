@@ -5,7 +5,7 @@ use super::*;
 use crate::host::HostView;
 use crate::socket::protocol::{SceneRow, ScenesView, ValueObject};
 use crate::socket::signal::{Signal, SignalSource};
-use svolder_host::eq::EqView;
+use svolder_host::eq::{BypassView, ChainLevels, EqView, HeldStages};
 use svolder_host::{PlayerMatch, RouteFacts, SinkFacts, StreamFacts};
 use svolder_profiles::{Profile, Registry};
 
@@ -116,6 +116,7 @@ fn route(rate_hz: u32, player_hz: u32) -> RouteFacts {
             rate_hz: Some(player_hz),
             format: Some("S16LE".into()),
             volume_milli: Some(1000),
+            channels: None,
             muted: false,
         }),
         player_match: PlayerMatch::Pid,
@@ -133,10 +134,24 @@ fn host(route: Option<RouteFacts>, eq_on: bool) -> HostView {
         eq: Some(EqView {
             on: eq_on,
             preset: eq_on.then(|| "Late night".to_string()),
+            levels: Some(match eq_on {
+                true => ChainLevels::of(true, -7.8, 0.0, -7.8, false),
+                false => ChainLevels::of(false, 0.0, 0.0, 0.0, false),
+            }),
+            bypass: Some(BypassView::default()),
             ..Default::default()
         }),
         ..HostView::default()
     }
+}
+
+/// The computer of an older daemon: an EQ that has no levels and no bypass.
+fn old_host(route: Option<RouteFacts>, eq_on: bool) -> HostView {
+    let mut view = host(route, eq_on);
+    let eq = view.eq.as_mut().unwrap();
+    eq.levels = None;
+    eq.bypass = None;
+    view
 }
 
 fn scenes(on: Option<&str>, names: &[&str]) -> ScenesView {
@@ -358,6 +373,52 @@ fn an_unidentified_player_is_a_grey_segment() {
     assert_eq!(path(&view).tone, PanelLabelTone::Plain);
 }
 
+#[test]
+fn a_stream_with_no_mpris_player_is_a_green_segment_that_says_so() {
+    let mut case = untouched();
+    let mut route = route(44_100, 44_100);
+    route.player_match = PlayerMatch::NoMpris;
+    case.host = Some(host(Some(route), false));
+    let view = case.view();
+    assert_eq!(path(&view).end_to_end, "untouched");
+    assert_eq!(tones(&view), [PanelTone::Good; 3]);
+    assert_eq!(
+        path(&view).segments[0].words,
+        "Player (no MPRIS): untouched"
+    );
+    assert_eq!(path(&view).segments[1].words, "Computer: untouched");
+}
+
+#[test]
+fn a_changing_stream_with_no_mpris_player_keeps_the_name_in_the_segment_and_the_rest_line() {
+    let mut case = untouched();
+    let mut route = route(44_100, 44_100);
+    route.player_match = PlayerMatch::NoMpris;
+    route.player.as_mut().unwrap().volume_milli = Some(500);
+    case.host = Some(host(Some(route), false));
+    let view = case.view();
+    assert_eq!(
+        path(&view).segments[0].words,
+        "Player (no MPRIS): volume 50 %"
+    );
+    assert_eq!(path(&view).off, "Player (no MPRIS): volume 50 %");
+    golden("no_mpris.jsonl", std::slice::from_ref(&view));
+}
+
+#[test]
+fn several_streams_with_no_mpris_player_are_grey_with_those_words() {
+    let mut case = untouched();
+    let mut route = route(44_100, 44_100);
+    route.player = None;
+    route.player_match = PlayerMatch::NoPlayer;
+    route.others_mixing = 2;
+    case.host = Some(host(Some(route), false));
+    let view = case.view();
+    assert_eq!(tones(&view), [PanelTone::Unknown; 3]);
+    assert_eq!(path(&view).off, "no MPRIS player");
+    assert_eq!(path(&view).end_to_end, "unknown");
+}
+
 /// A saved preset with no curve for the computer is not offered for it.
 #[test]
 fn a_preset_the_computer_cannot_play_is_not_offered() {
@@ -477,6 +538,102 @@ fn the_computer_eq_lists_presets_with_the_verb_that_selects_them() {
     );
 }
 
+/// The switch's arguments, from the views of a computer whose chain plays, holds a bypass or
+/// plays nothing; the level is the daemon's words.
+#[test]
+fn the_computer_switch_flips_with_the_bypass_arguments() {
+    let switch = |case: &Case| {
+        case.view()
+            .computer_eq
+            .and_then(|eq| eq.switch)
+            .expect("a switch")
+    };
+    // Playing: the switch is on and turning it off is the bypass.
+    let mut case = untouched();
+    case.host = Some(host(Some(route(44_100, 44_100)), true));
+    let playing = switch(&case);
+    assert!(playing.on);
+    assert_eq!(playing.args, ["host", "bypass", "on"]);
+    assert_eq!(playing.name, "The computer changes the sound, on or off");
+    let level = case.view().computer_eq.unwrap().level;
+    assert_eq!(level.as_deref(), Some("plays \u{2212}7.8 dB in all"));
+    golden("computer_playing.jsonl", &[case.view()]);
+
+    // A stage other than the EQ plays: the switch is on too.
+    let mut other = host(Some(route(44_100, 44_100)), false);
+    other.eq.as_mut().unwrap().speakers = Some(svolder_host::eq::SpeakersView {
+        on: true,
+        ..Default::default()
+    });
+    case.host = Some(other);
+    assert!(switch(&case).on);
+
+    // The bypass holds a set: the switch is off and turning it on is the bypass's end.
+    let mut held = host(Some(route(44_100, 44_100)), false);
+    let eq = held.eq.as_mut().unwrap();
+    eq.levels = Some(ChainLevels::of(true, 0.0, 0.0, -7.6, true));
+    eq.bypass = Some(BypassView {
+        on: true,
+        held: HeldStages {
+            eq: true,
+            loudness: true,
+            ..HeldStages::default()
+        },
+    });
+    case.host = Some(held);
+    let bypassed = switch(&case);
+    assert!(!bypassed.on);
+    assert_eq!(bypassed.args, ["host", "bypass", "off"]);
+    let eq = case.view().computer_eq.unwrap();
+    assert_eq!(
+        eq.level.as_deref(),
+        Some("pass-through \u{2212}7.6 dB until the music pauses")
+    );
+    golden("computer_bypass.jsonl", &[case.view()]);
+
+    // Nothing plays and nothing is held: the switch is off and turning it on is the EQ's.
+    case.host = Some(host(Some(route(44_100, 44_100)), false));
+    let idle = switch(&case);
+    assert!(!idle.on);
+    assert_eq!(idle.args, ["host", "eq", "on"]);
+    assert_eq!(case.view().computer_eq.unwrap().level, None);
+}
+
+/// A pass-through the daemon proved untouched: the row says so in the daemon's words, and the
+/// switch is off with nothing held (turning it on is the EQ's).
+#[test]
+fn an_untouched_pass_through_says_so() {
+    let mut case = untouched();
+    let mut idle = host(Some(route(44_100, 44_100)), false);
+    idle.eq.as_mut().unwrap().levels =
+        Some(ChainLevels::of(true, 0.0, 0.0, 0.0, true).with_climb(None, true));
+    case.host = Some(idle);
+    let eq = case.view().computer_eq.unwrap();
+    assert_eq!(eq.level.as_deref(), Some("pass-through, untouched"));
+    let switch = eq.switch.as_ref().expect("a switch");
+    assert!(!switch.on);
+    assert_eq!(switch.args, ["host", "eq", "on"]);
+    golden("passthrough_untouched.jsonl", &[case.view()]);
+}
+
+/// A daemon without the bypass sends no switch and no level, and the fields stay out of the
+/// line: an older reader sees what it always saw.
+#[test]
+fn an_older_daemon_has_no_switch_and_no_level() {
+    let mut case = untouched();
+    case.host = Some(old_host(Some(route(44_100, 44_100)), true));
+    let view = case.view();
+    let eq = view.computer_eq.as_ref().unwrap();
+    assert!(eq.switch.is_none() && eq.level.is_none());
+    golden("computer_old_daemon.jsonl", std::slice::from_ref(&view));
+    let line = serde_json::to_string(&view).unwrap();
+    assert!(
+        !line.contains("\"switch\"") && !line.contains("\"level\""),
+        "{line}"
+    );
+    assert_eq!(PANEL_VERSION, 1, "the line stays version 1");
+}
+
 #[test]
 fn several_scenes_keep_the_files_order_and_mark_the_one_on() {
     let mut case = untouched();
@@ -540,4 +697,164 @@ fn minus_signs_leave_hyphens_in_names_alone() {
         "Computer: USB-3 \u{b7} volume \u{2212}3.0 dB"
     );
     assert_eq!(minus_signs("-5 dB"), "\u{2212}5 dB");
+}
+
+fn words(view: &PanelView) -> Vec<&str> {
+    path(view)
+        .segments
+        .iter()
+        .map(|s| s.words.as_str())
+        .collect()
+}
+
+/// A green hop says `untouched`, and the strip at rest says so end to end.
+#[test]
+fn an_untouched_path_says_untouched_on_every_segment_and_at_rest() {
+    let view = untouched().view();
+    assert_eq!(
+        words(&view),
+        ["Player: untouched", "Computer: untouched", "DAC: untouched"]
+    );
+    let rest = &path(&view).rest;
+    assert_eq!(rest.text, "untouched end to end");
+    assert_eq!(rest.tone, PanelLabelTone::Good);
+}
+
+/// Each hop that changes the sound names its own changes; the `off` line is the same words
+/// grouped.
+#[test]
+fn each_changing_hop_names_its_changes() {
+    let mut player = untouched();
+    let mut quiet = route(44_100, 44_100);
+    quiet.player.as_mut().unwrap().volume_milli = Some(500);
+    player.host = Some(host(Some(quiet), false));
+    let view = player.view();
+    assert_eq!(path(&view).segments[0].tone, PanelTone::Warn);
+    assert_eq!(words(&view)[0], "Player: volume 50 %");
+    assert_eq!(words(&view)[1], "Computer: untouched");
+    assert_eq!(path(&view).off, words(&view)[0]);
+
+    let mut case = untouched();
+    case.readings = readings(1, 2, 127, false);
+    case.host = Some(host(Some(route(48_000, 44_100)), false));
+    let view = case.view();
+    assert_eq!(words(&view)[1], "Computer: resampled");
+
+    let mut case = untouched();
+    case.readings = readings(1, 1, 67, false);
+    let mode_id = bifrost().eq.unwrap().mode_id().to_string();
+    case.readings.push(reading(&mode_id, 2.into()));
+    let view = case.view();
+    assert_eq!(
+        words(&view)[2],
+        "DAC: volume \u{2212}24.1 dB \u{b7} tone control"
+    );
+    assert_eq!(path(&view).rest.text, path(&view).off);
+    assert_eq!(path(&view).rest.tone, PanelLabelTone::Warn);
+}
+
+/// A hop that could not be read says `not read`, and nothing is claimed untouched at rest.
+#[test]
+fn an_unread_hop_says_not_read() {
+    let mut case = untouched();
+    let mut route = route(44_100, 44_100);
+    route.player = None;
+    case.host = Some(host(Some(route), false));
+    let view = case.view();
+    assert_eq!(words(&view)[0], "Player: not read");
+    assert_eq!(words(&view)[1], "Computer: untouched");
+    assert_eq!(path(&view).rest.text, "");
+    assert_eq!(path(&view).rest.tone, PanelLabelTone::Plain);
+}
+
+/// With no hops every segment carries the `off` words and the rest line is those words.
+#[test]
+fn a_path_with_no_hops_gives_every_segment_the_off_words() {
+    let mut case = untouched();
+    case.readings = readings(2, 1, 127, false);
+    let view = case.view();
+    let off = path(&view).off.clone();
+    assert!(off.contains("Optical"), "{off}");
+    assert_eq!(words(&view), [off.as_str(); 3]);
+    assert_eq!(path(&view).rest.text, off);
+    assert_eq!(path(&view).rest.tone, PanelLabelTone::Warn);
+}
+
+/// A failing config check alone: every hop is untouched, the rest line is `config N` in warn.
+#[test]
+fn a_config_failure_alone_is_not_untouched_at_rest() {
+    let mut case = untouched();
+    let mut route = route(44_100, 44_100);
+    route.setup = Some(setup_allowing(&[44_100, 48_000]));
+    case.host = Some(host(Some(route), false));
+    let view = case.view();
+    assert_eq!(words(&view)[2], "DAC: untouched");
+    assert_eq!(path(&view).rest.text, "config 1");
+    assert_eq!(path(&view).rest.tone, PanelLabelTone::Warn);
+}
+
+/// The DAC segment's words end with what the card is open at (no `hw:N`, no format name); a
+/// closed card says so, a card the route does not read adds nothing, and the other segments and
+/// the rest line are as they were.
+#[test]
+fn the_dac_segment_ends_with_what_the_card_is_open_at() {
+    use svolder_host::{HwParams, HwState};
+    let dac_words = |hw: HwState| {
+        let mut case = untouched();
+        let mut route = route(44_100, 44_100);
+        let mut setup = setup_allowing(&[44_100, 48_000, 96_000]);
+        setup.alsa.as_mut().unwrap().hw = hw;
+        route.setup = Some(setup);
+        case.host = Some(host(Some(route), false));
+        case.view()
+    };
+    let open = dac_words(HwState::Open(HwParams {
+        format: "S32_LE".into(),
+        rate: 44_100,
+        channels: 2,
+    }));
+    golden("config_io.jsonl", std::slice::from_ref(&open));
+    assert_eq!(
+        words(&open),
+        [
+            "Player: untouched",
+            "Computer: untouched",
+            "DAC: untouched \u{b7} 44.1 kHz \u{b7} 32-bit \u{b7} stereo"
+        ]
+    );
+    assert_eq!(path(&open).rest.text, "untouched end to end");
+    let closed = dac_words(HwState::Closed);
+    assert_eq!(words(&closed)[2], "DAC: untouched \u{b7} not open");
+    assert_eq!(words(&dac_words(HwState::NotRead))[2], "DAC: untouched");
+}
+
+/// A DAC hop that changes the sound with the card open: the changes come first, the card's words
+/// last. The longest words the strip can say (the extension sizes its line for them).
+#[test]
+fn a_changing_dac_hop_ends_with_the_card_words_too() {
+    use svolder_host::{HwParams, HwState};
+    let mut case = untouched();
+    case.readings = readings(1, 1, 67, false);
+    let mode_id = bifrost().eq.unwrap().mode_id().to_string();
+    case.readings.push(reading(&mode_id, 2.into()));
+    let mut route = route(44_100, 44_100);
+    let mut setup = setup_allowing(&[44_100, 48_000, 96_000]);
+    setup.alsa.as_mut().unwrap().hw = HwState::Open(HwParams {
+        format: "S32_LE".into(),
+        rate: 44_100,
+        channels: 2,
+    });
+    route.setup = Some(setup);
+    case.host = Some(host(Some(route), false));
+    let view = case.view();
+    golden("dac_io_changed.jsonl", std::slice::from_ref(&view));
+    assert_eq!(
+        words(&view)[2],
+        "DAC: volume \u{2212}24.1 dB \u{b7} tone control \u{b7} 44.1 kHz \u{b7} 32-bit \u{b7} stereo"
+    );
+    // The line at rest names only what is off: the card's words are for the hover.
+    assert_eq!(
+        path(&view).rest.text,
+        "DAC: volume \u{2212}24.1 dB \u{b7} tone control"
+    );
 }

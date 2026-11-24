@@ -89,9 +89,9 @@ config error.
 ### Writes and the volume rule
 
 With `writes = false` the server offers six read tools (`get_host` reads the computer, `list_scenes`
-the scenes) and nothing can change. `writes = true` adds fourteen more: three that change a device,
-`identify`, which only asks the unit to show itself, six for the computer's volume, mute, EQ,
-loudness, crossfeed and virtual speakers, and four for scenes.
+the scenes) and nothing can change. `writes = true` adds fifteen more: three that change a device,
+`identify`, which only asks the unit to show itself, seven for the computer's volume, mute, EQ,
+loudness, crossfeed, virtual speakers and bypass, and four for scenes.
 The rule below stands between a model and your amplifier. Set `max_volume_db` too:
 `svolder doctor` warns when writes are on without it.
 
@@ -237,9 +237,11 @@ when one device is configured. Results are structured JSON.
   like the others, so a client with an older list that calls it is refused naming the setting.
 - `get_host` — no arguments; answers `{"volume": {percent, muted, sink} | null, "eq": {on, preset,
   preamp_db, points: [{type, frequency_hz, gain_db, q}]} | null, "player": {title, artist, album,
-  status} | null, "loudness": {…} | null, "crossfeed": {…} | null, "speakers": {…} | null, "path":
-  {…} | null, "config": {…} | null}`. Each is read on its own: `volume` and `player` are null while
-  there is nothing to read, and `eq` is null with `unavailable` saying why when the computer EQ
+  status} | null, "loudness": {…} | null, "crossfeed": {…} | null, "speakers": {…} | null, "bypass":
+  {on, held: {eq, loudness, crossfeed, speakers}} | null, "levels": {eq_db, space_db, total_db,
+  climb_to_db, passthrough, untouched, words} | null, "path": {…} | null, "config": {…} | null}`.
+  Each is read on its own: `volume` and `player` are null while there is nothing to read, and `eq`
+  is null with `unavailable` saying why when the computer EQ
   cannot be used. An EQ whose state the daemon could not verify carries `"unverified": true`: `on`
   is then only what the saved state says. `crossfeed` is the computer's crossfeed beside the EQ:
   `on`, `model`, `preset` (null for Custom), `edited_from`, `level_pct`, `level_db`, `feed_db`,
@@ -294,6 +296,13 @@ when one device is configured. Results are structured JSON.
   `reference` is refused (a null reads as "not given" in every tool, so a word says it). A value
   past a range is held to it, and the ranges are in the tool's schema. It never asks: loudness only
   cuts, so it cannot raise the level. Answers `{"loudness": {…}}`, the object `get_host` carries.
+- `set_host_bypass` (writes) — `on` (required): true turns off every stage that plays (EQ, loudness,
+  crossfeed, virtual speakers) in one change and holds which they were, false brings back exactly
+  those with their settings as they are now. It never asks: the preamp falls first and a rise
+  climbs at a fixed pace, so it cannot make the output suddenly louder. Nothing on and nothing
+  held is refused (`nothing plays on the computer to bypass`). Any stage turned on from another
+  path (a preset, a scene, a switch) ends the bypass. Answers `{"bypass": {…}, "levels": {…}}`,
+  the objects `get_host` carries; `levels.words` is the one sentence for what the chain plays at.
 - `set_host_crossfeed` (writes) — the computer's [crossfeed](eq.md#crossfeed). Optional `on`,
   `model` (`bauer`, `linkwitz`, `meier`, `mid-side`), `preset` (a name of the model), `level_pct`,
   `crossover_hz` and `delay_ms` (a number, or the word `"own"` for the model's own lag: a null reads

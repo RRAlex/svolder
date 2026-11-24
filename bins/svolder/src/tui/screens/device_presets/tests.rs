@@ -72,7 +72,7 @@ fn the_loki_max_preset_list_draws_at_80_by_24() {
     assert_rows(
         &buffer,
         &[
-            " svolder  Loki Max  ● connected                                        mouse:on ",
+            " svolder  Loki Max  ● connected                                       mouse:on  ",
             "─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─",
             "┌ Controls ───────────────────────────────────────── mute ─ 0 centre ─ refresh ┐",
             "│ ▶ Input  —                                                                   │",

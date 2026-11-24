@@ -20,6 +20,8 @@ export const HUD = Object.freeze({
   changes: 'changes the sound',
   eq: 'EQ',
   off: 'OFF',
+  space: 'SPACE',
+  stageOpens: (words) => `${words}: open its settings`,
   unconfirmed: 'unconfirmed',
   flat: 'FLAT',
   loudness: 'LOUDNESS',
@@ -44,6 +46,8 @@ export const DASH = Object.freeze({
   mute: 'MUTE',
   eq: 'EQ',
   eqLabel: (on) => `EQ ${on ? 'on' : 'off'}`,
+  bypass: 'BYPASS',
+  bypassLabel: (on) => `Bypass ${on ? 'on' : 'off'}`,
   input: 'Input',
   power: 'Power',
   previous: 'Previous',
@@ -53,6 +57,7 @@ export const DASH = Object.freeze({
   device: 'DEVICE ▴',
   deviceLabel: 'Device settings',
   nothing: 'Nothing playing',
+  noMpris: 'No MPRIS player',
 });
 
 /** The page's states: the stream lost, the page reading again or resting, the card of a device out of reach and the

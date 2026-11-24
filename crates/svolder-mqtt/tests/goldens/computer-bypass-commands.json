@@ -1,0 +1,131 @@
+[
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/reframe/availability"
+        },
+        {
+          "topic": "svolder/computer_reframe/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_computer_reframe"
+        ],
+        "manufacturer": "svolder",
+        "model": "Computer",
+        "name": "Reframe"
+      },
+      "json_attributes_topic": "svolder/computer_reframe/computer_level_chain/attributes",
+      "name": "Chain level",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_class": "measurement",
+      "state_topic": "svolder/computer_reframe/computer_level_chain/state",
+      "suggested_display_precision": 1,
+      "unique_id": "svolder_computer_reframe_computer_level_chain",
+      "unit_of_measurement": "dB"
+    },
+    "topic": "homeassistant/sensor/svolder_computer_reframe/computer_level_chain/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/reframe/availability"
+        },
+        {
+          "topic": "svolder/computer_reframe/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_computer_reframe"
+        ],
+        "manufacturer": "svolder",
+        "model": "Computer",
+        "name": "Reframe"
+      },
+      "name": "EQ level",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_class": "measurement",
+      "state_topic": "svolder/computer_reframe/computer_level_eq/state",
+      "suggested_display_precision": 1,
+      "unique_id": "svolder_computer_reframe_computer_level_eq",
+      "unit_of_measurement": "dB"
+    },
+    "topic": "homeassistant/sensor/svolder_computer_reframe/computer_level_eq/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/reframe/availability"
+        },
+        {
+          "topic": "svolder/computer_reframe/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_computer_reframe"
+        ],
+        "manufacturer": "svolder",
+        "model": "Computer",
+        "name": "Reframe"
+      },
+      "name": "Space level",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_class": "measurement",
+      "state_topic": "svolder/computer_reframe/computer_level_space/state",
+      "suggested_display_precision": 1,
+      "unique_id": "svolder_computer_reframe_computer_level_space",
+      "unit_of_measurement": "dB"
+    },
+    "topic": "homeassistant/sensor/svolder_computer_reframe/computer_level_space/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/reframe/availability"
+        },
+        {
+          "topic": "svolder/computer_reframe/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/computer_reframe/computer_bypass/set",
+      "device": {
+        "identifiers": [
+          "svolder_computer_reframe"
+        ],
+        "manufacturer": "svolder",
+        "model": "Computer",
+        "name": "Reframe"
+      },
+      "name": "Bypass",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/computer_reframe/computer_bypass/state",
+      "unique_id": "svolder_computer_reframe_computer_bypass"
+    },
+    "topic": "homeassistant/switch/svolder_computer_reframe/computer_bypass/config"
+  }
+]

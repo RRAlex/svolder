@@ -55,7 +55,7 @@ async fn recall(control: &mut EqControl, name: &str, curve: Correction) {
 
 /// The chain applied with the hot curve and a stream playing through it; the preamp it plays.
 async fn hot_playing(keep: Keep) -> (EqControl, FakeChain, FakeParams, f64) {
-    let (mut control, chain, params) = setup(keep);
+    let (mut control, chain, params) = setup_curve(keep);
     chain.restarts_node_of(&params);
     params.set_output(Some(OutputSink {
         name: "a".into(),
@@ -305,7 +305,7 @@ async fn a_daemon_stopped_while_held_keeps_the_curve_and_the_next_start_plays_it
 /// level is held and said, and lifts once idle.
 #[tokio::test]
 async fn a_stage_that_covers_the_gap_for_a_while_keeps_the_lift() {
-    let (mut control, chain, params) = setup(Keep::Memory);
+    let (mut control, chain, params) = setup_curve(Keep::Memory);
     chain.restarts_node_of(&params);
     params.set_output(Some(OutputSink {
         name: "a".into(),
@@ -356,7 +356,7 @@ async fn a_stage_that_covers_the_gap_for_a_while_keeps_the_lift() {
 /// controller took back (seed 4421 of the preamp lab).
 #[tokio::test]
 async fn a_pass_through_line_that_failed_is_put_right_by_the_next_line() {
-    let (mut control, chain, params) = setup(Keep::Memory);
+    let (mut control, chain, params) = setup_curve(Keep::Memory);
     recall(&mut control, "Hot", hot()).await;
     params.set_playing(true);
     params.takes(false);
@@ -382,7 +382,7 @@ async fn a_pass_through_line_that_failed_is_put_right_by_the_next_line() {
 /// The chain applied with `curve` while a stream is on the output, as a real chain comes up: its
 /// preamp ports hold the config's preamp as `pw-dump` prints it, and its graph has not run.
 async fn applied(curve: Correction) -> (EqControl, FakeChain, FakeParams) {
-    let (mut control, chain, params) = setup(Keep::Memory);
+    let (mut control, chain, params) = setup_curve(Keep::Memory);
     chain.restarts_node_like_pipewire(&params);
     params.set_output(Some(OutputSink {
         name: "a".into(),

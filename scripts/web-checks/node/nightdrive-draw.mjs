@@ -402,6 +402,15 @@ ok('the_amp_page_takes_the_computers_parts_in_the_dash_and_the_sheet', () => {
   assert.ok(!drawDash(page, { phone: () => false }, 1000, rig.core.computer.view()).includes('volume-down'));
 });
 
+ok('the_dash_says_no_mpris_player_when_a_path_has_no_track', () => {
+  const page = pageOf('amp');
+  const dash = () => drawDash(page, view, 1000);
+  page.device = { ...page.device, playing: { track: null, path: { hops: [], words: ['no MPRIS player'] } } };
+  assert.ok(dash().includes('No MPRIS player') && !dash().includes('Nothing playing'));
+  page.device = { ...page.device, playing: { track: null, path: null } };
+  assert.ok(dash().includes('Nothing playing') && !dash().includes('No MPRIS player'));
+});
+
 ok('a_failed_cover_is_left_out_until_another_cover_or_none_is_drawn', () => {
   const page = pageOf('amp');
   const dash = () => drawDash(page, view, 1000);

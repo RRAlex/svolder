@@ -335,7 +335,7 @@ fn the_tall_tier_draws_the_level_history_of_each_source() {
 
 /// The whole 80×40 frame of the stereo amp with its level history shown.
 const STEREO_FRAME_80: [&str; 40] = [
-    " svolder  Fake amp  ● connected                                        mouse:on ",
+    " svolder  Fake amp  ● connected                                       mouse:on  ",
     "─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─",
     "┌ Controls ───────────────────────────────────────── mute ─ 0 centre ─ refresh ┐",
     "│                                                                              │",
@@ -524,7 +524,7 @@ fn header_is_unchanged() {
     assert_rows_start(
         &text(&screen(&dac)),
         &[
-            " svolder  Gungnir 2 · fw 3 · 0102…08  ● connected                 mouse:on 14:02",
+            " svolder  Gungnir 2 · fw 3 · 0102…08  ● connected                mouse:on 14:02 ",
             "─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─",
         ],
     );
@@ -533,7 +533,7 @@ fn header_is_unchanged() {
     assert_rows_start(
         &text(&frame(&amp, 80, 40)),
         &[
-            " svolder  Fake amp  ● connected                                        mouse:on ",
+            " svolder  Fake amp  ● connected                                       mouse:on  ",
             "─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─",
         ],
     );

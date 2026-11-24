@@ -46,9 +46,9 @@ use svolder_host::fake::FakePlayers;
 use svolder_host::fake::{FakeChain, FakeParams, FakeSink};
 use svolder_host::route::{ChainStages, PlayerMatch, PwDump, SinkFacts, StreamFacts, route};
 use svolder_host::{
-    AlsaFacts, Asound, Button, ClockFacts, Dither, Frame, FrameCapture, Layout, Mpris, NoBus,
-    NowPlaying, Players, Progress, PwFrames, Rates, RouteFacts, SetupFacts, Sink, SinkOffer,
-    SinkState, Status, Wpctl, fill_alsa, unix_ms,
+    AlsaFacts, Asound, Button, ClockFacts, Dither, Frame, FrameCapture, HwParams, HwState, Layout,
+    Mpris, NoBus, NowPlaying, Players, Progress, PwFrames, Rates, RouteFacts, SetupFacts, Sink,
+    SinkOffer, SinkState, Status, Wpctl, fill_alsa, unix_ms,
 };
 use svolder_ipc::config::HostConfig;
 use svolder_ipc::host::{
@@ -116,6 +116,8 @@ const FRAMES_BACKLOG: usize = 8;
 /// The sample rate the fake route's sink and the fake player's stream run at: the one the fake
 /// device reads, so the path on the fake DAC reads untouched.
 const FAKE_RATE_HZ: u32 = svolder_fake::SAMPLE_RATE_HZ;
+/// The card number the fake sink's ALSA device reports (`hw:3` in the popup's `To DAC` line).
+const FAKE_CARD: u32 = 3;
 
 /// Where the host's sources come from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,6 +155,13 @@ pub(crate) trait Routes: Send + Sync {
     /// The route to the default sink for the player being followed, or `None` when it cannot
     /// be read.
     async fn read(&self, player: Option<NowPlaying>) -> Option<RouteFacts>;
+
+    /// Whether the stages of the chain in a route it reads are the daemon's to tell, from the
+    /// computer's EQ view each time a view is made (see [`staged`]); `false` for a reader that
+    /// tells them itself.
+    fn stages_from_eq(&self) -> bool {
+        true
+    }
 }
 
 /// Finds the players on the bus: called when the host starts, and again every [`BUS_RETRY`]
@@ -275,6 +284,9 @@ pub(crate) struct FakeKnobs {
     /// resample, a quieter sink with a narrower format and dither, the host EQ and other sounds
     /// mixing.
     pub(crate) route_changed: bool,
+    /// Whether, with the player gone, the fake route still has its one stream playing: a sound
+    /// with no MPRIS player behind it.
+    pub(crate) route_no_mpris: bool,
     /// Whether the fake route's PipeWire config fails the rates, forced rate and filter lines of
     /// the config check.
     pub(crate) setup_fail: bool,
@@ -310,6 +322,7 @@ impl Default for FakeKnobs {
             cover_next_file: None,
             display: "Gungnir 2".to_string(),
             route_changed: false,
+            route_no_mpris: false,
             setup_fail: false,
             capture_off: false,
             title: None,
@@ -329,7 +342,8 @@ impl FakeKnobs {
     /// `SVOLDER_FAKE_PLAYER_GONE_AFTER_MS` in milliseconds (anything else is unset),
     /// `SVOLDER_FAKE_COVER_GONE_FILE`, `SVOLDER_FAKE_COVER_NEXT_FILE` and
     /// `SVOLDER_FAKE_PLAYER_GONE_FILE` as paths (unset when empty),
-    /// `SVOLDER_FAKE_ROUTE=changed` for the route that alters the signal,
+    /// `SVOLDER_FAKE_ROUTE=changed` for the route that alters the signal (`no-mpris` for the
+    /// stream that plays on with the player gone),
     /// `SVOLDER_FAKE_CONFIG=fail` for a PipeWire config that fails the rates, forced rate and
     /// filter lines,
     /// `SVOLDER_FAKE_CAPTURE=off` for a host with no capture, `SVOLDER_FAKE_TITLE` for the
@@ -355,6 +369,8 @@ impl FakeKnobs {
             cover_next_file: path("SVOLDER_FAKE_COVER_NEXT_FILE"),
             route_changed: knob("SVOLDER_FAKE_ROUTE")
                 .is_some_and(|route| route.trim().eq_ignore_ascii_case("changed")),
+            route_no_mpris: knob("SVOLDER_FAKE_ROUTE")
+                .is_some_and(|route| route.trim().eq_ignore_ascii_case("no-mpris")),
             setup_fail: knob("SVOLDER_FAKE_CONFIG")
                 .is_some_and(|setup| setup.trim().eq_ignore_ascii_case("fail")),
             capture_off: knob("SVOLDER_FAKE_CAPTURE")
@@ -482,6 +498,7 @@ impl Parts {
             routes: Some(Arc::new(FakeRoute {
                 display: knobs.display,
                 changed: knobs.route_changed,
+                no_mpris: knobs.route_no_mpris,
                 setup_fail: knobs.setup_fail,
                 computer: Some(Arc::clone(&computer)),
             })),
@@ -629,6 +646,8 @@ struct FakeRoute {
     display: String,
     /// Whether the route changes the signal (see [`FakeKnobs::route_changed`]).
     changed: bool,
+    /// Whether the stream plays on with the player gone (see [`FakeKnobs::route_no_mpris`]).
+    no_mpris: bool,
     /// Whether the PipeWire config fails three lines (see [`FakeKnobs::setup_fail`]).
     setup_fail: bool,
     /// The fake computer, whose EQ the route follows.
@@ -697,6 +716,14 @@ impl FakeRoute {
             stream_filter: Some(false),
             alsa: Some(AlsaFacts {
                 path: Some("hw:Audio".to_string()),
+                card: Some(FAKE_CARD),
+                // The card runs as the sink does (`changed` plays the sink at 16 bits), so the
+                // `plug` line is not touched by it.
+                hw: HwState::Open(HwParams {
+                    format: if self.changed { "S16_LE" } else { "S32_LE" }.to_string(),
+                    rate: FAKE_RATE_HZ,
+                    channels: 2,
+                }),
                 ..AlsaFacts::default()
             }),
         }
@@ -705,6 +732,10 @@ impl FakeRoute {
 
 #[async_trait]
 impl Routes for FakeRoute {
+    fn stages_from_eq(&self) -> bool {
+        false
+    }
+
     async fn read(&self, player: Option<NowPlaying>) -> Option<RouteFacts> {
         let product = format!("Schiit {}", self.display);
         // The fake computer's own volume and mute are the sink's, as the real route reads them.
@@ -730,17 +761,19 @@ impl Routes for FakeRoute {
             rate_hz: Some(if self.changed { 44_100 } else { FAKE_RATE_HZ }),
             format: Some(if self.changed { "S32LE" } else { "S16LE" }.to_string()),
             volume_milli: Some(if self.changed { 910 } else { 1000 }),
+            channels: Some(2),
             muted: false,
         };
         let stages = self.chain_stages();
         let playing = player.is_some();
+        let lone = !playing && self.no_mpris;
         Some(RouteFacts {
             sink: Some(sink),
-            player: playing.then_some(stream),
-            player_match: if playing {
-                PlayerMatch::Pid
-            } else {
-                PlayerMatch::NoPlayer
+            player: (playing || lone).then_some(stream),
+            player_match: match (playing, lone) {
+                (true, _) => PlayerMatch::Pid,
+                (_, true) => PlayerMatch::NoMpris,
+                _ => PlayerMatch::NoPlayer,
             },
             others_mixing: if self.changed { 2 } else { 0 },
             host_eq: self.changed || stages.is_some(),
@@ -767,6 +800,9 @@ struct Shared {
     /// How many slow [`Watcher`]s are held (the MQTT client): the route alone is read, every
     /// [`ROUTE_EVERY_SLOW`], while only these are held.
     slow: watch::Sender<usize>,
+    /// Asks the route watcher to read at once, not at its next period: the EQ view began to
+    /// vouch for stages while the kept route says no filter is in the path.
+    route_wake: tokio::sync::Notify,
     /// Where the route comes from, while a run has one: a one-shot `host` request reads it when
     /// no watcher keeps a route.
     routes: Mutex<Option<Arc<dyn Routes>>>,
@@ -858,6 +894,9 @@ pub(crate) trait EqSwitch: Send + Sync {
 
     /// Change the loudness: turn it on or off, or set its strength in percent.
     async fn loudness(&self, on: Option<bool>, strength_pct: Option<f64>) -> Result<(), String>;
+
+    /// Turn the bypass on or off, through the host's own `Bypass` op.
+    async fn bypass(&self, on: bool) -> Result<(), String>;
 }
 
 /// The computer's controller as the service holds it, reached when a switch is turned.
@@ -940,6 +979,21 @@ impl EqSwitch for SharedSwitch {
                     reference_now: None,
                     done: true,
                 },
+                &[],
+                |_| Vec::new(),
+                |_| async { Ok(()) },
+            )
+            .await
+            .map_err(|refusal| refusal.to_string())
+    }
+
+    async fn bypass(&self, on: bool) -> Result<(), String> {
+        let computer = locked(&self.0.computer)
+            .clone()
+            .ok_or_else(|| "computer controls unavailable: host audio is off".to_string())?;
+        computer
+            .eq_op(
+                HostEqOp::Bypass { on },
                 &[],
                 |_| Vec::new(),
                 |_| async { Ok(()) },
@@ -1054,6 +1108,7 @@ impl HostService {
                 view: watch::channel(HostView::default()).0,
                 watchers: watch::channel(0).0,
                 slow: watch::channel(0).0,
+                route_wake: tokio::sync::Notify::new(),
                 routes: Mutex::new(None),
                 shot: tokio::sync::Mutex::new(None),
                 holds: watch::channel(0).0,
@@ -1252,6 +1307,7 @@ impl HostService {
         if volume.is_some() {
             view.volume = volume;
         }
+        staged(&self.shared, &mut view);
         view
     }
 
@@ -1276,14 +1332,13 @@ impl HostService {
         route
     }
 
-    /// The route read now for the followed player, with the chain's stages; `None` with no route
-    /// reader or when the read finds nothing.
+    /// The route read now for the followed player, as read (its stages are told by [`staged`]);
+    /// `None` with no route reader or when the read finds nothing.
     async fn route_now(&self) -> Option<RouteFacts> {
         let routes = locked(&self.shared.routes).clone()?;
         let players = locked(&self.shared.players).clone();
         let player = players.and_then(|players| players.now_playing());
-        let route = routes.read(player).await?;
-        Some(with_stages(route, &self.shared))
+        routes.read(player).await
     }
 
     /// The computer's controls, or the sentence that says why there are none.
@@ -1670,10 +1725,12 @@ impl State {
     }
 
     /// The player is gone, so the route has no stream of its own to show: the stream and the
-    /// match go at once rather than at the next read.
+    /// match go at once rather than at the next read (a stream taken with no MPRIS player was
+    /// never the player's, and stays).
     fn lose_player_in_route(&mut self) {
         if self.now.is_none()
             && let Some(route) = self.route.as_mut()
+            && route.player_match != PlayerMatch::NoMpris
         {
             route.player = None;
             route.player_match = PlayerMatch::NoPlayer;
@@ -1731,6 +1788,8 @@ fn publish(shared: &Shared, view: HostView) {
             eq: current.eq.clone(),
             ..view
         };
+        let mut view = view;
+        staged(shared, &mut view);
         let same = HostView {
             now_ms: current.now_ms,
             ..view.clone()
@@ -1750,14 +1809,34 @@ fn stamped(view: HostView) -> HostView {
     }
 }
 
-/// The route with the stages of its filter chain, taken from the computer's EQ view where the
-/// route alone could not tell them apart.
-fn with_stages(mut route: RouteFacts, shared: &Shared) -> RouteFacts {
-    if route.host_eq && route.stages.is_none() {
-        let computer = locked(&shared.computer).clone();
-        route.stages = computer.and_then(|computer| ChainStages::of_view(&computer.eq_view()));
+/// `view` with the stages of the route's filter chain taken from the EQ view it carries, where the
+/// route alone could not tell them apart: the route is kept as it was read, and what it says of
+/// the chain (and `untouched` with it) is never older than that EQ view.
+fn staged(shared: &Shared, view: &mut HostView) {
+    let from_eq = locked(&shared.routes)
+        .as_ref()
+        .is_some_and(|routes| routes.stages_from_eq());
+    if let (true, Some(route), Some(eq)) = (from_eq, view.route.as_mut(), view.eq.as_ref())
+        && route.host_eq
+    {
+        route.stages = ChainStages::of_view(eq);
     }
-    route
+}
+
+/// Wakes the route watcher when `eq` is the first EQ view to vouch for stages (`was` did not)
+/// while the route `view` keeps says no filter is in the path: that route may be older than the
+/// filter, and only a read can tell. The route stays as it was read until the read lands.
+fn wake_route_if_unfiltered(
+    shared: &Shared,
+    view: &HostView,
+    was: Option<&svolder_host::eq::EqView>,
+    eq: &svolder_host::eq::EqView,
+) {
+    let kept_without_filter = view.route.as_ref().is_some_and(|route| !route.host_eq);
+    let vouches = |eq: &svolder_host::eq::EqView| ChainStages::of_view(eq).is_some();
+    if kept_without_filter && vouches(eq) && !was.is_some_and(vouches) {
+        shared.route_wake.notify_one();
+    }
 }
 
 /// A route read under way, ended with it.
@@ -1871,8 +1950,15 @@ async fn serve(
         tokio::select! {
             change = changes.next() => {
                 let Some(now) = change else { break };
+                let handed_over = state.now.is_some() != now.is_some();
                 state.now = now;
                 state.follow_cover(shared, generation);
+                if handed_over {
+                    // A player coming or going changes which stream the route calls the
+                    // player's (or none): read it again at once rather than at the next period.
+                    reading = None;
+                    last_read = None;
+                }
                 if state.now.is_none() {
                     reading = None;
                     state.lose_player_in_route();
@@ -1914,9 +2000,16 @@ async fn serve(
                     })));
                 }
             }
+            () = shared.route_wake.notified() => {
+                // The read in hand began before the EQ view changed: read again.
+                if watched && routes.is_some() {
+                    reading = None;
+                    last_read = None;
+                }
+            }
             route = finished_route(&mut reading), if reading.is_some() => {
                 reading = None;
-                state.route = route.map(|route| with_stages(route, shared));
+                state.route = route;
                 emit(&state);
             }
             () = tokio::time::sleep_until(cover_due.unwrap_or_else(Instant::now)),

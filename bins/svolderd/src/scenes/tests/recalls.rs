@@ -3,7 +3,6 @@
 
 //! Recalling a scene.
 
-use svolder_host::eq::LEVEL_HELD_NOTE;
 use svolder_ipc::socket::protocol::{PartStatus, SceneOp};
 
 use super::*;
@@ -503,10 +502,11 @@ async fn custom_shows_title_cased_in_a_note() {
     rig.daemon.shutdown().await;
 }
 
-/// The computer's notes are the outcome's: a level held for a stream that plays says so, and the
-/// part still counts as set.
+/// The computer's notes are the outcome's. A chain the daemon started has an identity config, so a
+/// softer scene recalled while a stream plays plays at its own level at once and holds nothing:
+/// the part is done with no note.
 #[tokio::test]
-async fn the_computer_outcome_passes_the_held_level_words() {
+async fn a_softer_computer_part_over_a_stream_holds_nothing_and_says_nothing() {
     let rig = Rig::new(Vec::new(), true, "").await;
     rig.chain.restarts_node_of(&rig.params);
     rig.add(&[
@@ -530,7 +530,58 @@ async fn the_computer_outcome_passes_the_held_level_words() {
         [(
             "computer".to_string(),
             PartStatus::Done,
-            vec![LEVEL_HELD_NOTE.to_string()]
+            Vec::<String>::new()
+        )]
+    );
+    rig.daemon.shutdown().await;
+}
+
+/// The command line applied a hot curve (the config holds it) and the daemon adopted the chain: a
+/// softer scene recalled while a stream plays goes live at the level that curve allows, and the
+/// computer's outcome carries the controller's held-level words; the part still counts as set.
+#[tokio::test]
+async fn the_computer_outcome_passes_the_held_level_words_of_an_adopted_chain() {
+    use svolder_host::eq::{HostEqState, Manager, Route};
+    let rig = Rig::new(Vec::new(), true, "").await;
+    let state = HostEqState {
+        on: true,
+        name: "Hot".into(),
+        origin: None,
+        target: "fake_sink".into(),
+        route: Route::Smart,
+        manager: Manager::Child,
+        previous_default: None,
+        preamp_db: -10.0,
+        filters: vec![pk(100.0, 10.0, 1.0)],
+        slots: vec![1],
+        crossfeed: None,
+        crossfeed_on: false,
+        flat: false,
+        speakers: None,
+        speakers_on: false,
+        speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
+        bypass: None,
+    };
+    let chain = FakeChain::with_state(state);
+    rig.daemon
+        .host()
+        .run_with_eq(chain.clone(), rig.params.clone());
+    rig.add(&[scene(
+        "Mild",
+        Some(computer_part("Mild", vec![pk(100.0, 2.0, 1.0)], 0.0)),
+        Vec::new(),
+    )])
+    .await;
+    rig.params.set_playing(true);
+    let done = outcomes(rig.recall("Mild").await);
+    assert_eq!(
+        done,
+        [(
+            "computer".to_string(),
+            PartStatus::Done,
+            vec![svolder_host::eq::LEVEL_HELD_NOTE.to_string()]
         )]
     );
     rig.daemon.shutdown().await;

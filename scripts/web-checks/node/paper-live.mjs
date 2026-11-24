@@ -427,6 +427,38 @@ await ok('the_host_and_the_fleet_draw_now_playing_and_the_title', () => {
   }
 });
 
+await ok('a_host_reading_that_changes_nothing_the_tone_draws_draws_no_tone', () => {
+  const drawn = [];
+  const real = SECTIONS.tone;
+  let words = 'climbing to 0.0 dB';
+  SECTIONS.tone = () => `<p>${words}</p>`;
+  try {
+    const { live, store, root, core } = rig();
+    core.computer.side = () => 'computer';
+    live.drawAll();
+    const box = root.boxes.tone;
+    let sets = 0;
+    let html = box.innerHTML;
+    Object.defineProperty(box, 'innerHTML', { get: () => html, set: (v) => { sets++; html = v; } });
+    // a climb's ticks: the host event comes again and again with the same words
+    for (let tick = 0; tick < 5; tick++) store.emit('host', { track: null });
+    assert.equal(sets, 0, 'the same words are not drawn again');
+    words = 'pass-through, untouched';
+    store.emit('host', { track: null });
+    assert.equal(sets, 1);
+    assert.equal(html, '<p>pass-through, untouched</p>');
+    // a held tone (a point in hand) is drawn again from the model when it is let go
+    live.freeze('tone', true);
+    html = '<p>edited by the hand</p>';
+    live.freeze('tone', false);
+    store.emit('host', { track: null });
+    assert.equal(html, '<p>pass-through, untouched</p>', 'what the hand did is not what was drawn');
+    drawn.push(sets);
+  } finally {
+    SECTIONS.tone = real;
+  }
+});
+
 await ok('readings_are_heard_until_the_signal_aborts', () => {
   const { live, store, controller } = rig();
   const heard = [];

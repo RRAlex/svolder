@@ -24,6 +24,10 @@ on a fake host (`SVOLDER_HOST=fake`, whose EQ and sink live in memory: no PipeWi
   the_same_preset_on_both_asks_and_yes_flattens_the_dac   recalling on the computer a preset the DAC
                                         plays asks; no sends nothing; yes repeats with confirm and
                                         the DAC is flat
+  the_bypass_round_trips                `actions.computer.setBypass`: with nothing playing the daemon
+                                        refuses in words (a toast, nothing held); with the EQ on it
+                                        turns the EQ off and holds it, `bypassOf` and `levelsOf` say
+                                        so, and off brings the EQ back
 Usage: python3 computer_core.py chromium|firefox"""
 import json
 import os
@@ -343,6 +347,46 @@ def both_sides(b, d):
           not any(r.get('on') and r['name'] == 'Warm' for r in dac['presets']['rows']), dac['presets'])
 
 
+def bypass_round_trip(b, d):
+    load(b, d)
+    poll(lambda: b.page(f'!!{COMPUTER}?.volume'))
+    page = '__core.model.page()'
+    check('the_bypass_round_trips: the model carries the bypass and the levels',
+          poll(lambda: b.page(f'!!({COMPUTER}?.eq?.bypass && {COMPUTER}?.eq?.levels)')),
+          b.page(f'JSON.stringify({COMPUTER}?.eq)')[:300])
+    bypass = lambda: b.page(f'__core.computer.bypassOf({page})')  # noqa: E731
+    run = lambda call: json.loads(b.page(f'(async () => JSON.stringify(await __core.actions.computer.{call}))()'))  # noqa: E731
+    check('the_bypass_round_trips: off at first, and nothing to bypass', bypass()['on'] is False
+          and bypass()['can'] is False, bypass())
+    refused = run('setBypass(true)')
+    check('the_bypass_round_trips: nothing playing is refused in words', refused.get('ok') is False
+          and 'nothing plays' in (refused.get('error') or ''), refused)
+    check('the_bypass_round_trips: and nothing is held after it', bypass()['on'] is False, bypass())
+    b.page("document.querySelectorAll('#toasts .toast').forEach((t) => t.remove())")
+    run("setMode('eq')")
+    check('the_bypass_round_trips: the EQ on can be bypassed',
+          poll(lambda: bypass()['can'] is True), bypass())
+    run('setBypass(true)')
+    check('the_bypass_round_trips: on turns the EQ off and holds it',
+          poll(lambda: b.page(f'{COMPUTER}.eq.bypass.on === true && {COMPUTER}.eq.on === false'
+                              f' && {COMPUTER}.eq.bypass.held.eq === true')), b.page(f'{COMPUTER}.eq.bypass'))
+    check('the_bypass_round_trips: bypassOf says on, with the held EQ',
+          bypass()['on'] is True and bypass()['held']['eq'] is True, bypass())
+    levels = b.page(f'__core.computer.levelsOf({page})')
+    check('the_bypass_round_trips: levelsOf shows the EQ off and the words are the daemon\'s',
+          levels['stages'][0]['on'] is False
+          and levels['words'] == b.page(f'{COMPUTER}.eq.levels.words'), levels)
+    run('setBypass(false)')
+    check('the_bypass_round_trips: off brings the EQ back',
+          poll(lambda: b.page(f'{COMPUTER}.eq.bypass.on === false && {COMPUTER}.eq.on === true')),
+          b.page(f'{COMPUTER}.eq.bypass'))
+    paths = [(p[0], p[1], p[2]) for p in b.page('window.__posts')]
+    posts = [(p[0], json.loads(p[1])) for p in paths if p[0] == 'api/v1/host/bypass']
+    check('the_bypass_round_trips: the bypass route got the three asks',
+          posts == [('api/v1/host/bypass', {'on': True})] * 2 + [('api/v1/host/bypass', {'on': False})]
+          or [b_[1] for b_ in posts] == [{'on': True}, {'on': True}, {'on': False}], posts)
+
+
 def one(name, fn, env=None, fleet=FLEET):
     d = common.Daemon('gungnir2-v2', host='fake', fleet=fleet, env=env or {})
     b = make()
@@ -357,6 +401,7 @@ def one(name, fn, env=None, fleet=FLEET):
 one('the_host_event_carries_the_computer', host_event)
 one('each_action_reaches_its_route', actions)
 one('a_stale_place_still_lands_on_the_point_dragged', slots)
+one('the_bypass_round_trips', bypass_round_trip)
 one('the_side_is_kept_and_a_flip_writes_nothing', kept_and_silent)
 one('unavailable_hides_nothing_but_says_why', unavailable, env={'SVOLDER_FAKE_HOST_EQ': 'off'})
 one('the_question_is_asked_with_keys_and_buttons', question)

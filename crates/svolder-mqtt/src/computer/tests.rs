@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use svolder_host::eq::crossfeed::{Model, ModelView};
-use svolder_host::eq::{CrossfeedView, LoudnessView, PointView, SpeakersView};
+use svolder_host::eq::{
+    BypassView, ChainLevels, CrossfeedView, LoudnessView, PointView, SpeakersView,
+};
 
 use super::*;
 
@@ -190,6 +192,8 @@ fn a_controller_without_crossfeed_announces_none_and_topics_of_lists_every_entit
             crossfeed: Some(xf_view(true, "meier", None)),
             speakers: Some(sp_view(false, None)),
             loudness: Some(ld_view(true, 35.0)),
+            bypass: Some(bypass_view(false)),
+            levels: Some(levels(0.0, 0.0, 0.0)),
             ..Default::default()
         };
         let announced: Vec<String> = entries_of(&desk(), "svolder", "homeassistant", commands, &eq)
@@ -914,4 +918,179 @@ fn the_legacy_state_topics_are_exactly_what_the_old_computer_kept_retained() {
     .map(|leaf| format!("{b}/{leaf}"))
     .collect();
     assert_eq!(legacy_state_topics("svolder"), want);
+}
+
+fn bypass_view(on: bool) -> BypassView {
+    BypassView {
+        on,
+        ..Default::default()
+    }
+}
+
+fn levels(total: f64, eq: f64, space: f64) -> ChainLevels {
+    ChainLevels {
+        total_db: total,
+        eq_db: eq,
+        space_db: space,
+        ..Default::default()
+    }
+}
+
+fn eq_with(bypass: Option<BypassView>, levels: Option<ChainLevels>) -> EqView {
+    EqView {
+        bypass,
+        levels,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn the_bypass_is_a_switch_with_commands_and_a_binary_sensor_without() {
+    let eq = eq_with(Some(bypass_view(false)), None);
+    let all = entries_of(&desk(), "svolder", "homeassistant", true, &eq);
+    let bypass = all.last().expect("the bypass entry");
+    assert_eq!(
+        bypass.topic,
+        "homeassistant/switch/svolder_computer_reframe/computer_bypass/config"
+    );
+    assert_eq!(bypass.payload["name"], "Bypass");
+    assert_eq!(
+        bypass.payload["unique_id"],
+        "svolder_computer_reframe_computer_bypass"
+    );
+    assert_eq!(
+        bypass.payload["command_topic"],
+        "svolder/computer_reframe/computer_bypass/set"
+    );
+    assert_eq!(
+        bypass.payload["state_topic"],
+        "svolder/computer_reframe/computer_bypass/state"
+    );
+    assert_eq!(bypass.payload["payload_on"], "ON");
+    assert_eq!(bypass.payload["payload_off"], "OFF");
+
+    let all = entries_of(&desk(), "svolder", "homeassistant", false, &eq);
+    let bypass = all.last().expect("the bypass entry");
+    assert_eq!(
+        bypass.topic,
+        "homeassistant/binary_sensor/svolder_computer_reframe/computer_bypass/config"
+    );
+    assert!(bypass.payload.get("command_topic").is_none());
+}
+
+#[test]
+fn the_levels_are_three_db_sensors_that_measure() {
+    let eq = eq_with(None, Some(levels(-14.8, -7.8, -7.0)));
+    for commands in [true, false] {
+        let all = entries_of(&desk(), "svolder", "homeassistant", commands, &eq);
+        let sensors = &all[all.len() - 3..];
+        let want = [
+            ("computer_level_chain", "Chain level"),
+            ("computer_level_eq", "EQ level"),
+            ("computer_level_space", "Space level"),
+        ];
+        for (entry, (key, name)) in sensors.iter().zip(want) {
+            assert_eq!(
+                entry.topic,
+                format!("homeassistant/sensor/svolder_computer_reframe/{key}/config")
+            );
+            assert_eq!(entry.payload["name"], name);
+            assert_eq!(entry.payload["unit_of_measurement"], "dB");
+            assert_eq!(entry.payload["state_class"], "measurement");
+            assert_eq!(entry.payload["suggested_display_precision"], 1);
+            assert!(entry.payload.get("command_topic").is_none());
+            assert_eq!(
+                entry.payload["state_topic"],
+                format!("svolder/computer_reframe/{key}/state")
+            );
+        }
+    }
+}
+
+#[test]
+fn a_view_without_the_fields_announces_none_of_them() {
+    let all = entries_of(
+        &desk(),
+        "svolder",
+        "homeassistant",
+        true,
+        &EqView::default(),
+    );
+    assert!(
+        all.iter()
+            .all(|e| !e.topic.contains("computer_bypass") && !e.topic.contains("computer_level"))
+    );
+    // Only the bypass, only the levels.
+    let bypass_only = eq_with(Some(bypass_view(true)), None);
+    let all = entries_of(&desk(), "svolder", "homeassistant", true, &bypass_only);
+    assert_eq!(
+        all.iter()
+            .filter(|e| e.topic.contains("computer_level"))
+            .count(),
+        0
+    );
+    assert_eq!(
+        all.iter()
+            .filter(|e| e.topic.contains("computer_bypass"))
+            .count(),
+        1
+    );
+    let levels_only = eq_with(None, Some(levels(0.0, 0.0, 0.0)));
+    let all = entries_of(&desk(), "svolder", "homeassistant", true, &levels_only);
+    assert_eq!(
+        all.iter()
+            .filter(|e| e.topic.contains("computer_level"))
+            .count(),
+        3
+    );
+    assert_eq!(
+        all.iter()
+            .filter(|e| e.topic.contains("computer_bypass"))
+            .count(),
+        0
+    );
+    // An empty prefix announces nothing; the sweep still knows every topic, both ways.
+    assert!(
+        entries_of(
+            &desk(),
+            "svolder",
+            "",
+            true,
+            &eq_with(Some(bypass_view(true)), Some(levels(0.0, 0.0, 0.0)))
+        )
+        .is_empty()
+    );
+    for (commands, component) in [(true, "switch"), (false, "binary_sensor")] {
+        let topics = topics_of(&desk(), "homeassistant", commands);
+        for want in [
+            format!("homeassistant/{component}/svolder_computer_reframe/computer_bypass/config"),
+            "homeassistant/sensor/svolder_computer_reframe/computer_level_chain/config".into(),
+            "homeassistant/sensor/svolder_computer_reframe/computer_level_eq/config".into(),
+            "homeassistant/sensor/svolder_computer_reframe/computer_level_space/config".into(),
+        ] {
+            assert!(topics.contains(&want), "{want}");
+        }
+    }
+}
+
+#[test]
+fn the_bypass_and_level_states_and_commands_parse() {
+    assert_eq!(bypass::state(&bypass_view(true)), "ON");
+    assert_eq!(bypass::state(&bypass_view(false)), "OFF");
+    assert_eq!(
+        bypass::levels_state(&levels(-14.84, -7.76, -7.0)),
+        ["-14.8", "-7.8", "-7.0"]
+    );
+    let mut said = levels(-14.84, -7.76, -7.0);
+    said.words = "plays \u{2212}14.8 dB in all".into();
+    let attributes: serde_json::Value =
+        serde_json::from_str(&bypass::levels_attributes(&said)).unwrap();
+    assert_eq!(attributes["words"], "plays \u{2212}14.8 dB in all");
+    assert_eq!(attributes["untouched"], false);
+    // A tiny negative level reads as zero, never `-0.0`.
+    assert_eq!(bypass::levels_state(&levels(-0.04, 0.0, 0.0))[0], "0.0");
+    assert_eq!(bypass::level_text(3.25), "3.3");
+    assert_eq!(parse(" on "), Some(true));
+    assert_eq!(parse("OFF"), Some(false));
+    assert_eq!(parse("toggle"), None);
 }

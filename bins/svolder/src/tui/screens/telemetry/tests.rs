@@ -84,7 +84,7 @@ fn the_telemetry_screen_lists_every_reading_labelled_aged_and_rated() {
         13
     ];
     let mut expected = vec![
-        " svolder  Gungnir 2 · fw 3  ● connected                           mouse:on 14:02",
+        " svolder  Gungnir 2 · fw 3  ● connected                          mouse:on 14:02 ",
         "─ Controls ── EQ ──┤ Telemetry ├── Devices ───────────────── ? help ─ esc back ─",
         "┌ Telemetry ──────────────────────────────────────────── refresh ─ 6 functions ┐",
         "│   ID       Type  Value       Label                               Age  Rate   │",
@@ -655,7 +655,7 @@ fn graph_app() -> App {
 #[test]
 fn the_telemetry_screen_draws_a_graph_column_at_80_by_24() {
     let expected = [
-        " svolder  Gungnir 2  ● connected                                  mouse:on 14:02",
+        " svolder  Gungnir 2  ● connected                                 mouse:on 14:02 ",
         "─ Controls ── EQ ──┤ Telemetry ├── Devices ───────────────── ? help ─ esc back ─",
         "┌ Telemetry ──────────────────────────────────────────── refresh ─ 4 functions ┐",
         "│   ID       Type  Value       Label           History             Age  Rate   │",
@@ -688,7 +688,7 @@ fn the_telemetry_screen_draws_a_graph_column_at_80_by_24() {
 fn the_telemetry_screen_draws_a_wider_graph_column_at_120_by_24() {
     let expected = [
         " █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀                                                                                         ",
-        " ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    Gungnir 2  ● connected                                                   mouse:on 14:02",
+        " ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    Gungnir 2  ● connected                                                  mouse:on 14:02 ",
         "─ Controls ── EQ ──┤ Telemetry ├── Devices ───────────────────────────────────────────────────────── ? help ─ esc back ─",
         "┌ Telemetry ──────────────────────────────────────────────────────────────────────────────────── refresh ─ 4 functions ┐",
         "│    ID       Type  Value       Label                           History                                   Age  Rate    │",

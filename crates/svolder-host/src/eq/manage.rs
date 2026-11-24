@@ -110,6 +110,12 @@ pub struct ApplyRequest {
     /// choice is not virtual speakers. The state keeps the set's id (and `speakers_on`) when
     /// given, else the ones it had.
     pub speakers: Option<SpeakersConf>,
+    /// The config is the IDENTITY: every slot flat and no stage, with this preamp (the one the
+    /// first live line carries), while `correction` stays the EQ's own points. The curve and the
+    /// stages reach the chain live, so a rebuild of its graph (a sample-rate change) puts back a
+    /// flat chain under the last preamp sent, never a curve under a preamp that rose. `None`
+    /// writes the points into the config, for a PipeWire that takes no live changes.
+    pub identity: Option<f64>,
 }
 
 /// The virtual speakers' stage in a config (see [`ApplyRequest::speakers`]).
@@ -769,6 +775,8 @@ impl Host {
                 .map(|speakers| speakers.id.clone()),
             // The loudness's settings stay across an apply.
             loudness: previous.as_ref().and_then(|s| s.loudness),
+            // The bypass's held set stays too: a start over it drops it when a stage is on.
+            bypass: previous.as_ref().and_then(|s| s.bypass),
         };
         // The process manager keeps its pid in the runtime directory, so one that has none is
         // refused here, before anything changes.
@@ -1452,6 +1460,7 @@ pub(crate) fn checked_request(
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     });
     if request.correction.filters.len() > SLOTS {
         return Err(trouble(
@@ -1538,15 +1547,22 @@ pub(crate) fn conf_text(
     request: &ApplyRequest,
 ) -> String {
     let rate = request.rate_hz.unwrap_or(CONFIG_RATE_HZ);
-    let (points, eq_preamp) = match request.flat {
-        true => (
+    let (points, eq_preamp) = match (request.flat, request.identity) {
+        (_, Some(db)) => (
+            Points {
+                filters: Vec::new(),
+                slots: Vec::new(),
+            },
+            db,
+        ),
+        (true, None) => (
             Points {
                 filters: Vec::new(),
                 slots: Vec::new(),
             },
             0.0,
         ),
-        false => (points.clone(), preamp_db),
+        (false, None) => (points.clone(), preamp_db),
     };
     let (stage, preamp) = match &request.crossfeed {
         // The request was checked ([`checked_request`]): the stage holds at this rate.

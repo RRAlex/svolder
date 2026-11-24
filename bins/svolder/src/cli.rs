@@ -718,6 +718,22 @@ pub(crate) enum HostCommand {
         #[command(subcommand)]
         command: Option<HostLoudnessCommand>,
     },
+    /// Turn every stage of the computer off in one change, and bring them back as they were
+    ///
+    /// With no verb, print one line: whether the bypass is on, which stages it brings back, and
+    /// what the chain plays at. `on` turns off the EQ, the loudness, the crossfeed and the
+    /// speakers that play and remembers them (the sound is then the pass-through, which climbs
+    /// toward 0 dB); `off` brings back exactly those, the preamp falling at once to the level they
+    /// play at.
+    /// Turning any stage on from anywhere ends the bypass. Needs a running daemon to change;
+    /// without one only the held stages show.
+    Bypass {
+        /// Print the bypass and the levels as one JSON object
+        #[arg(long, global = true)]
+        json: bool,
+        #[command(subcommand)]
+        command: Option<HostBypassCommand>,
+    },
     /// Two virtual speakers on headphones, through the daemon
     ///
     /// Two choices: "With room · BRIR" (the speakers in a measured room) and "No room · HRTF"
@@ -732,6 +748,14 @@ pub(crate) enum HostCommand {
         #[command(subcommand)]
         command: Option<HostSpeakersCommand>,
     },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum HostBypassCommand {
+    /// Turn every stage that plays off, remembering which
+    On,
+    /// Bring back the stages the bypass turned off
+    Off,
 }
 
 #[derive(Subcommand)]

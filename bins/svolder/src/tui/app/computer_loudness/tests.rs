@@ -65,24 +65,24 @@ fn the_section_is_absent_where_the_view_has_no_loudness() {
 }
 
 #[test]
-fn the_tone_screen_walks_the_chain_in_order_and_tab_has_a_stop_per_section() {
+fn the_loudness_panel_walks_its_three_rows_and_tab_has_a_stop_per_stage() {
     let mut app = app_on(Screen::Tone, true, 50.0);
     app.host.computer.eq.as_mut().expect("a view").crossfeed = None;
+    press(&mut app, KeyCode::Char('L'));
+    assert_eq!(app.tone.row, ToneRow::Ld(Ld::On));
     let mut seen = Vec::new();
-    for _ in 0..5 {
+    for _ in 0..3 {
         press(&mut app, KeyCode::Down);
         seen.push(app.tone.row);
     }
     assert_eq!(
         seen,
         [
-            ToneRow::Point(0),
-            ToneRow::Point(1),
             ToneRow::Ld(Ld::Strength),
             ToneRow::Ld(Ld::Reference),
             ToneRow::Ld(Ld::Reference),
         ],
-        "this view has no crossfeed rows: the walk stops at the last row"
+        "the walk stops at the last row"
     );
     app.tone.row = ToneRow::Mode;
     let mut tabs = Vec::new();
@@ -91,22 +91,18 @@ fn the_tone_screen_walks_the_chain_in_order_and_tab_has_a_stop_per_section() {
         tabs.push(app.tone.row);
     }
     assert!(matches!(tabs[0], ToneRow::Point(_)));
-    assert_eq!(tabs[1], ToneRow::Ld(Ld::Strength));
+    assert_eq!(tabs[1], ToneRow::Ld(Ld::On));
     assert_eq!(tabs[2], ToneRow::Mode);
 }
 
 #[test]
-fn loudness_comes_before_crossfeed_in_the_walk_and_in_tab() {
+fn loudness_comes_before_the_space_stage_in_tab() {
     let mut app = app_on(Screen::Tone, true, 50.0);
     app.tone.row = ToneRow::Point(1);
-    press(&mut app, KeyCode::Down);
-    press(&mut app, KeyCode::Down);
-    assert_eq!(app.tone.row, ToneRow::Ld(Ld::Reference));
-    press(&mut app, KeyCode::Down);
-    assert_eq!(app.tone.row, ToneRow::Crossfeed(Xf::Preset));
-    app.tone.row = ToneRow::Ld(Ld::Strength);
     press(&mut app, KeyCode::Tab);
-    assert_eq!(app.tone.row, ToneRow::Crossfeed(Xf::Preset));
+    assert_eq!(app.tone.row, ToneRow::Ld(Ld::On));
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.tone.row, ToneRow::Crossfeed(Xf::Space));
 }
 
 #[test]
@@ -172,8 +168,8 @@ fn the_reference_row_steps_the_reference_and_r_takes_the_current_volume() {
 }
 
 #[test]
-fn space_and_enter_turn_it_on_and_off() {
-    let mut app = app_on(Screen::Tone, false, 50.0);
+fn space_and_enter_turn_it_on_and_off_on_the_device_pane() {
+    let mut app = app_on(Screen::Device, false, 50.0);
     app.focus_ld(Ld::Strength);
     for key in [KeyCode::Char(' '), KeyCode::Enter] {
         assert_eq!(
@@ -185,7 +181,8 @@ fn space_and_enter_turn_it_on_and_off() {
     app.focus_ld(Ld::Strength);
     assert_eq!(
         op(&press(&mut app, KeyCode::Char(' '))),
-        only(Some(false), None, None, None)
+        only(Some(false), None, None, None),
+        "the space bar turns the stage off from any of its rows"
     );
 }
 
@@ -203,18 +200,64 @@ fn a_view_that_says_why_it_cannot_follow_still_takes_every_change() {
 }
 
 #[test]
-fn the_section_is_unfolded_exactly_while_the_keys_are_in_it_and_esc_folds_it() {
+fn esc_in_the_panel_goes_to_the_strip_and_the_device_pane_has_the_strength_row_alone() {
     let mut app = app_on(Screen::Tone, true, 50.0);
-    assert!(!app.ld_unfolded());
     app.focus_ld(Ld::Reference);
-    assert!(app.ld_unfolded());
     press(&mut app, KeyCode::Esc);
-    assert_eq!(app.tone.row, ToneRow::Mode);
-    assert!(!app.ld_unfolded());
-    // the device pane never unfolds: its row has the strength alone
+    assert_eq!(
+        app.tone.row,
+        ToneRow::Strip(crate::tui::app::Stage::Loudness)
+    );
     let mut app = app_on(Screen::Device, true, 50.0);
     app.focus_ld(Ld::Strength);
-    assert!(app.ld_row().is_some() && !app.ld_unfolded());
+    assert!(app.ld_row().is_some());
+    assert_eq!(app.ld_stops(), [Ld::Strength]);
+}
+
+#[test]
+fn enter_types_a_strength_or_a_reference_and_never_turns_loudness_off() {
+    let mut app = app_on(Screen::Tone, true, 50.0);
+    app.focus_ld(Ld::Reference);
+    assert!(
+        press(&mut app, KeyCode::Enter).is_empty(),
+        "Enter opens a line"
+    );
+    assert!(app.tone.xf_line.is_some());
+    for c in ['8', '0'] {
+        press(&mut app, KeyCode::Char(c));
+    }
+    assert_eq!(
+        op(&press(&mut app, KeyCode::Enter)),
+        only(None, None, Some(80.0), None)
+    );
+    app.focus_ld(Ld::Strength);
+    press(&mut app, KeyCode::Enter);
+    for c in ['7', '0'] {
+        press(&mut app, KeyCode::Char(c));
+    }
+    assert_eq!(
+        op(&press(&mut app, KeyCode::Enter)),
+        only(None, Some(70.0), None, None)
+    );
+    // an untouched line sends nothing, and Esc closes it
+    press(&mut app, KeyCode::Enter);
+    assert!(press(&mut app, KeyCode::Esc).is_empty());
+    assert!(app.tone.xf_line.is_none());
+}
+
+#[test]
+fn the_on_row_turns_it_on_and_off_with_the_arrows_enter_and_space() {
+    let mut app = app_on(Screen::Tone, false, 50.0);
+    app.focus_ld(Ld::On);
+    assert_eq!(
+        op(&press(&mut app, KeyCode::Right)),
+        only(Some(true), None, None, None)
+    );
+    assert!(press(&mut app, KeyCode::Left).is_empty(), "already off");
+    assert_eq!(
+        op(&press(&mut app, KeyCode::Enter)),
+        only(Some(true), None, None, None)
+    );
 }
 
 fn drag_op(done: bool, strength: f64) -> HostEqOp {
@@ -294,18 +337,18 @@ fn the_readout_is_the_views_numbers_and_shortens_to_fit() {
     let view = app.loudness_view().expect("loudness");
     assert_eq!(
         readout(view, false, true, 80),
-        "ref 100 % \u{b7} 35 %: bass +7.3 \u{b7} mids \u{2212}7.3 \u{b7} treble +2.1 dB"
+        "at 35 %: bass +7.3 \u{b7} mids \u{2212}7.3 \u{b7} treble +2.1 dB"
     );
     assert_eq!(
         readout(view, false, false, 80),
-        "ref 100 % \u{b7} 35 %: bass +7.3 \u{b7} mids \u{2212}7.3 dB"
+        "at 35 %: bass +7.3 \u{b7} mids \u{2212}7.3 dB"
     );
     assert_eq!(
         readout(view, false, false, 33),
-        "35 %: bass +7.3 \u{b7} mids \u{2212}7.3 dB"
+        "at 35 %: bass +7.3 \u{b7} mids \u{2212}7.3 dB"
     );
     assert_eq!(
-        readout(view, false, false, 25),
+        readout(view, false, false, 28),
         "bass +7.3 \u{b7} mids \u{2212}7.3 dB"
     );
     assert!(readout(view, true, false, 120).ends_with(DAC_HINT));
@@ -324,7 +367,7 @@ fn the_device_pane_row_comes_before_the_crossfeed_row() {
     press(&mut app, KeyCode::Down);
     assert_eq!(app.tone.row, ToneRow::Ld(Ld::Strength));
     press(&mut app, KeyCode::Down);
-    assert_eq!(app.tone.row, ToneRow::Crossfeed(Xf::Preset));
+    assert_eq!(app.tone.row, ToneRow::Crossfeed(Xf::Space));
 }
 
 #[test]

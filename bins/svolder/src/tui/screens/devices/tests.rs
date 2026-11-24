@@ -76,7 +76,7 @@ fn daemon_rows() -> Vec<DeviceRow> {
 #[test]
 fn the_device_list_names_every_device_its_product_and_its_state() {
     let mut expected = vec![
-        " svolder  Gungnir 2  ● connected                                  mouse:on 14:02",
+        " svolder  Gungnir 2  ● connected                                 mouse:on 14:02 ",
         "─ Controls ── EQ ── Telemetry ──┤ Devices ├───────────────── ? help ─ esc back ─",
         "┌ Devices ───────────────────── new ─ update ─ b identify ─ x remove ─ refresh ┐",
         "│ ▶ bifrost   Bifrost 3   connected                                            │",
@@ -203,7 +203,7 @@ fn the_editor_draws_the_device_over_the_list_it_is_about() {
     assert_rows(
         &frame(&editing(daemon_rows()), 80, 24),
         &[
-            " svolder  Gungnir 2  ● connected                                  mouse:on 14:02",
+            " svolder  Gungnir 2  ● connected                                 mouse:on 14:02 ",
             "─ Controls ── EQ ── Telemetry ──┤ Devices ├───────────────── ? help ─ esc back ─",
             "┌ Devices ───────────────────── new ─ update ─ b identify ─ x remove ─ refresh ┐",
             "│ ▶ bifrost   Bifrost 3   connected                                            │",
@@ -324,7 +324,7 @@ fn the_removal_asks_about_the_device_it_would_take_away() {
     assert_rows(
         &frame(&app, 80, 24),
         &[
-            " svolder  Gungnir 2  ● connected                                  mouse:on 14:02",
+            " svolder  Gungnir 2  ● connected                                 mouse:on 14:02 ",
             "─ Controls ── EQ ── Telemetry ──┤ Devices ├───────────────── ? help ─ esc back ─",
             "┌ Devices ───────────────────── new ─ update ─ b identify ─ x remove ─ refresh ┐",
             "│ ▶ bifrost   Bifrost 3   connected                                            │",

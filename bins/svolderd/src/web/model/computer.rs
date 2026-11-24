@@ -6,7 +6,9 @@
 //! whose tone control gives the built-in presets their bands.
 
 use serde::Serialize;
-use svolder_host::eq::{CrossfeedView, EqView, LoudnessView, SpeakersView};
+use svolder_host::eq::{
+    BypassView, ChainLevels, CrossfeedView, EqView, LoudnessView, SpeakersView,
+};
 use svolder_ipc::{DeviceInfo, HostView};
 use svolder_profiles::tone::apo::{Correction, SourceFilter};
 use svolder_profiles::tone::preset::{self, Preset};
@@ -70,6 +72,12 @@ pub(crate) struct EqModel {
     pub(crate) speakers: Option<SpeakersView>,
     /// The loudness as the host's own view gives it; none from a host that has none.
     pub(crate) loudness: Option<LoudnessView>,
+    /// What the chain plays at and the words for it, as the host's own view gives them; none
+    /// from a host that has none.
+    pub(crate) levels: Option<ChainLevels>,
+    /// The bypass as the host's own view gives it; none from a host that has none, and then the
+    /// page offers no bypass.
+    pub(crate) bypass: Option<BypassView>,
 }
 
 /// One preset the computer side lists.
@@ -146,6 +154,8 @@ fn eq_model(view: &EqView) -> EqModel {
         crossfeed: view.crossfeed.clone(),
         speakers: view.speakers.clone(),
         loudness: view.loudness.clone(),
+        levels: view.levels.clone(),
+        bypass: view.bypass.clone(),
     }
 }
 

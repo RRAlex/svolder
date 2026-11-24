@@ -214,10 +214,10 @@ fn a_device_with_no_tone_control_has_a_blank_preset_line() {
 }
 
 /// The computer side's Crossfeed row sits at the bottom of the pane whatever its height: the
-/// summary under it goes first when the pane is short, then the table's rows, scrolled to keep
-/// the focused point in view; the row itself always stays.
+/// Model and Preset rows under it go first when the pane is short, then the table's rows, scrolled
+/// to keep the focused point in view; the row itself always stays.
 #[test]
-fn a_short_tone_pane_gives_up_the_crossfeed_summary_first_and_the_row_stays() {
+fn a_short_tone_pane_gives_up_the_model_and_preset_rows_first_and_the_row_stays() {
     use crate::tui::app::Screen;
     let theme = Theme::new(false);
     let mut app = crate::tui::test_support::app_showing(Screen::Device);
@@ -231,19 +231,23 @@ fn a_short_tone_pane_gives_up_the_crossfeed_summary_first_and_the_row_stays() {
         let plain: Vec<String> = pane.lines.iter().map(|l| l.to_string()).collect();
         (pane.lines.len(), plain, pane.crossfeed.map(|row| row.line))
     };
-    // tall: blank, row, summary at the very bottom
+    // tall: blank, row, Model, Preset at the very bottom
     let (len, plain, row) = kinds(14);
     assert_eq!(len, 14, "{plain:#?}");
-    assert_eq!(row, Some(12));
-    assert!(plain[13].contains("37 %"), "{plain:#?}");
-    // 8 rows is the least that keeps the summary: 4 of head, a point, a blank, row, summary
-    let (len, plain, _) = kinds(8);
-    assert_eq!((len, plain[7].contains("37 %")), (8, true), "{plain:#?}");
-    // one row fewer: the summary goes, the row stays at the bottom, the point stays
-    let (len, plain, row) = kinds(7);
-    assert_eq!((len, row), (7, Some(6)), "{plain:#?}");
-    assert!(plain[6].contains("Crossfeed"), "{plain:#?}");
-    assert!(!plain.iter().any(|l| l.contains("37 %")));
+    assert_eq!(row, Some(11));
+    assert!(
+        plain[12].contains("Model") && plain[12].contains("Bauer"),
+        "{plain:#?}"
+    );
+    assert!(plain[13].contains("Preset"), "{plain:#?}");
+    // 9 rows is the least that keeps them: 4 of head, a point, a blank, row, Model, Preset
+    let (len, plain, _) = kinds(9);
+    assert_eq!((len, plain[7].contains("Model")), (9, true), "{plain:#?}");
+    // one row fewer: they go, the row stays at the bottom, the point stays
+    let (len, plain, row) = kinds(8);
+    assert_eq!((len, row), (8, Some(7)), "{plain:#?}");
+    assert!(plain[7].contains("Crossfeed"), "{plain:#?}");
+    assert!(!plain.iter().any(|l| l.contains("Model")));
     assert!(
         plain[4].contains("1000"),
         "the table keeps a row: {plain:#?}"
@@ -381,7 +385,7 @@ fn the_pane_s_space_and_crossfeed_rows_are_styled_as_the_target_choice() {
             target(&app)[0],
             "mono={mono} on at rest"
         );
-        app.focus_crossfeed(Xf::Preset);
+        app.focus_crossfeed(Xf::Space);
         let buffer = shot(&app);
         let row = "Crossfeed ‹";
         assert_eq!(style_of(&buffer, row, "on"), keys[0], "mono={mono} on keys");
@@ -396,10 +400,10 @@ fn the_pane_s_space_and_crossfeed_rows_are_styled_as_the_target_choice() {
             "mono={mono} pad"
         );
         assert!(
-            !style_of(&buffer, row, "Bauer")
+            !style_of(&buffer, "Model ", "Bauer")
                 .2
                 .contains(Modifier::REVERSED),
-            "the model words are not boxed"
+            "the model words are not boxed while the Space row has the keys"
         );
     }
 }

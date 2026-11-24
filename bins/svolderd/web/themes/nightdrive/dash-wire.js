@@ -85,7 +85,7 @@ export function wireDash({
     const at = Date.now();
     const comp = core.computer.view();
     drawSwitch(comp);
-    const html = drawDash(model, view, at, comp);
+    const html = drawDash(model, view, at, comp, core.computer.bypassOf(model));
     const sig = sigOf(html);
     if (sig === drawn.sig) {
       // the same keys: only the progress moves, in place
@@ -262,6 +262,11 @@ export function wireDash({
     if (el.matches(STEPS)) {
       // A press of the pointer stepped already; a click with no pointer is a key: one step.
       if (event.detail === 0) nudge(what === 'volume-up' ? 1 : -1);
+      return;
+    }
+    if (what === 'bypass') {
+      const on = el.getAttribute('aria-pressed') !== 'true';
+      write('bypass', on, (a) => a.computer.setBypass(on));
       return;
     }
     if (what === 'eq') {

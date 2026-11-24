@@ -447,6 +447,78 @@ struct World {
     /// The next reads of the node alone (the session's `pw-dump <id>` before each line) find
     /// nothing: the read did not answer in time. The line is not written.
     fail_key_reads: u8,
+    /// The level the node played at when it was last asked (its id, serial and dB), for the rule
+    /// that the level never rises by more than [`LEVEL_RISE_DB`] between two states.
+    level_last: Option<(u32, u64, f64)>,
+    /// A rise in the level is allowed until this time on the world's clock: a hand edit, a
+    /// preset load or apply, a scene recall, a stage or the EQ turned on, and the lines that
+    /// follow them (see [`exempts`]).
+    rise_ok_until_ms: u64,
+    /// The node a line has landed on (its id and serial): the first line a node takes that turns
+    /// the speakers' mixers wet gives back what the config's dry mixers play over the wet ones
+    /// (the config's preamp is lower by the set's level), a dip and a rise the rule leaves out.
+    first_line_of: Option<(u32, u64)>,
+}
+
+/// The most the level the chain plays at (the preamp in dB plus the speakers' level while their
+/// mixers are wet) may rise between two states of the same node, every line boundary, event and
+/// tick included: a change that raises it climbs at 0.32 dB a tick, and a rise bigger than this
+/// is a jump. The sum is read from f32 ports, so the margin holds a hair of rounding.
+const LEVEL_RISE_DB: f64 = 0.5 + 0.02;
+
+/// How long after an event that may raise the level at once the rule is off, in ms: the lines it
+/// leaves (a repeat a tick or two later) belong to it.
+const RISE_GRACE_MS: u64 = 200;
+
+/// The level `node` plays at: its preamp and the speakers' share.
+fn level_of(node: &Node) -> f64 {
+    let (_, pre_db) = played(node, 'l');
+    pre_db + speakers_db(node, 'l')
+}
+
+/// The rule that the level never rises by more than [`LEVEL_RISE_DB`] between two states of one
+/// node. `last` holds the level seen before; a node that is another one starts afresh.
+fn level_step(
+    last: &mut Option<(u32, u64, f64)>,
+    node: &Node,
+    exempt: bool,
+    at: &str,
+) -> Option<String> {
+    let now = level_of(node);
+    let before = last.replace((node.id, node.serial, now));
+    let (id, serial, was) = before?;
+    ((id, serial) == (node.id, node.serial) && !exempt && now - was > LEVEL_RISE_DB).then(|| {
+        format!(
+            "node {id} jumps {:+.3} dB in the level it plays at ({was:+.3} to {now:+.3} dB) {at}",
+            now - was
+        )
+    })
+}
+
+/// Whether `event` may raise the level at once: a hand edit, a preset load or apply, a scene
+/// recall, a stage or the EQ turned on, a node that starts afresh, and a daemon that reads or
+/// takes over what another process wrote.
+fn exempts(event: &Event) -> bool {
+    match event {
+        Event::Drag { .. }
+        | Event::Add(_)
+        | Event::Remove { .. }
+        | Event::Load { .. }
+        | Event::Cli { .. }
+        | Event::Reload
+        | Event::NodeRestart
+        | Event::DaemonRestart
+        | Event::Takeover { .. }
+        | Event::Scene(_) => true,
+        // Loudness never moves the level (it is no part of it): only turning it on counts as a
+        // stage turned on.
+        Event::Loudness { on, .. } => *on == Some(true),
+        Event::Toggle(on) => *on,
+        Event::Crossfeed { on, .. } => *on != Some(false),
+        Event::Speakers { on, .. } => *on != Some(false),
+        Event::Bypass(on) => !*on,
+        _ => false,
+    }
 }
 
 /// The ids the model gives new nodes.
@@ -643,6 +715,7 @@ impl World {
                 .map(|speakers| speakers.id.clone()),
             crossfeed_loaded: None,
             loudness: None,
+            bypass: None,
         };
         Ok((state, parse_conf(&text)))
     }
@@ -691,6 +764,12 @@ impl World {
         let repair = lands && std::mem::take(&mut self.repair_owed);
         self.repair_owed |= !lands;
         let rate = self.sink_rate;
+        let first_line = lands
+            && self.node.as_ref().is_some_and(|node| {
+                node.id == id
+                    && self.first_line_of.replace((node.id, node.serial))
+                        != Some((node.id, node.serial))
+            });
         let mut part_way = Vec::new();
         match self.node.as_mut() {
             Some(node) if node.id == id => {
@@ -720,6 +799,26 @@ impl World {
                     for (at, (name, value)) in params.iter().enumerate() {
                         if node.ports.contains_key(name) {
                             node.ports.insert(name.clone(), held_value(name, *value));
+                        }
+                        // At each boundary between kinds of port and at the end of the line, as the
+                        // unity rule is: the mixers' three ports are one state.
+                        if (at + 1 == params.len() || kinds.get(at + 1) != Some(&kinds[at]))
+                            && let Some(jump) = level_step(
+                                &mut self.level_last,
+                                node,
+                                self.clock_ms < self.rise_ok_until_ms
+                                    || repair
+                                    || (first_line
+                                        && params.iter().any(|(n, v)| {
+                                            port_kind(n) == PORT_SPEAKERS
+                                                && (n.ends_with(":Gain 2")
+                                                    || n.ends_with(":Gain 3"))
+                                                && *v > 0.0
+                                        })),
+                                &format!("part way through a line, after {name}"),
+                            )
+                        {
+                            part_way.push(jump);
                         }
                         let last = at + 1 == params.len();
                         if (!repair || self.check_repairs)
@@ -1348,6 +1447,8 @@ pub enum Event {
     /// A scene's computer part is recalled: the EQ, loudness, crossfeed and the virtual speakers
     /// set as one change.
     Scene(Box<ComputerPart>),
+    /// The bypass goes on or off: every stage off as one change, or brought back.
+    Bypass(bool),
 }
 
 fn filter(rng: &mut Rng, hand: bool) -> SourceFilter {
@@ -1604,6 +1705,55 @@ pub fn generate_scene(seed: u64, len: usize) -> Vec<Event> {
         .collect()
 }
 
+/// The climb profile: a stream plays through a chain with the EQ and stages on, and the events
+/// that raise the level (stages off, the EQ off, the bypass) come among rate changes up to 768 kHz,
+/// rebuilds, node restarts, `pw-cli` deaths and time. Its own stream of numbers, so no older
+/// profile's seeds move.
+pub fn generate_climb(seed: u64, len: usize) -> Vec<Event> {
+    let mut rng = Rng::new(seed ^ 0xC11B_C11B_0A0A_3232);
+    let mut events = vec![Event::Toggle(true), Event::Playing(true)];
+    events.extend((0..len).map(|_| match rng.below(100) {
+        0..=27 => Event::Ticks(1 + rng.below(30) as u32),
+        28..=31 => Event::Playing(rng.chance(80)),
+        32..=41 => Event::Crossfeed {
+            on: Some(rng.chance(50)),
+            model: rng.chance(40).then(|| rng.below(4) as usize),
+            amount_pct: None,
+            delay_ms: None,
+            done: true,
+        },
+        42..=49 => Event::Speakers {
+            on: Some(rng.chance(50)),
+            set: rng.chance(50).then(|| rng.below(2) as usize),
+        },
+        50..=57 => Event::Toggle(rng.chance(50)),
+        58..=65 => Event::Bypass(rng.chance(55)),
+        66..=71 => Event::Loudness {
+            on: Some(rng.chance(50)),
+            strength_pct: None,
+            reference_pct: None,
+            reference_now: false,
+            done: true,
+        },
+        72..=77 => Event::Rate(rng.pick(&HIGH_RATES)),
+        78..=80 => Event::Rate(rng.pick(&RATES)),
+        81..=83 => Event::SlotRevert,
+        84..=86 => Event::NodeRestart,
+        87..=89 => Event::CliDeath {
+            after_line: match rng.below(3) {
+                0 => None,
+                1 => Some(true),
+                _ => Some(false),
+            },
+        },
+        _ => {
+            let roll = rng.below(100);
+            event_for(&mut rng, roll)
+        }
+    }));
+    events
+}
+
 /// The event a `roll` of 0 to 99 stands for, with its fields drawn from `rng`.
 fn event_for(rng: &mut Rng, roll: u64) -> Event {
     match roll {
@@ -1854,6 +2004,12 @@ struct Lab {
     scene: Option<ComputerPart>,
     /// The scene's liveness rule has been checked since then.
     scene_checked: bool,
+    /// The climb in progress: when it was first seen with this target (the world's clock), the
+    /// target preamp, and how long it has to reach it.
+    climb_seen: Option<(u64, f64, u64, f64)>,
+    /// The event being run may raise the level at once ([`exempts`]): its own ticks do not end
+    /// the window.
+    exempt_event: bool,
 }
 
 /// Why a sequence failed.
@@ -1921,6 +2077,9 @@ impl Lab {
             volume: 1.0,
             muted: false,
             fail_key_reads: 0,
+            level_last: None,
+            rise_ok_until_ms: 0,
+            first_line_of: None,
         }));
         let control = new_control(&shared);
         Lab {
@@ -1936,6 +2095,8 @@ impl Lab {
             ld_checked: false,
             scene: None,
             scene_checked: false,
+            climb_seen: None,
+            exempt_event: false,
         }
     }
 
@@ -1943,6 +2104,24 @@ impl Lab {
     fn check(&mut self) -> Result<(), Failure> {
         let (broken, played) = {
             let mut world = world(&self.shared);
+            let exempt = world.clock_ms < world.rise_ok_until_ms;
+            let jump = match world.node.take() {
+                Some(node) => {
+                    let jump = level_step(
+                        &mut world.level_last,
+                        &node,
+                        exempt,
+                        "after an event or a tick",
+                    );
+                    world.node = Some(node);
+                    jump
+                }
+                None => {
+                    world.level_last = None;
+                    None
+                }
+            };
+            world.broken.extend(jump);
             let broken = world.broken.pop();
             let played = world.node.as_ref().map(|node| {
                 (
@@ -2005,11 +2184,77 @@ impl Lab {
         for _ in 0..count {
             world(&self.shared).clock_ms += 50;
             self.control.tick().await;
+            self.climb_liveness()?;
+            if !self.exempt_event {
+                self.end_rise_window();
+            }
             self.daemon_ticks += 1;
             if self.daemon_ticks.is_multiple_of(20) {
+                let loads = self.control.loads();
                 self.reload()?;
+                if self.control.loads() != loads {
+                    // What another process wrote is read as an apply is: its lines may raise.
+                    let mut world = world(&self.shared);
+                    world.rise_ok_until_ms = world
+                        .rise_ok_until_ms
+                        .max(world.clock_ms + 4 * RISE_GRACE_MS);
+                }
             }
             self.check()?;
+        }
+        Ok(())
+    }
+
+    /// A rise in the level is allowed through an event that may make one and for as long as the
+    /// controller still owes the chain a line for it (a node not listed yet, a `pw-cli` that is
+    /// being started again), and a moment after.
+    fn end_rise_window(&mut self) {
+        let pending = self.control.lines_pending();
+        let mut world = world(&self.shared);
+        if world.rise_ok_until_ms == u64::MAX && !pending {
+            world.rise_ok_until_ms = world.clock_ms + RISE_GRACE_MS;
+        }
+    }
+
+    /// The climb's liveness rule: a climb reaches its target within (the rise over 0.32 dB) ticks
+    /// and two seconds of being first seen with that target, and the second a dead `pw-cli` waits
+    /// before it is started again.
+    fn climb_liveness(&mut self) -> Result<(), Failure> {
+        let (now, disturbed) = {
+            let world = world(&self.shared);
+            (world.clock_ms, world.disturbed())
+        };
+        match self.control.climb_progress() {
+            // A fault armed or under way (a refused send, a `pw-cli` being started again) holds
+            // the climb up: the budget starts again when it is over, as every liveness rule's does.
+            Some(_) if disturbed => self.climb_seen = None,
+            Some((level, to)) => match self.climb_seen {
+                // A level under the one last seen is a climb that began again when an event other
+                // than time going by ran since the budget started (a toggle that cut the preamp
+                // anew): its rise is counted from its own start. A level that only falls with
+                // ticks is a climb that is being cut and restarted, and keeps its budget.
+                Some((since, target, budget, last))
+                    if (target - to).abs() < 1e-6
+                        && (level >= last - 1e-9 || self.quiet_since_ms <= since) =>
+                {
+                    self.climb_seen = Some((since, target, budget, level));
+                    if now - since > budget {
+                        return Err(Failure {
+                            event: self.at,
+                            what: format!(
+                                "a climb to {to:+.2} dB is still at {level:+.2} dB after {} ms",
+                                now - since
+                            ),
+                        });
+                    }
+                }
+                _ => {
+                    let ticks = ((to - level).max(0.0) / super::LEVEL_CLIMB_DB_PER_TICK).ceil();
+                    self.climb_seen =
+                        Some((now, to, ticks as u64 * 50 + 2_000 + RESTART_GAP_MS, level));
+                }
+            },
+            None => self.climb_seen = None,
         }
         Ok(())
     }
@@ -2021,7 +2266,14 @@ impl Lab {
         if !matches!(event, Event::Ticks(_) | Event::Reload) {
             self.scene = None;
         }
-        self.run_event(event).await?;
+        self.exempt_event = exempts(event);
+        if self.exempt_event {
+            world(&self.shared).rise_ok_until_ms = u64::MAX;
+        }
+        let ran = self.run_event(event).await;
+        self.exempt_event = false;
+        self.end_rise_window();
+        ran?;
         match event {
             Event::Ticks(_) => {
                 // Before the liveness rule, which turns on an EQ that is off with a playable
@@ -2508,6 +2760,7 @@ impl Lab {
                     flat: false,
                     crossfeed: None,
                     speakers: None,
+                    identity: None,
                 };
                 // The daemon is not blocked by the command line: it ticks in the wait.
                 let staged = World::stage_apply(request);
@@ -2645,6 +2898,9 @@ impl Lab {
                 }
             }
             Event::DaemonRestart => self.daemon_restart()?,
+            Event::Bypass(on) => {
+                let _ = self.control.bypass(*on).await;
+            }
         }
         self.check()
     }
@@ -2755,6 +3011,13 @@ pub fn sequence_of_scene(seed: u64) -> (u32, Vec<Event>) {
     let mut rng = Rng::new(seed ^ 0x5CE9_0A0A_F0F0);
     let len = 20 + rng.below(50) as usize;
     (start_rate(seed), generate_scene(seed, len))
+}
+
+/// The events of `seed` from the climb profile ([`generate_climb`]), as the lab runs them.
+pub fn sequence_of_climb(seed: u64) -> (u32, Vec<Event>) {
+    let mut rng = Rng::new(seed ^ 0xC11B_0A0A_F0F0_1111);
+    let len = 20 + rng.below(50) as usize;
+    (start_rate(seed), generate_climb(seed, len))
 }
 
 /// `events` with as many removed as still fail the same way: chunks first, then one by one.
@@ -2904,6 +3167,11 @@ pub fn run_loudness_seeds(first: u64, runs: u64, ids: Ids) -> Vec<String> {
 /// [`run_seeds`] on the scene profile ([`generate_scene`]).
 pub fn run_scene_seeds(first: u64, runs: u64, ids: Ids) -> Vec<String> {
     run_block(first, runs, sequence_of_scene, ids)
+}
+
+/// [`run_seeds`] on the climb profile ([`generate_climb`]).
+pub fn run_climb_seeds(first: u64, runs: u64, ids: Ids) -> Vec<String> {
+    run_block(first, runs, sequence_of_climb, ids)
 }
 
 fn run_block(

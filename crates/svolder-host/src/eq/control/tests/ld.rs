@@ -615,6 +615,7 @@ async fn an_owner_start_with_loudness_on_keeps_it_on_and_sends_it_at_the_first_l
             on: true,
             ..LoudnessSettings::default()
         }),
+        bypass: None,
     };
     let chain = FakeChain::with_state(state);
     let params = FakeParams::new();
@@ -711,7 +712,7 @@ async fn a_chain_without_the_stage_is_rebuilt_once_at_turn_on() {
 
 #[tokio::test]
 async fn a_held_recall_lifted_once_idle_carries_the_stage_under_the_curves_own_preamp() {
-    let (mut control, chain, params) = setup(Keep::Memory);
+    let (mut control, chain, params) = setup_curve(Keep::Memory);
     chain.restarts_node_of(&params);
     params.with_loudness_ports();
     params.set_level(Some(level(50.0)));
@@ -880,6 +881,7 @@ async fn adopting_a_flat_state_with_loudness_on_owes_no_removal() {
             on: true,
             ..LoudnessSettings::default()
         }),
+        bypass: None,
     };
     let chain = FakeChain::with_state(state);
     let (mut control, params) = {
@@ -1008,7 +1010,7 @@ async fn every_part_of_a_line_plays_the_stage_under_unity_both_ways() {
         ..ld(true)
     };
     // Deeper, shallower, a rebuild while shallower, deeper again, then a graceful stop.
-    let (mut control, _chain, params) = setup(Keep::Memory);
+    let (mut control, _chain, params) = setup_curve(Keep::Memory);
     params.with_loudness_ports();
     params.set_level(Some(level(100.0)));
     control.loudness(strong(true)).await.unwrap();
@@ -1032,7 +1034,8 @@ async fn every_part_of_a_line_plays_the_stage_under_unity_both_ways() {
     assert!(carries(params.sent().last().unwrap(), 0.0, 48_000));
     parts_under_unity(&identity, &params.sent(), &[reset], 48_000);
 
-    // Loudness off as the chain's last reason, a stream playing: the pass-through line snaps it.
+    // Loudness off as the chain's last reason, a stream playing: the pass-through glides it to the
+    // identity a step a tick.
     let (mut control, _chain, params) = setup(Keep::Memory);
     params.with_loudness_ports();
     params.set_level(Some(level(3.0)));
@@ -1041,11 +1044,10 @@ async fn every_part_of_a_line_plays_the_stage_under_unity_both_ways() {
     params.set_playing(true);
     control.loudness(strong(false)).await.unwrap();
     assert!(control.runs, "kept as a pass-through");
-    // Flat at once (the low section a flat cut for the high shelf the node held), then the exact
-    // identity with the repeat.
-    let snap = params.sent().last().unwrap().clone();
-    assert_eq!(
-        ld_ports(&snap)
+    // The first line is a step of the glide, not the identity.
+    let step = params.sent().last().unwrap().clone();
+    assert_ne!(
+        ld_ports(&step)
             .into_iter()
             .filter(|(name, _)| name.contains("ld2:"))
             .collect::<Vec<_>>(),
@@ -1053,9 +1055,9 @@ async fn every_part_of_a_line_plays_the_stage_under_unity_both_ways() {
             .into_iter()
             .filter(|(name, _)| name.contains("ld2:"))
             .collect::<Vec<_>>(),
-        "the high section goes flat at once"
+        "no snap while a stream plays"
     );
-    ticks(&mut control, 2 * WATCH_EVERY).await;
+    ticks(&mut control, 100).await;
     assert!(carries(params.sent().last().unwrap(), 0.0, 48_000));
     parts_under_unity(&identity, &params.sent(), &[], 48_000);
 
@@ -1083,6 +1085,7 @@ async fn every_part_of_a_line_plays_the_stage_under_unity_both_ways() {
             strength_pct: 100.0,
             reference_pct: 100.0,
         }),
+        bypass: None,
     };
     let params = FakeParams::new();
     params.with_loudness_ports();
@@ -1240,6 +1243,7 @@ fn over_a_node_left_deep() -> (EqControl, FakeParams, Vec<(String, f64)>) {
             strength_pct: 100.0,
             reference_pct: 100.0,
         }),
+        bypass: None,
     };
     let params = FakeParams::new();
     params.with_loudness_ports();

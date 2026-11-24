@@ -20,6 +20,8 @@ async fn get_host_reads_volume_eq_and_player() {
             "crossfeed": null,
             "speakers": null,
             "loudness": null,
+            "bypass": null,
+            "levels": null,
             "player": {"title": "Song", "artist": "Band", "album": "Record", "status": "playing"},
             "path": null,
             "config": null
@@ -425,6 +427,7 @@ fn route_to(
             rate_hz: Some(48_000),
             format: Some("S16LE".into()),
             volume_milli: Some(1000),
+            channels: Some(2),
             muted: false,
         }),
         player_match: PlayerMatch::Pid,
@@ -491,6 +494,9 @@ async fn get_host_names_the_path_and_the_config_from_the_route() {
     );
     assert_eq!(reply["config"]["outcome"], "untouched");
     assert_eq!(reply["config"]["sink"], "Speakers");
+    // What comes in and what the card runs at: the judge's words (no card facts in this route).
+    assert_eq!(reply["config"]["from_player"], "48 kHz · S16LE · stereo");
+    assert_eq!(reply["config"]["to_dac"], "not read");
     assert_eq!(reply["config"]["limit"], svolder_ipc::host::SETUP_LIMIT);
     let lines = reply["config"]["lines"].as_array().expect("the lines");
     let keys: Vec<_> = lines.iter().map(|l| l["key"].as_str().unwrap()).collect();

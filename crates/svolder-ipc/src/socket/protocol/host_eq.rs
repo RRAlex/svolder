@@ -189,6 +189,14 @@ pub enum HostEqOp {
         #[serde(default = "done_by_default")]
         done: bool,
     },
+    /// Turn the computer's bypass on or off. On turns every stage off as one change and keeps
+    /// which ones played; off brings back exactly those. On with nothing playing is refused in
+    /// words, and a restore that cannot be made leaves the bypass on. Offer it only while the
+    /// host's `EqView.bypass` is present: a daemon without it cannot parse the op.
+    Bypass {
+        /// whether the bypass is on
+        on: bool,
+    },
     /// Save the points as a preset of the user's, under a name
     SaveAs {
         /// the new preset's name
@@ -224,6 +232,16 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&op).unwrap(),
             r#"{"op":"speakers","set":"sadie-d2","done":true}"#
+        );
+    }
+
+    #[test]
+    fn a_bypass_op_is_on_and_nothing_else() {
+        let op: HostEqOp = serde_json::from_str(r#"{"op":"bypass","on":true}"#).unwrap();
+        assert_eq!(op, HostEqOp::Bypass { on: true });
+        assert_eq!(
+            serde_json::to_string(&HostEqOp::Bypass { on: false }).unwrap(),
+            r#"{"op":"bypass","on":false}"#
         );
     }
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The PipeWire config box over the device screen: the sink the check judges, its seven lines
-//! each with a mark, and what they add up to.
+//! each with a mark, what they add up to, and the hops that change the sound.
 //!
 //! A modal box like the quit question: everything around it is dimmed and it takes every key
 //! until `k` or `Esc` closes it. Every word is the judge's; the box only lays them out, and says
@@ -14,6 +14,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use svolder_ipc::host::{SETUP_LIMIT, SetupOutcome, SetupSummary};
 
+use super::device::path_line::{VALUE_JOIN, role};
 use crate::tui::app::App;
 use crate::tui::boxes::setup::{self, SetupBox};
 use crate::tui::theme::{Role, Theme};
@@ -28,6 +29,11 @@ const CLOSE: &str = " k or esc close ";
 const LABEL: usize = 21;
 /// The cells before a line's words: the box's blank, the mark, a blank, the name and two blanks.
 const WORDS_AT: usize = 1 + 1 + 1 + LABEL + 2;
+/// The cells before the words of the sink, `From player` and `To DAC` lines: a blank, the
+/// longest name and two blanks.
+const IO_LABEL: usize = 1 + 11 + 2;
+/// The heading of the section that names every hop that changes the sound.
+const CHANGES_HEADING: &str = "What changes the sound";
 /// The widest the box grows, border included.
 const MAX_WIDTH: u16 = 100;
 
@@ -35,7 +41,11 @@ const MAX_WIDTH: u16 = 100;
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) -> Rect {
     let width = area.width.min(MAX_WIDTH);
     let inner = usize::from(width.saturating_sub(2));
-    let lines = lines(app, theme, inner);
+    let mut lines = lines(app, theme, inner);
+    // A box too tall for the screen drops its separating blanks before it drops the limit.
+    if lines.len() + 2 > usize::from(area.height) {
+        lines.retain(|line| !line.spans.is_empty());
+    }
     let height = u16::try_from(lines.len() + 2)
         .unwrap_or(area.height)
         .min(area.height);
@@ -53,8 +63,10 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) -> Rect {
     box_area
 }
 
-/// The box's lines for `inner` cells: the sink, a blank, the seven lines with their words wrapped
-/// under the words column, a blank, the summary, what the box adds of its own read and the limit.
+/// The box's lines for `inner` cells: the sink with what comes in from the player and what the
+/// card is open at, a blank, the seven lines with their words wrapped
+/// under the words column, a blank, the summary, the hops that change the sound (`changes`), what
+/// the box adds of its own read and the limit.
 fn lines(app: &App, theme: &Theme, inner: usize) -> Vec<Line<'static>> {
     let check = app.setup_check();
     let mut lines = Vec::new();
@@ -62,10 +74,23 @@ fn lines(app: &App, theme: &Theme, inner: usize) -> Vec<Line<'static>> {
         true => "not read".to_string(),
         false => check.sink.clone(),
     };
-    lines.push(Line::from(vec![
-        Span::styled(" Sink  ", theme.style(Role::Dim)),
-        Span::raw(cut_to_cells(&sink, inner.saturating_sub(7))),
-    ]));
+    let room_io = inner.saturating_sub(IO_LABEL + 1).max(1);
+    for (name, words) in [
+        ("Sink", sink.as_str()),
+        ("From player", check.io.from_player.as_str()),
+        ("To DAC", check.io.to_dac.as_str()),
+    ] {
+        if words.is_empty() {
+            continue;
+        }
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!(" {name:<width$}", width = IO_LABEL - 1),
+                theme.style(Role::Dim),
+            ),
+            Span::raw(cut_to_cells(words, room_io)),
+        ]));
+    }
     lines.push(Line::default());
     let room = inner.saturating_sub(WORDS_AT + 1).max(1);
     for line in &check.lines {
@@ -109,6 +134,7 @@ fn lines(app: &App, theme: &Theme, inner: usize) -> Vec<Line<'static>> {
             theme.style(Role::Dim),
         )));
     }
+    changes(app, theme, room, &mut lines);
     lines.push(Line::default());
     for part in wrap(SETUP_LIMIT, inner.saturating_sub(2).max(1)) {
         lines.push(Line::from(Span::styled(
@@ -117,6 +143,59 @@ fn lines(app: &App, theme: &Theme, inner: usize) -> Vec<Line<'static>> {
         )));
     }
     lines
+}
+
+/// The section under the summary that names what changes the sound: a blank, the heading and
+/// one row per hop of the Path row's `changes` (its label, then its words each in its own tone).
+/// Nothing when the row names no hop.
+fn changes(app: &App, theme: &Theme, room: usize, lines: &mut Vec<Line<'static>>) {
+    let Some(hops) = app.path_row().map(|row| row.changes) else {
+        return;
+    };
+    if hops.is_empty() {
+        return;
+    }
+    lines.push(Line::default());
+    lines.push(Line::from(Span::styled(
+        format!(" {CHANGES_HEADING}"),
+        theme.style(Role::Text),
+    )));
+    for hop in &hops {
+        // Whole words, each in its own tone, joined by a dim ` · `; a line breaks only between
+        // two words, never before a join.
+        let mut rows: Vec<Vec<Span<'static>>> = vec![Vec::new()];
+        let mut used = 0;
+        for (at, word) in hop.words.iter().enumerate() {
+            let join = if at == 0 { 0 } else { cells(VALUE_JOIN) };
+            let own = cells(&word.text);
+            if used > 0 && used + join + own > room {
+                rows.push(Vec::new());
+                used = 0;
+            } else if used > 0 {
+                rows.last_mut()
+                    .expect("a row")
+                    .push(Span::styled(VALUE_JOIN, theme.style(Role::Dim)));
+                used += join;
+            }
+            rows.last_mut().expect("a row").push(Span::styled(
+                cut_to_cells(&word.text, room),
+                theme.style(role(word.tone)),
+            ));
+            used += own.min(room);
+        }
+        for (at, spans) in rows.into_iter().enumerate() {
+            let mut line = match at {
+                0 => vec![
+                    Span::raw("   "),
+                    Span::styled(pad(&hop.label), theme.style(Role::Text)),
+                    Span::raw("  "),
+                ],
+                _ => vec![Span::raw(" ".repeat(WORDS_AT))],
+            };
+            line.extend(spans);
+            lines.push(Line::from(line));
+        }
+    }
 }
 
 /// What the box says of its own read, where no daemon gives the route: that the first one is on

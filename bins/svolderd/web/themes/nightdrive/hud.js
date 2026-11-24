@@ -92,15 +92,32 @@ export function gainWords(text) {
   return `${db < 0 ? '−' : '+'}${tenths.toFixed(1)}`;
 }
 
+/** The words after the EQ line's name, each `{ text, stage?, kind? }` (a `stage` is a word that opens the Sound
+ * popup at its tab): the Space stage with its level while it plays, then the total in dB, or the daemon's own words
+ * while the chain is a pass-through, climbing or untouched (`pass-through −7.6 dB until the music pauses`); empty where the
+ * host sent no words for the chain. `levels` is the core's `computer.levelsOf`. */
+function levelWords(levels) {
+  if (!levels?.words) return [];
+  const space = levels.stages.find((s) => s.key === 'space');
+  const total = levels.passthrough || levels.untouched || levels.climbTo !== null ? levels.words : `${levels.totalText} ${HUD.defaultUnit}`;
+  return [
+    ...(space?.on ? [{ text: `${HUD.space} ${space.text}`, stage: 'space', kind: space.kind }] : []),
+    { text: total },
+  ];
+}
+
 /** The EQ line of the computer's EQ state (core `eqOf`, `comp.eq`): `OFF`, or `EQ` with the preset's name when one is
- * on; no gains, and a word of it while the EQ's state is only what its file says. `null` with no EQ. */
-function computerEqLine(eq) {
+ * on; no gains, and a word of it while the EQ's state is only what its file says; `levels` (the Space stage and the
+ * total) where the host has them. `null` with no EQ. */
+function computerEqLine(eq, levels) {
   if (!eq) return null;
   const gains = eq.verified ? [] : [HUD.unconfirmed];
-  if (!eq.on) return { lead: '', name: HUD.off, gains };
+  const words = levelWords(levels);
+  const more = words.length ? { levels: words, stage: 'eq' } : {};
+  if (!eq.on) return { lead: '', name: HUD.off, gains, ...more };
   return eq.preset
-    ? { lead: HUD.eq, name: String(eq.preset).toUpperCase(), gains }
-    : { lead: '', name: HUD.eq, gains };
+    ? { lead: HUD.eq, name: String(eq.preset).toUpperCase(), gains, ...more }
+    : { lead: '', name: HUD.eq, gains, ...more };
 }
 
 /**
@@ -108,10 +125,11 @@ function computerEqLine(eq) {
  * name when one is on (`lead: 'EQ'`, `name: 'WARM'`, else `lead: ''`, `name: 'EQ'`) and the
  * bands' gains, and `fit` (`fit 0.9 dB`, the daemon's miss) while an imported preset's overlay is served; Loudness
  * `LOUDNESS 3` and Flat `FLAT` have neither. `null` for a device with no tone. With the
- * computer as the side shown (`comp`, the core's `computer.view()`) it is the computer's: `OFF` or `EQ` and the preset.
+ * computer as the side shown (`comp`, the core's `computer.view()`) it is the computer's: `OFF` or `EQ` and the preset,
+ * then its `levels` (`SPACE −7.0`, `−14.8 dB`) from `core.computer.levelsOf`.
  */
-export function eqLine(page, comp = null) {
-  if (comp?.side === 'computer') return computerEqLine(comp.eq);
+export function eqLine(page, comp = null, levels = null) {
+  if (comp?.side === 'computer') return computerEqLine(comp.eq, levels);
   const device = page?.device;
   const tone = device?.tone;
   if (!tone) return null;

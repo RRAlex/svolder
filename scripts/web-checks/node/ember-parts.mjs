@@ -824,6 +824,44 @@ ok('the_builtin_the_bands_match_is_lit_and_no_slot_is', () => {
   assert.equal(deviceOf('lokimax-flat').device_presets.builtins.filter((b) => b.on).length, 1);
 });
 
+/** The `playing` case's card with no track, its path's player hop as the daemon words a sound with
+ * no MPRIS player behind it. */
+const noMpris = (playing) => ({
+  ...playing,
+  track: null,
+  path: {
+    ...playing.path,
+    row: {
+      ...playing.path.row,
+      hops: playing.path.row.hops.map((h, i) => (i ? h : {
+        ...h, label: 'player (no MPRIS)', words: [{ text: '?', tone: 'dim' }],
+      })),
+    },
+  },
+});
+
+ok('with_no_mpris_player_the_card_says_so_and_still_draws_the_path', () => {
+  const device = deviceOf('playing');
+  const html = drawn('playing', 'playing', { playing: noMpris(device.playing) });
+  assert.ok(html.includes('class="p-playing idle nompris"'), html);
+  assert.ok(html.includes('No MPRIS player'), html);
+  assert.ok(html.includes('class="np-path') && html.includes('player (no MPRIS)'), html);
+  assert.ok(html.includes('<span class="v d">?</span>'), html);
+  for (const gone of ['data-press', '<img', 'np-head', 'np-prog']) {
+    assert.ok(!html.includes(gone), gone);
+  }
+});
+
+ok('with_several_streams_and_no_mpris_player_the_row_alone_says_so_once', () => {
+  const device = deviceOf('playing');
+  const playing = noMpris(device.playing);
+  playing.path.row = { ...playing.path.row, hops: [], words: 'no MPRIS player' };
+  const html = drawn('playing', 'playing', { playing });
+  assert.ok(html.includes('class="p-playing idle nompris"'), html);
+  assert.ok(!html.includes('np-none'), html);
+  assert.equal(html.split("no MPRIS player").length - 1, 1, html);
+});
+
 ok('with_no_player_the_card_is_one_quiet_line', () => {
   const html = drawn('no-player', 'playing');
   assert.ok(html.includes('class="p-playing idle"'), html);
@@ -1228,7 +1266,7 @@ ok('a_first_paint_reads_a_dash_never_a_live_zero_and_a_muted_one_keeps_its_numbe
 ok('the_tone_mode_is_off_eq_in_the_seg_style', () => {
   const tone = html(viewOf('dac'), 'tone');
   const track = /<div class="seg" role="group" aria-label="Tone control mode">(.*?)<\/div>/.exec(tone)[1];
-  const options = [...track.matchAll(/<button type="button" class="opt" aria-pressed="(\w+)"[^>]*>(.*?)<\/button>/g)]
+  const options = [...track.matchAll(/<button type="button" class="opt"(?: id="[^"]*")? aria-pressed="(\w+)"[^>]*>(.*?)<\/button>/g)]
     .map((m) => [m[2], m[1]]);
   assert.deepEqual(options, [['Off', 'false'], ['EQ', 'true']]);
   assert.doesNotMatch(tone, /Loudness|loudness|class="rb"/);
@@ -1395,6 +1433,124 @@ ok('the_amp_page_draws_the_dac_pages_parts_on_the_computer_side', () => {
   const away = viewOf('amp', { side: 'dac' });
   assert.match(screen(away.page, undefined, away.view), /class="view amp/);
   assert.equal(away.view.volume, null);
+});
+
+// ------------------------------------------------------------- the stages line and the Bypass toggle
+
+const computerDraw = await import('../../../bins/svolderd/web/themes/ember/draw/computer.js');
+const { withStages } = computerDraw;
+const CHAIN_LEVELS = {
+  eq_db: -7.8, space_db: -7, total_db: -14.8, climb_to_db: null, passthrough: false, untouched: false,
+  words: 'plays −14.8 dB in all',
+};
+const chainModel = (over = {}, eqOver = {}) => {
+  const base = computerModel();
+  return {
+    ...base,
+    eq: {
+      ...base.eq,
+      loudness: { on: true, strength_pct: 60 },
+      crossfeed: { on: false },
+      speakers: { on: true },
+      levels: CHAIN_LEVELS,
+      bypass: { on: false, held: { eq: false, loudness: false, crossfeed: false, speakers: false } },
+      ...eqOver,
+    },
+    ...over,
+  };
+};
+/** The tone part as Ember draws it with the stages laid over the computer's view. */
+function staged(opts = {}) {
+  const c = viewOf('dac', opts);
+  const core = { model: { page: () => c.page }, computer: c.core };
+  const view = withStages(core, c.view);
+  return { ...c, view, tone: PARTS.tone(c.page.device, c.page, { oob: false, computer: view }) };
+}
+
+ok('the_stages_line_says_the_levels_in_the_daemons_words_and_the_toggle_reads_the_bypass', () => {
+  const { tone } = staged({ computer: chainModel() });
+  const line = /<p class="chain"[^>]*>(.*?)<\/p>/.exec(tone);
+  assert.ok(line, tone);
+  assert.equal(words(line[1]), 'EQ −7.8 dB · Loudness 60 % · Space speakers −7.0 dB · plays −14.8 dB in all');
+  // a stage word opens the Sound popup at its tab
+  const stages = [...line[1].matchAll(/<button[^>]*data-stage="(\w+)"/g)].map((m) => m[1]);
+  assert.deepEqual(stages, ['eq', 'loudness', 'space']);
+  const toggle = /<button[^>]*data-comp="bypass"[^>]*>(.*?)<\/button>/.exec(tone);
+  assert.ok(toggle, tone);
+  assert.match(toggle[0], /aria-pressed="false"/);
+  assert.doesNotMatch(toggle[0], /aria-disabled/);
+  assert.equal(toggle[1], 'Bypass');
+  // the toggle sits after the mode track, not in it
+  assert.ok(tone.indexOf('data-comp="bypass"') > tone.indexOf('data-comp="mode"'));
+  assert.doesNotMatch(/<div class="seg" role="group" aria-label="Tone control mode">.*?<\/div>/.exec(tone)[0], /bypass/);
+});
+
+ok('bypassed_the_stages_read_off_and_the_toggle_is_pressed_a_pass_through_says_its_words', () => {
+  const held = { eq: true, loudness: true, crossfeed: false, speakers: true };
+  const off = staged({
+    computer: chainModel({}, {
+      on: false,
+      loudness: { on: false, strength_pct: 60 },
+      speakers: { on: false },
+      levels: { ...CHAIN_LEVELS, eq_db: 0, space_db: 0, total_db: -7.6, passthrough: true,
+        words: 'pass-through −7.6 dB until the music pauses' },
+      bypass: { on: true, held },
+    }),
+  });
+  const line = /<p class="chain"[^>]*>(.*?)<\/p>/.exec(off.tone);
+  assert.equal(words(line[1]),
+    'EQ off · Loudness off · Space off · pass-through −7.6 dB until the music pauses');
+  assert.match(/<button[^>]*data-comp="bypass"[^>]*>/.exec(off.tone)[0], /aria-pressed="true"/);
+});
+
+ok('no_levels_and_no_bypass_draw_nothing_extra_and_a_dim_bypass_is_still_sent', () => {
+  const none = staged({ computer: computerModel() });
+  assert.doesNotMatch(none.tone, /class="chain"|data-comp="bypass"/);
+  const idle = staged({
+    computer: chainModel({}, {
+      on: false, loudness: { on: false }, speakers: { on: false },
+      levels: { ...CHAIN_LEVELS, words: '' },
+    }),
+  });
+  // dim (`idle`) while nothing plays, yet a writer's tap on it is still sent and the daemon says why not
+  assert.doesNotMatch(/<button[^>]*data-comp="bypass"[^>]*>/.exec(idle.tone)[0], /aria-disabled/);
+  assert.match(/<button[^>]*data-comp="bypass"[^>]*>/.exec(idle.tone)[0], /class="opt idle"/);
+});
+
+ok('a_guest_sees_the_toggle_disabled_and_the_stage_words_as_plain_words', () => {
+  const g = staged({ guest: true, computer: chainModel() });
+  assert.match(/<button[^>]*data-comp="bypass"[^>]*>/.exec(g.tone)[0], /aria-disabled="true"/);
+  const line = /<p class="chain"[^>]*>(.*?)<\/p>/.exec(g.tone);
+  assert.doesNotMatch(line[1], /<button/);
+  assert.equal(words(line[1]), 'EQ −7.8 dB · Loudness 60 % · Space speakers −7.0 dB · plays −14.8 dB in all');
+});
+
+ok('the_bypass_toggle_the_stage_words_and_the_mode_track_have_ids_for_the_focus_to_come_back_to', () => {
+  const { tone } = staged({ computer: chainModel() });
+  assert.match(/<button[^>]*data-comp="bypass"[^>]*>/.exec(tone)[0], / id="ember-cbypass"/);
+  const stages = [...tone.matchAll(/<button[^>]*data-comp="stage"[^>]*>/g)].map((m) => /id="([^"]+)"/.exec(m[0])?.[1]);
+  assert.deepEqual(stages, ['ember-cstage-eq', 'ember-cstage-loudness', 'ember-cstage-space']);
+  const modes = [...tone.matchAll(/<button[^>]*data-comp="mode"[^>]*>/g)].map((m) => /id="([^"]+)"/.exec(m[0])?.[1]);
+  assert.deepEqual(modes, ['ember-cm-off', 'ember-cm-eq']);
+  const ids = [...tone.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(new Set(ids).size, ids.length, 'every id is unique');
+});
+
+ok('a_climb_tick_that_changes_nothing_drawn_is_the_same_computer_state_and_a_changed_word_is_not', () => {
+  const { drawnOf } = computerDraw;
+  const key = (levels, over = {}) => JSON.stringify(drawnOf(staged({
+    computer: chainModel({}, { on: false, loudness: { on: false }, speakers: { on: false }, levels, ...over }),
+  }).view));
+  const climbing = { ...CHAIN_LEVELS, eq_db: 0, space_db: 0, total_db: -3.2, passthrough: true,
+    climb_to_db: 0, words: 'climbing to 0.0 dB' };
+  // the 50 ms ticks of a pass-through climb move the total and the climb's end, never a word drawn
+  assert.equal(key(climbing), key({ ...climbing, total_db: -2.88 }));
+  assert.equal(key(climbing), key({ ...climbing, total_db: -2.56, climb_to_db: 0.0 }));
+  // a word, a stage's level or the bypass's press is drawn
+  assert.notEqual(key(climbing), key({ ...climbing, climb_to_db: null, untouched: true, words: 'pass-through, untouched' }));
+  assert.notEqual(key(climbing), key({ ...climbing, eq_db: -1.1 }, { on: true }));
+  assert.notEqual(key(climbing), key(climbing, { bypass: { on: true, held: { eq: true } } }));
+  assert.equal(drawnOf(null), null);
 });
 
 if (failed > 0) {

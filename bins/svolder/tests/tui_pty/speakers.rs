@@ -24,12 +24,17 @@ fn has(tui: &Tui, needle: &str) -> bool {
     tui.screen_text().contains(needle)
 }
 
-/// Press `e` and wait for the tone screen to be drawn whole.
+/// Press `e` and wait for the tone screen to be drawn whole: the screen is read in chunks, so the
+/// EQ panel's top border can show while the device screen's rows and its hint box still stand
+/// under it. The keys open in the EQ panel.
 fn open_tone_screen(tui: &Tui) {
     tui.send_keys("e");
     tui.wait_for("the tone screen, drawn whole", WAIT, |s| {
         let text = s.contents();
-        text.contains("(X)") && text.contains("Points · computer") && !text.contains("tui --join")
+        text.contains("┏ EQ")
+            && text.contains("Esc strip")
+            && !text.contains("Level from")
+            && !text.contains("tui --join")
     });
 }
 
@@ -57,25 +62,22 @@ fn the_space_choice_steps_through_the_daemon_to_the_virtual_speakers() {
     for (cols, rows) in SIZES {
         let tui = on_computer(cols, rows);
         open_tone_screen(&tui);
-        // X goes into the section, the arrow steps the choice: Crossfeed, then the speakers,
-        // which the daemon chooses a set for (the first fetched one)
+        // X goes into the panel; the arrows highlight a choice on Plays and Enter plays it:
+        // Crossfeed, then the speakers, which the daemon chooses a set for (the first fetched)
         tui.send_keys("X");
         tui.wait_for_text("Off \u{b7} Crossfeed \u{b7} Virtual speakers");
-        tui.send_keys("\x1b[C");
+        tui.send_keys("\x1b[C\r");
         tui.wait_for("crossfeed on in the view", WAIT, |s| {
-            s.contents().contains("\u{2039} Crossfeed \u{203a}")
+            s.contents().contains("Space \u{25cf} crossfeed")
         });
-        tui.send_keys("\x1b[C");
-        tui.wait_for("the speakers in the view", WAIT, |s| {
-            s.contents().contains("\u{2039} Virtual speakers \u{203a}")
-        });
+        tui.send_keys("\x1b[C\r");
         // the screen is read in chunks: wait for it drawn whole, the crossfeed rows gone
-        tui.wait_for("the speakers section, drawn whole", WAIT, |s| {
+        tui.wait_for("the speakers panel, drawn whole", WAIT, |s| {
             let t = s.contents();
             t.contains("quieter than Off")
                 && t.contains("S sets")
                 && t.contains("Licence")
-                && !t.contains("Crossfeed on")
+                && !t.contains("Crossover")
         });
         let text = tui.screen_text();
         assert!(
@@ -85,14 +87,12 @@ fn the_space_choice_steps_through_the_daemon_to_the_virtual_speakers() {
         assert!(text.contains("quieter than Off"), "{cols}x{rows}:\n{text}");
         assert!(text.contains("S sets"), "{cols}x{rows}:\n{text}");
         // the arrow back is the crossfeed again, then off
-        tui.send_keys("\x1b[D");
+        tui.send_keys("\x1b[D\r");
         tui.wait_for("the crossfeed", WAIT, |s| {
-            s.contents().contains("\u{2039} Crossfeed \u{203a}")
+            s.contents().contains("Space \u{25cf} crossfeed")
         });
-        tui.send_keys("\x1b[D");
-        tui.wait_for("off", WAIT, |s| {
-            s.contents().contains("\u{2039} Off \u{203a}")
-        });
+        tui.send_keys("\x1b[D\r");
+        tui.wait_for("off", WAIT, |s| s.contents().contains("Space \u{25cb}"));
         tui.quit();
     }
 }

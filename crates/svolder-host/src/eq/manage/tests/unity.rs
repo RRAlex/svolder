@@ -145,6 +145,7 @@ async fn a_re_apply_from_the_state_file_is_bounded_too() {
             flat: false,
             crossfeed: None,
             speakers: None,
+            identity: None,
         })
         .await
         .unwrap();

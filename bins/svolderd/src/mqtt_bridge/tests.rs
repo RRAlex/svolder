@@ -1419,6 +1419,7 @@ type LoudnessCall = (Option<bool>, Option<f64>);
 struct RecordingSwitch {
     loudnesses: std::sync::Mutex<Vec<LoudnessCall>>,
     calls: std::sync::Mutex<Vec<bool>>,
+    bypasses: std::sync::Mutex<Vec<bool>>,
     crossfeeds: std::sync::Mutex<Vec<CrossfeedCall>>,
     speakers: std::sync::Mutex<Vec<SpeakersCall>>,
     answer: Result<(), String>,
@@ -1447,6 +1448,11 @@ impl crate::host::EqSwitch for RecordingSwitch {
 
     async fn loudness(&self, on: Option<bool>, strength_pct: Option<f64>) -> Result<(), String> {
         self.loudnesses.lock().unwrap().push((on, strength_pct));
+        self.answer.clone()
+    }
+
+    async fn bypass(&self, on: bool) -> Result<(), String> {
+        self.bypasses.lock().unwrap().push(on);
         self.answer.clone()
     }
 }
@@ -1499,6 +1505,7 @@ async fn with_computer_at(
     let switch = Arc::new(RecordingSwitch {
         loudnesses: std::sync::Mutex::new(Vec::new()),
         calls: std::sync::Mutex::new(Vec::new()),
+        bypasses: std::sync::Mutex::new(Vec::new()),
         crossfeeds: std::sync::Mutex::new(Vec::new()),
         speakers: std::sync::Mutex::new(Vec::new()),
         answer,
@@ -2552,6 +2559,7 @@ fn path_route(
             rate_hz: Some(player_hz),
             format: Some("S32LE".into()),
             volume_milli: Some(1000),
+            channels: None,
             muted: false,
         }),
         player_match: PlayerMatch::Pid,
@@ -2651,6 +2659,7 @@ async fn with_dac_computer_at(
     let switch = Arc::new(RecordingSwitch {
         loudnesses: std::sync::Mutex::new(Vec::new()),
         calls: std::sync::Mutex::new(Vec::new()),
+        bypasses: std::sync::Mutex::new(Vec::new()),
         crossfeeds: std::sync::Mutex::new(Vec::new()),
         speakers: std::sync::Mutex::new(Vec::new()),
         answer: Ok(()),
@@ -3495,4 +3504,277 @@ async fn the_scene_configs_are_put_back_before_a_devices() {
         .position(|t| t.contains(&format!("svolder_{UNIT}/")))
         .unwrap_or_else(|| panic!("no device config: {topics:#?}"));
     assert!(select < device, "the device came first: {topics:#?}");
+}
+
+/// A computer view whose controller serves the bypass and the levels.
+fn bypass_computer_view(on: bool, total: f64) -> svolder_ipc::host::HostView {
+    let mut view = computer_view(false, None, 0.0);
+    let eq = view.eq.as_mut().unwrap();
+    eq.bypass = Some(svolder_host::eq::BypassView {
+        on,
+        ..Default::default()
+    });
+    eq.levels = Some(svolder_host::eq::ChainLevels {
+        total_db: total,
+        eq_db: -7.8,
+        space_db: -7.0,
+        ..Default::default()
+    });
+    view
+}
+
+fn bypass_calls(switch: &RecordingSwitch) -> Vec<bool> {
+    switch.bypasses.lock().unwrap().clone()
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_bypass_and_levels_are_announced_and_their_states_follow_the_view() {
+    let (mut task, tx, _switch) = with_computer(bypass_computer_view(false, -14.8), Ok(())).await;
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    // The EQ's two, the path's two, the bypass, the three levels.
+    assert_eq!(published.configs.len(), 8);
+    assert!(
+        published
+            .configs
+            .contains_key("homeassistant/switch/svolder_computer_reframe/computer_bypass/config")
+    );
+    assert!(
+        published.configs.contains_key(
+            "homeassistant/sensor/svolder_computer_reframe/computer_level_chain/config"
+        )
+    );
+    assert_eq!(published.bypass_state, Some("OFF"));
+    assert_eq!(
+        published.levels_state,
+        Some(["-14.8".to_string(), "-7.8".to_string(), "-7.0".to_string()])
+    );
+
+    tokio::time::advance(METERS_EVERY).await;
+    tx.send_replace(bypass_computer_view(true, -7.6));
+    task.changed("computer_reframe");
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert_eq!(published.bypass_state, Some("ON"));
+    assert_eq!(published.levels_state.as_ref().unwrap()[0], "-7.6");
+
+    // A view without the fields takes its entities down, not the EQ's.
+    tx.send_replace(computer_view(false, None, 0.0));
+    task.changed("computer_reframe");
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert_eq!(published.configs.len(), 4);
+    assert_eq!(
+        (&published.bypass_state, &published.levels_state),
+        (&None, &None)
+    );
+
+    // Host audio off takes the whole computer down, the new states with it.
+    tx.send_replace(bypass_computer_view(true, -7.6));
+    task.changed("computer_reframe");
+    task.publish_computer();
+    tx.send_replace(svolder_ipc::host::HostView::default());
+    task.changed("computer_reframe");
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert!(published.configs.is_empty());
+    assert!(published.bypass_state.is_none() && published.levels_state.is_none());
+}
+
+/// The Chain level sensor carries the daemon's words as its attributes; a change of the words
+/// alone (the total stays) is published too, and no chain takes them down with the levels.
+#[tokio::test(start_paused = true)]
+async fn the_chain_levels_words_are_attributes_that_follow_the_view() {
+    let words = |view: &mut svolder_ipc::host::HostView, words: &str, untouched: bool| {
+        let levels = view.eq.as_mut().unwrap().levels.as_mut().unwrap();
+        levels.words = words.to_string();
+        levels.passthrough = true;
+        levels.untouched = untouched;
+    };
+    let mut view = bypass_computer_view(true, 0.0);
+    words(&mut view, "climbing to 0.0 dB", false);
+    let (mut task, tx, _switch) = with_computer(view.clone(), Ok(())).await;
+    task.publish_computer();
+    let attributes = |task: &BridgeTask| {
+        task.computer
+            .as_ref()
+            .unwrap()
+            .levels_attributes
+            .clone()
+            .map(|text| serde_json::from_str::<serde_json::Value>(&text).unwrap())
+    };
+    let first = attributes(&task).expect("published");
+    assert_eq!(first["words"], "climbing to 0.0 dB");
+    assert_eq!(first["untouched"], false);
+    assert!(
+        task.computer.as_ref().unwrap().configs
+            ["homeassistant/sensor/svolder_computer_reframe/computer_level_chain/config"]
+            .contains("svolder/computer_reframe/computer_level_chain/attributes")
+    );
+
+    tokio::time::advance(METERS_EVERY).await;
+    words(&mut view, "pass-through, untouched", true);
+    tx.send_replace(view);
+    task.changed("computer_reframe");
+    task.publish_computer();
+    let second = attributes(&task).unwrap();
+    assert_eq!(second["words"], "pass-through, untouched");
+    assert_eq!(second["untouched"], true);
+
+    tx.send_replace(computer_view(false, None, 0.0));
+    task.changed("computer_reframe");
+    task.publish_computer();
+    assert_eq!(attributes(&task), None);
+}
+
+#[tokio::test]
+async fn bypass_commands_go_through_the_hosts_bypass_op_and_nothing_else() {
+    let (mut task, _tx, switch) = with_computer(bypass_computer_view(false, -14.8), Ok(())).await;
+    let set = "svolder/computer_reframe/computer_bypass/set";
+    task.message(set, b"ON", false);
+    task.message(set, b" off ", false);
+    // Garbage, and a retained copy, are never acted on.
+    task.message(set, b"toggle", false);
+    task.message(set, &[0xff], false);
+    task.message(set, b"ON", true);
+    settle(&mut task).await;
+    assert_eq!(bypass_calls(&switch), [true, false]);
+    assert!(computer_calls(&switch).is_empty());
+    assert!(loudness_calls(&switch).is_empty());
+    assert!(crossfeed_calls(&switch).is_empty());
+    assert!(speakers_calls(&switch).is_empty());
+}
+
+#[tokio::test]
+async fn a_bypass_command_the_host_cannot_take_does_nothing() {
+    // No bypass in the view, host audio off, and commands off: none reaches the controller.
+    for view in [
+        computer_view(false, None, 0.0),
+        svolder_ipc::host::HostView::default(),
+    ] {
+        let (mut task, _tx, switch) = with_computer(view, Ok(())).await;
+        task.message("svolder/computer_reframe/computer_bypass/set", b"ON", false);
+        settle(&mut task).await;
+        assert!(bypass_calls(&switch).is_empty());
+    }
+    let (mut task, _tx, switch) = with_computer(bypass_computer_view(false, 0.0), Ok(())).await;
+    task.config.commands = false;
+    task.message("svolder/computer_reframe/computer_bypass/set", b"ON", false);
+    settle(&mut task).await;
+    assert!(bypass_calls(&switch).is_empty());
+}
+
+#[tokio::test]
+async fn a_refused_bypass_marks_the_computer_and_the_state_stays_the_views() {
+    let (mut task, _tx, switch) = with_computer(
+        bypass_computer_view(false, -14.8),
+        Err("the held loudness could not come back".into()),
+    )
+    .await;
+    task.publish_computer();
+    task.message("svolder/computer_reframe/computer_bypass/set", b"ON", false);
+    settle(&mut task).await;
+    assert_eq!(bypass_calls(&switch), [true]);
+    // The refusal marks the computer for a publish, and the switch keeps saying what the view
+    // says: the refusal changed nothing.
+    assert!(task.computer.as_ref().unwrap().dirty);
+    task.publish_computer();
+    assert_eq!(task.computer.as_ref().unwrap().bypass_state, Some("OFF"));
+}
+
+/// A climb moves the chain level every tick: the level goes out at once the first time, then at
+/// most every [`METERS_EVERY`], and the value the burst ends on always lands.
+#[tokio::test(start_paused = true)]
+async fn a_burst_of_level_changes_is_one_publish_and_then_the_last_value() {
+    let (mut task, tx, _switch) = with_computer(bypass_computer_view(false, -14.8), Ok(())).await;
+    task.publish_computer();
+    let chain = |task: &BridgeTask| {
+        task.computer
+            .as_ref()
+            .unwrap()
+            .levels_state
+            .clone()
+            .unwrap()[0]
+            .clone()
+    };
+    assert_eq!(chain(&task), "-14.8");
+    let first = tokio::time::Instant::now();
+    // Nine ticks of 50 ms, each a new level: none is published.
+    for tick in 1..=9 {
+        tokio::time::advance(Duration::from_millis(50)).await;
+        tx.send_replace(bypass_computer_view(false, -14.8 + 0.32 * f64::from(tick)));
+        task.changed("computer_reframe");
+        task.publish_computer();
+        assert_eq!(chain(&task), "-14.8", "tick {tick} was published");
+        assert!(
+            task.computer.as_ref().unwrap().dirty,
+            "the last value is owed"
+        );
+    }
+    // The flush the ticks asked for finds the level held, and owes it for when the hold ends.
+    task.flush();
+    assert_eq!(chain(&task), "-14.8");
+    assert_eq!(task.flush_at, Some(first + METERS_EVERY));
+    // At the deadline the last value lands, and nothing is owed after it.
+    tokio::time::advance(first + METERS_EVERY - tokio::time::Instant::now()).await;
+    task.flush();
+    assert_eq!(chain(&task), "-11.9");
+    assert!(!task.computer.as_ref().unwrap().dirty);
+    assert!(task.flush_at.is_none());
+    // A level that did not move owes nothing, and one more change waits again.
+    task.changed("computer_reframe");
+    task.publish_computer();
+    assert!(!task.computer.as_ref().unwrap().dirty);
+    tokio::time::advance(Duration::from_millis(50)).await;
+    tx.send_replace(bypass_computer_view(false, -10.0));
+    task.changed("computer_reframe");
+    task.publish_computer();
+    assert_eq!(chain(&task), "-11.9");
+}
+
+/// The level sensors publish a moved level once, when it is due: a view that moves one level
+/// moves one topic, and a change below one decimal moves none.
+#[cfg(feature = "broker-tests")]
+#[tokio::test]
+async fn a_level_is_published_once_per_change() {
+    let broker = broker::TestBroker::start();
+    let mut watcher = broker::Watcher::connect(broker.port, &["svolder/#"]).await;
+    let (mut task, tx, _switch) =
+        with_computer_at(broker.port, bypass_computer_view(false, -14.8), Ok(())).await;
+    task.publish_computer();
+    let level = |key: &str| format!("svolder/computer_reframe/{key}/state");
+    watcher
+        .wait_for_each(
+            &[
+                (level("computer_level_chain").as_str(), "-14.8"),
+                (level("computer_level_eq").as_str(), "-7.8"),
+                (level("computer_level_space").as_str(), "-7.0"),
+            ],
+            Duration::from_secs(5),
+        )
+        .await;
+
+    // Only the chain level moves; it goes out when the hold on levels ends.
+    tx.send_replace(bypass_computer_view(false, -12.3));
+    task.changed("computer_reframe");
+    task.publish_computer();
+    tokio::time::sleep(METERS_EVERY).await;
+    task.flush();
+    watcher
+        .wait_for(
+            &level("computer_level_chain"),
+            Duration::from_secs(5),
+            |s| s.payload == "-12.3",
+        )
+        .await;
+    // Then no other level topic arrives, and a change below one decimal sends nothing.
+    tx.send_replace(bypass_computer_view(false, -12.31));
+    task.changed("computer_reframe");
+    tokio::time::sleep(METERS_EVERY).await;
+    task.flush();
+    let seen = watcher.collect(Duration::from_millis(500)).await;
+    assert!(
+        seen.iter().all(|s| !s.topic.contains("computer_level")),
+        "{seen:#?}"
+    );
 }

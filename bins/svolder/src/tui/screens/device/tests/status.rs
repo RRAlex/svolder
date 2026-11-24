@@ -20,7 +20,7 @@ fn an_active_fault_flashes_the_header_and_the_status_pane_offers_its_advice() {
     let rows = text(&screen(&app));
     assert_eq!(
         rows[0],
-        " svolder  Gungnir 2 · fw 3 · 0102…08  ● connected ⚡  over-current mouse:on 14:02",
+        " svolder  Gungnir… · fw 3 · 0102…08  ● connected ⚡  over-current mouse:on 14:02 ",
         "the header gains the fault's glyph and lower-case name"
     );
     assert_eq!(

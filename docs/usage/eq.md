@@ -782,13 +782,15 @@ and MCP asks for `confirm`; the CLI's `host eq apply` asks the same way. The poi
 the live editing are in ["The computer's side"](tui.md#the-computers-side-c) of the TUI reference and
 ["The switch to this computer"](web-ui.md#the-page) of the web page.
 
-A preset loaded on the computer while music plays through the computer EQ never restarts its
-chain, which would take the sink from under the player (some players pause then): it plays at
-once. One that needs more headroom than the curve the chain started with plays at the earlier,
-lower level, and the computer side says `level held until the music pauses`; about 30 s after the
-music stops, the chain starts again with the preset at its own level. With nothing playing a preset
-plays at its own level at once. Why the level is held:
-[`host-control-preamp.md`](../design/host-control-preamp.md#a-softer-preset-while-a-stream-plays).
+A preset loaded on the computer while music plays through the computer EQ never restarts its chain,
+which would take the sink from under the player (some players pause then): it plays at once, at its
+own level, whatever curve the chain started with: a chain svolder starts has an identity config
+(every filter flat) and gets the curve live, so a change of the output's sample rate can only put
+back a flat chain. The computer side says `level held until the music pauses` only for a chain
+svolder did not start (the command line applied it, or the output takes no live changes): there the
+preset plays at the earlier, lower level, and about 3 s after the music stops the chain starts again
+with the preset at its own level. How that is kept safe:
+[`host-control-preamp.md`](../design/host-control-preamp.md#a-chain-started-from-an-identity-config).
 
 Loading a preset, from either front end, sends the same sequence: the gains that go down first, then
 every frequency and Q change, then the gains that go up, and the mode last when it becomes EQ — so
@@ -836,6 +838,24 @@ full volume and not drawn until it is measured on a real device — under
 ["What the graph draws"](tui.md#what-the-graph-draws); and typing a band's exact frequency, gain and
 Q under ["The edit line (`Enter`)"](tui.md#the-edit-line-enter).
 
+## Bypass
+
+The bypass is an all-off for the computer: one switch that turns the EQ, loudness, crossfeed and
+the virtual speakers off together, and brings back exactly the ones that were on, with their
+config as it is now. Turning it on with nothing playing on the computer is refused (`nothing plays
+on the computer to bypass`). Turning any of the stages on again, by hand, from a preset or from a
+scene, ends the bypass: what it held is forgotten. If a stage cannot come back (a virtual speakers
+set that is no longer fetched) the bypass stays on and says why. While music plays the chain stays
+as a pass-through, changed in one step. The web page reaches it with `POST api/v1/host/bypass`
+(`{"on": true}`); the same change is `svolder host bypass on|off`, the TUI's `f` on the computer's
+side, the MCP tool `set_host_bypass`, the Bypass switch in Home Assistant and the GNOME indicator's
+Computer EQ switch. The state shows as `bypass` and the levels as `levels` in `api/v1/host`.
+
+The bypass is kept across a restart, so it can still be turned off then, in `host-eq.toml` as
+`[bypass]`; the file holds it only while the bypass holds (every stage off), and a state that has a
+stage on when the daemon starts drops it. A daemon's own apply (a chain restarted after it died)
+keeps it.
+
 ## Loudness
 
 Loudness is a setting of the computer's sound, beside the computer EQ. Below full volume the ear
@@ -846,7 +866,7 @@ make the sound quieter and never louder or clipped, apart from a rare PipeWire b
 live update (see [known issues](../known-issues.md)). It follows the computer's own volume (the
 Volume row of the computer's side: the sink's volume, and the chain's while the chain is in the
 path), not the volume of a device and not an application's own slider. It works from the TUI (the
-computer's Tone pane and the tone screen), the web page's Sound… popup,
+tone screen's Loudness panel, `L`, and the computer's Tone pane), the web page's Sound… popup,
 [`svolder host loudness`](cli.md#host-loudness), the MCP server's `set_host_loudness` and Home
 Assistant; all of them change the same one setting, kept by the daemon (or by a TUI with no daemon),
 so the last change wins. They offer it only while the daemon serves loudness; an older daemon has
@@ -916,11 +936,11 @@ Settings changed before any chain was applied wait in `host-eq-settings.toml`, a
 
 Crossfeed is a setting of the computer's sound, beside the computer EQ: it feeds a low-passed,
 delayed copy of each channel into the other channel at a set level. Use it with headphones on the
-computer's output; it does nothing for the DAC's own tone control, which it never touches. It
-works from the TUI (`C`, then the tone screen `e` or the device screen's Tone pane), the web
-page's Sound… popup, [`svolder host crossfeed`](cli.md#host-crossfeed), the MCP server's
-`set_host_crossfeed` and Home Assistant; all of them change the same one setting, kept by the
-daemon (or by a TUI with no daemon), so the last change wins.
+computer's output; it does nothing for the DAC's own tone control, which it never touches. It works
+from the TUI (`C`, then the tone screen `e` and its Space panel, `X`, or the device screen's Tone
+pane), the web page's Sound… popup, [`svolder host crossfeed`](cli.md#host-crossfeed), the MCP
+server's `set_host_crossfeed` and Home Assistant; all of them change the same one setting, kept by
+the daemon (or by a TUI with no daemon), so the last change wins.
 
 ### The four models
 
@@ -968,10 +988,23 @@ daemon (or by a TUI with no daemon), so the last change wins.
 Crossfeed has its own switch, apart from the computer EQ's. It plays with the EQ on or off: with the
 EQ off and crossfeed on, the chain plays flat (every filter the identity) with the crossfeed after
 it. With both off no chain runs, and turning one on starts it; but while a stream plays, where live
-updates work, the chain stays as a flat pass-through (0 dB, or the lower level its loaded curve
-needs, a boosted preset keeping its cut) so the player is not paused, and goes once nothing has
-played through it for about 30 s; a graceful stop removes it at once, and turning either back on in
-that time reuses it.
+updates work, the chain stays as a flat pass-through that climbs to 0 dB (see below; only a chain
+the command line applied, or an output that takes no live changes, keeps the lower level its loaded
+curve needs) so the player is not paused, and goes once nothing has played through it for about 3 s
+(three looks in a row, a look a second: a seek, a track change or a pause of two seconds keeps it);
+a graceful stop removes it at once, and turning either back on in that time reuses it.
+
+When a change raises the level, the level climbs: crossfeed off, the virtual speakers off, the EQ
+off into a pass-through and the bypass start at the level you were hearing and rise 6.4 dB a second
+(0.32 dB every 50 ms, the pace the DAC's own volume rises at) up to 0 dB, so turning a stage off
+never jumps the sound. The computer side says `climbing to 0.0 dB` while it runs. A pass-through
+that reached 0 dB, on a chain svolder started from an identity config, with every port read at its
+identity value, is `pass-through, untouched` and the Path's computer hop is green; anything else
+stays yellow (a pass-through at 0 dB that is not yet proven says `pass-through 0.0 dB`, and one that
+holds a cut `pass-through −7.6 dB until the music pauses`). A daemon that restarts over a chain it
+did not start never calls it untouched until its next apply: it cannot tell that the config it finds
+is an identity one. A hand edit, a preset load or a scene recall is not a climb: it plays at its own
+level at once, as before.
 
 A chain that dies (killed, crashed) is noticed at once: the daemon starts it again with crossfeed
 off and the note "the computer EQ chain stopped and was started again". The EQ turns off, with the

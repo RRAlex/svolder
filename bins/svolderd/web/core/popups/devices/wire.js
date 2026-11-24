@@ -187,7 +187,10 @@ export function wire({ core, frame }) {
   /** Whether the sound is going through the device `model` describes: its card has a track that
    * plays and a path that does not say the sound goes elsewhere (verdict `not_this_dac` or
    * `other_input`: another sink, or another input of the DAC). */
-  const playsThrough = (model) => model?.playing?.track?.status === 'playing'
+  const playsThrough = (model) => (model?.playing?.track
+    ? model.playing.track.status === 'playing'
+    // no MPRIS player: a sound plays when its stream is judged through hops
+    : (model?.playing?.path?.hops?.length ?? 0) > 0)
     && !OTHER_SINK.has(model.playing.path?.verdict);
 
   /** What a device's facts and readings are drawn from: when it is the same, they are not put. */

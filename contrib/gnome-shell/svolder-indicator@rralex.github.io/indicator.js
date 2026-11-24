@@ -8,6 +8,7 @@ import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Pango from 'gi://Pango';
 import St from 'gi://St';
 
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -15,13 +16,17 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Slider} from 'resource:///org/gnome/shell/ui/slider.js';
 
 import {BoxGlyph, SignalGlyph, SpeakerGlyph} from './glyphs.js';
-import {barView, COLORS, dbFromFraction, dbText, parseLine, popupView, sliderFraction} from './model.js';
 import {
-    clickFailure, ControlQueue, eqSwitchArgs, muteArgs, ScrollAccumulator, scrollArgs, volumeSetArgs,
+    barView, COLORS, dbFromFraction, dbText, lineCandidates, nobreak, parseLine, popupView, sliderFraction, stripLine,
+} from './model.js';
+import {
+    clickFailure, ControlQueue, eqSwitchArgs, eqSwitchSettled, muteArgs, ScrollAccumulator, scrollArgs, volumeSetArgs,
 } from './process.js';
 import {Runner} from './runner.js';
 
 const SLIDER_DEBOUNCE_MS = 400;
+// The most lines the Path line wraps to.
+const PATH_LINES = 2;
 
 const markup = (label, text) => {
     label.clutter_text.use_markup = true;
@@ -193,15 +198,42 @@ class SvolderIndicator extends PanelMenu.Button {
             menu.addMenuItem(row);
 
         this._pathItem = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
-        this._strip = new St.BoxLayout({style_class: 'svolder-strip', y_align: Clutter.ActorAlign.CENTER});
-        this._segments = [0, 1, 2].map(() => {
-            const seg = new St.Widget({style_class: 'svolder-segment'});
-            this._strip.add_child(seg);
-            return seg;
+        this._strip = new St.BoxLayout({style_class: 'svolder-strip', y_expand: true});
+        // Each drawn segment sits in a reactive bin as tall as the row, so the pointer finds it
+        // above and below the drawing; while it is on one, the line beside the strip says its words.
+        this._hovered = null;
+        this._segments = [];
+        this._bins = [0, 1, 2].map(i => {
+            const seg = new St.Widget({style_class: 'svolder-segment', y_align: Clutter.ActorAlign.CENTER});
+            const bin = new St.Bin({
+                style_class: 'svolder-bin', child: seg, reactive: true, track_hover: true, y_expand: true, y_align: Clutter.ActorAlign.FILL,
+            });
+            bin.connect('notify::hover', () => this._onSegmentHover(i, bin.hover));
+            this._segments.push(seg);
+            this._strip.add_child(bin);
+            return bin;
         });
-        this._pathOff = new St.Label({style_class: 'svolder-path-off', y_align: Clutter.ActorAlign.CENTER});
+        // The line is drawn over a clear twin that holds the longest of the words it can say, so
+        // its width is the same whichever segment the pointer is on and the menu never resizes
+        // under it. Beyond the stylesheet's cap both end in an ellipsis; the accessible name has
+        // it whole.
+        this._pathOff = new St.Label({
+            style_class: 'svolder-path-line', x_expand: true, x_align: Clutter.ActorAlign.START,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._pathSizer = new St.Label({style_class: 'svolder-path-line', opacity: 0, reactive: false, y_align: Clutter.ActorAlign.CENTER});
+        // A line wraps at its separators, to two lines at most; the ellipsis is for what is beyond.
+        for (const label of [this._pathOff, this._pathSizer]) {
+            label.clutter_text.line_wrap = true;
+            label.clutter_text.line_wrap_mode = Pango.WrapMode.WORD;
+            label.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+            label.clutter_text.get_layout().set_height(-PATH_LINES);
+        }
+        this._pathLine = new St.Widget({layout_manager: new Clutter.BinLayout(), y_align: Clutter.ActorAlign.CENTER});
+        this._pathLine.add_child(this._pathSizer);
+        this._pathLine.add_child(this._pathOff);
         this._pathItem.add_child(this._strip);
-        this._pathItem.add_child(this._pathOff);
+        this._pathItem.add_child(this._pathLine);
         menu.addMenuItem(this._pathItem);
 
         this._sep = new PopupMenu.PopupSeparatorMenuItem();
@@ -339,18 +371,64 @@ class SvolderIndicator extends PanelMenu.Button {
         this._guard = true;
         this._eqRow.switch.state = eq.on;
         this._guard = false;
+        this._eqRow.toggleButton.accessible_name = eq.switchName;
     }
 
     _renderPath(path) {
-        if (!path)
+        if (!path) {
+            this._path = null;
             return;
+        }
+        this._path = path;
         this._pathItem.accessible_name = path.label;
         path.segments.forEach((seg, i) => {
             this._segments[i].style = `background-color: ${seg.color};`;
+            this._bins[i].accessible_name = seg.words;
         });
-        this._pathOff.visible = path.off !== '';
-        if (path.off !== '')
-            markup(this._pathOff, path.offMarkup);
+        this._renderPathLine();
+    }
+
+    // The line beside the strip: the hovered segment's words, else the rest line. With nothing to
+    // say it stays in the layout, drawn clear, so hovering never changes the row's height.
+    _renderPathLine() {
+        const line = stripLine(this._path, this._hovered);
+        this._pathOff.opacity = line.visible ? 255 : 0;
+        this._pathOff.style = `color: ${line.color};`;
+        markup(this._pathOff, nobreak(line.markup));
+        this._pathOff.accessible_name = this._pathOff.clutter_text.text.replace(/[\u200b\u2060]/g, '')
+            .replace(/\u00a0/g, ' ');
+        this._sizePathLine(line.markup);
+    }
+
+    // The clear twin holds the widest of the lines this state can draw (measured, as the plain
+    // words and the small dB unit differ in width), set whenever the state is drawn.
+    _sizePathLine(fallback) {
+        const twin = this._pathSizer;
+        const candidates = [...lineCandidates(this._path, this.menu.isOpen ? this._sizerMarkup : null)];
+        if (candidates.length === 0)
+            candidates.push(fallback);
+        // The widest line sets the width; at that width the tallest sets the height, so neither
+        // changes when the pointer moves from one line to another.
+        twin.min_height = -1;
+        let widest = candidates[0];
+        let width = -1;
+        for (const candidate of candidates) {
+            markup(twin, nobreak(candidate));
+            const [, natural] = twin.get_preferred_width(-1);
+            if (natural > width) {
+                width = natural;
+                widest = candidate;
+            }
+        }
+        let height = 0;
+        for (const candidate of candidates) {
+            markup(twin, nobreak(candidate));
+            const [, natural] = twin.get_preferred_height(width);
+            height = Math.max(height, natural);
+        }
+        markup(twin, nobreak(widest));
+        twin.min_height = height;
+        this._sizerMarkup = widest;
     }
 
     _renderScenes(scenes) {
@@ -374,10 +452,21 @@ class SvolderIndicator extends PanelMenu.Button {
     _onOpen(open) {
         if (open) {
             this._render();
-        } else if (this._clickLine !== '') {
-            this._clickLine = '';
+        } else {
+            this._hovered = null;
+            if (this._clickLine !== '')
+                this._clickLine = '';
             this._render();
         }
+    }
+
+    _onSegmentHover(i, hover) {
+        if (hover)
+            this._hovered = i;
+        else if (this._hovered === i)
+            this._hovered = null;
+        if (this._path)
+            this._renderPathLine();
     }
 
     // -- actions --------------------------------------------------------------------------
@@ -422,8 +511,11 @@ class SvolderIndicator extends PanelMenu.Button {
     _onEqSwitch() {
         if (this._guard || !this._view)
             return;
-        // The switch has already moved; a failing call puts it back with the next render.
-        this._runAction('eq', eqSwitchArgs(this._view.actions, !this._eqRow.switch.state));
+        // The switch has already moved; a failing call puts it back with the next render. A move
+        // back to the state the line shows has nothing to run: the next line settles it.
+        if (eqSwitchSettled(this._view.computer_eq, this._eqRow.switch.state))
+            return;
+        this._runAction('eq', eqSwitchArgs(this._view.actions, !this._eqRow.switch.state, this._view.computer_eq));
     }
 
     _onSliderValue() {

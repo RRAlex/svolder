@@ -3,7 +3,7 @@
 
 // The indicator's view data: one `svolder panel --json` line in, what the bar and the popup draw
 // out. Nothing here talks to the shell, St or Clutter, so `gjs -m` tests run it anywhere. The
-// Path strip's tones and its off-only words, the signal's bars, weak and old, and every choice's
+// Path strip's tones and words, the signal's bars, weak and old, and every choice's
 // CLI arguments arrive judged in the line; this module only turns them into colours, strings and
 // markup.
 
@@ -240,10 +240,13 @@ export function popupView(view, nowMs, failure = null) {
     const preset = !away && dev?.preset ? {
         label: 'DAC preset', value: dev.preset.on ?? '', choices: choiceRows(dev.preset),
     } : null;
+    // The switch is "the computer changes the sound" when svolder sends one; an older svolder's
+    // line has none, and the switch is the EQ's own, as it always was.
     const computerEq = view.computer_eq ? {
         label: 'Computer EQ',
-        on: view.computer_eq.on,
-        value: view.computer_eq.preset ?? '',
+        on: view.computer_eq.switch?.on ?? view.computer_eq.on,
+        switchName: view.computer_eq.switch?.name ?? 'Computer EQ on or off',
+        value: [view.computer_eq.preset, view.computer_eq.level].filter(Boolean).join(' \u00b7 '),
         choices: choiceRows({on: view.computer_eq.preset, choices: view.computer_eq.choices}),
     } : null;
 
@@ -252,15 +255,66 @@ export function popupView(view, nowMs, failure = null) {
         const color = {good: COLORS.green, warn: COLORS.yellow, unknown: COLORS.stripGrey};
         path = {
             label: view.path.label,
-            segments: view.path.segments.map(s => ({hop: s.hop, color: color[s.tone] ?? COLORS.stripGrey})),
+            segments: view.path.segments.map(s => ({
+                hop: s.hop,
+                color: color[s.tone] ?? COLORS.stripGrey,
+                tone: s.tone,
+                words: s.words ?? '',
+            })),
             off: view.path.off,
             offMarkup: view.path.off ? offMarkup(view.path.off) : '',
+            // An older svolder's line has no rest line: its off words, in yellow, are what it drew.
+            rest: view.path.rest ?? (view.path.off ? {text: view.path.off, tone: 'warn'} : {text: '', tone: 'plain'}),
         };
     }
 
     const scenes = {on: view.scenes.on, choices: choiceRows(view.scenes)};
     const note = dev ? null : 'no device yet: svolder setup';
     return {failure: null, note, header, volume, input, preset, computerEq, path, scenes};
+}
+
+// The line beside the Path strip: the segment's own words while the pointer is on segment
+// `hovered` (an index, or null), else the rest line the panel gives. `tone` names the colour and
+// `color` is it: good green, warn yellow, plain neutral; `markup` is ready for a label.
+const toneColor = {good: COLORS.green, warn: COLORS.yellow};
+// Every line starts with an invisible mark of the dB unit's size and rise, so a line with the unit
+// and one without are the same height at any text scale (it leads, as an ellipsis cuts the end).
+const lineHeightMark = () => popupUnit('', '\u200b', 12);
+export function stripLine(path, hovered = null) {
+    const seg = hovered === null ? undefined : path?.segments[hovered];
+    if (seg && seg.words !== '') {
+        const tone = seg.tone in toneColor ? seg.tone : 'plain';
+        return {visible: true, tone, color: toneColor[tone] ?? COLORS.dim,
+            markup: lineHeightMark() + escapeMarkup(seg.words)};
+    }
+    const rest = path?.rest;
+    if (!rest || rest.text === '')
+        return {visible: false, tone: 'plain', color: COLORS.dim, markup: `${lineHeightMark()}\u00a0`};
+    const markup = rest.tone === 'warn' ? offMarkup(rest.text) : escapeMarkup(rest.text);
+    return {visible: true, tone: rest.tone, color: toneColor[rest.tone] ?? COLORS.dim, markup: lineHeightMark() + markup};
+}
+
+// A line's words as the label draws them: a part (the words between two ` \u00b7 `) never breaks
+// inside, so a line that wraps does so only at the separators, the dot staying with the part
+// before it; a hyphen takes a word joiner after it, so `32-bit` stays whole. Only the text
+// outside the markup's tags changes.
+export function nobreak(markup) {
+    return markup.split(/(<[^>]*>)/).map(chunk => chunk.startsWith('<')
+        ? chunk
+        : chunk.replaceAll(' \u00b7 ', '\u00a0\u00b7\u0001').replaceAll(' ', '\u00a0').replaceAll('\u0001', ' ')
+            .replaceAll('-', '-\u2060')).join('');
+}
+
+// Every line the Path row can draw in this state, as label markup: the rest line and each
+// segment's words (hovered), the ones with something to say. The indicator measures them and sizes
+// the line for the widest, so hovering never changes the menu's width. A segment's words are drawn
+// plain and the rest line's dB unit small, so the widest cannot be told by counting characters.
+// `keep` is the markup the line is already sized for, kept as a candidate while the menu is open so
+// the line never shrinks under the pointer (it only grows, on new words).
+export function lineCandidates(path, keep = null) {
+    const hovers = [null, ...(path?.segments ?? []).map((_, i) => i)];
+    const found = hovers.map(hovered => stripLine(path, hovered)).filter(line => line.visible).map(line => line.markup);
+    return keep !== null && keep !== undefined && !found.includes(keep) ? [...found, keep] : found;
 }
 
 export function parseLine(line) {

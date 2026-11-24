@@ -42,6 +42,7 @@ fn stream(rate_hz: u32, format: &str, volume_milli: u32) -> Option<StreamFacts> 
         rate_hz: Some(rate_hz),
         format: Some(format.to_string()),
         volume_milli: Some(volume_milli),
+        channels: Some(2),
         muted: false,
     })
 }
@@ -140,11 +141,53 @@ fn others_mixing_counts_running_streams_but_not_the_player() {
 }
 
 #[test]
+fn no_followed_player_and_one_running_stream_takes_that_stream_as_the_unnamed_player() {
+    let found = facts(ONE_STREAM, None, "");
+    assert_eq!(found.player_match, PlayerMatch::NoMpris);
+    assert_eq!(found.player, stream(44_100, "S16LE", 0));
+    assert_eq!(found.others_mixing, 0);
+}
+
+#[test]
+fn no_followed_player_takes_the_lone_stream_that_the_filter_feeding_the_sink_carries() {
+    let found = facts(HOST_EQ, None, "");
+    assert_eq!(found.player_match, PlayerMatch::NoMpris, "{found:?}");
+    assert!(found.player.is_some());
+    assert!(found.host_eq);
+    assert_eq!(found.others_mixing, 0);
+}
+
+#[test]
+fn no_followed_player_and_a_lone_stream_into_another_sink_is_no_player() {
+    let found = facts(ELSEWHERE, None, "");
+    assert_eq!(found.player_match, PlayerMatch::NoPlayer, "{found:?}");
+    assert_eq!(found.player, None);
+}
+
+#[test]
+fn no_followed_player_and_no_running_stream_stays_no_player() {
+    let idle = edited(ONE_STREAM, "pw-cat", |node| {
+        node["info"]["state"] = serde_json::json!("idle");
+    });
+    let found = facts(&idle, None, "");
+    assert_eq!(found.player_match, PlayerMatch::NoPlayer);
+    assert_eq!(found.player, None);
+    assert_eq!(found.others_mixing, 0);
+}
+
+#[test]
 fn no_followed_player_means_no_match_and_every_running_stream_is_another() {
     let found = facts(TWO_STREAMS, None, "");
     assert_eq!(found.player_match, PlayerMatch::NoPlayer);
     assert_eq!(found.player, None);
     assert_eq!(found.others_mixing, 2);
+}
+
+/// The stream's channels are the `channels` of its negotiated `Format`.
+#[test]
+fn the_players_channels_are_read_from_its_format() {
+    let found = facts(TWO_STREAMS, Some(FIRST_PID), "");
+    assert_eq!(found.player.expect("a stream").channels, Some(2));
 }
 
 #[test]
@@ -519,6 +562,7 @@ fn every_known_way_of_finding_the_player_round_trips() {
         PlayerMatch::Elsewhere { sink: "TV".into() },
         PlayerMatch::NotFound,
         PlayerMatch::NoPlayer,
+        PlayerMatch::NoMpris,
     ] {
         let route = RouteFacts {
             player_match: found.clone(),
@@ -604,6 +648,7 @@ fn stages(eq: bool, crossfeed: bool, speakers: bool) -> Option<ChainStages> {
         loudness: false,
         crossfeed,
         speakers,
+        untouched: false,
     })
 }
 
@@ -655,6 +700,20 @@ fn stages_of_a_view_with_the_older_svolder_note_are_not_known() {
 fn stages_of_a_view_with_the_pass_through_note_are_none_on() {
     let view = view_with(false, false, false, Some(crate::eq::PASSTHROUGH_NOTE));
     assert_eq!(ChainStages::of_view(&view), stages(false, false, false));
+}
+
+#[test]
+fn stages_of_a_pass_through_under_a_standing_note_are_none_on() {
+    let mut view = view_with(
+        false,
+        false,
+        false,
+        Some("the computer EQ chain was started again"),
+    );
+    view.levels = Some(crate::eq::ChainLevels::of(true, 0.0, 0.0, -7.6, true));
+    assert_eq!(ChainStages::of_view(&view), stages(false, false, false));
+    view.levels = Some(crate::eq::ChainLevels::of(true, -7.6, 0.0, -7.6, false));
+    assert_eq!(ChainStages::of_view(&view), None);
 }
 
 #[test]

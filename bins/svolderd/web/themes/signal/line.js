@@ -36,16 +36,21 @@ export const shownHopId = (url) => `device:${url}`;
 /** The device `url`'s model: the shown one's, or a followed one's. */
 export const deviceOf = (page, url) => (url === page.shown ? page.device : page.followed?.[url]) ?? null;
 
+/** Whether a hop of the path is the player's: `player`, or `player (no MPRIS)` for a sound with no
+ * MPRIS player behind it. */
+const isPlayerHop = (hop) => hop.label === 'player' || hop.label.startsWith('player (');
+
 /** The words of the player: the path's reading of its stream, else its rate, then its status. */
 function playerHop(page, path) {
   const { track } = page.host;
-  const detail = path.find((hop) => hop.label === 'player')?.detail
-    || rateWords(page.host.route?.player_rate_hz);
+  const own = path.find(isPlayerHop);
+  const detail = own?.detail || rateWords(page.host.route?.player_rate_hz);
   return {
     id: 'player',
     kind: 'player',
-    name: playerName(track.source),
-    words: [detail, track.status].filter(Boolean),
+    // With no track the sound has no MPRIS player behind it: the path's own label says so.
+    name: track ? playerName(track.source) : (own?.label ?? playerName('')),
+    words: [detail, track?.status].filter(Boolean),
     live: true,
     changes: false,
     url: null,
@@ -167,7 +172,7 @@ export function hopsOf(page, shownUrl, state = 'open', chosen = null) {
   const alone = isAmp && !dac;
   const after = rows.filter((row) => row.after === shownUrl);
   const hops = [];
-  if (page.host?.track) hops.push(playerHop(page, path));
+  if (page.host?.track || path.some(isPlayerHop)) hops.push(playerHop(page, path));
   if (page.host) hops.push(computerHop(page, path, !isAmp, chosen === 'computer'));
   if (alone) hops.push(standin('standin-dac', NO_DAC, []));
   else if (dac) hops.push(dacBefore(dac));

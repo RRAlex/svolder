@@ -403,20 +403,21 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
         Hit::PointField(point, _) | Hit::Point(point) => {
             lines(&[&format!("Point {}", point + 1), "the wheel steps the gain"])
         }
-        Hit::CrossfeedOn | Hit::CrossfeedModel(_) => lines(&[
-            "Crossfeed",
-            "a click on the word turns it on or off · ‹ › picks the model",
+        Hit::Stage(stage) => lines(&[
+            stage.label(),
+            "a click opens its panel · Tab and ⇧Tab step between stages · f: bypass",
         ]),
-        Hit::Crossfeed(Xf::Preset) | Hit::CrossfeedStep(Xf::Preset, _) => match app.screen {
-            Screen::Tone => lines(&["Crossfeed", "← → preset · , . model · ␣ on/off · X here"]),
-            _ => lines(&[
-                "Crossfeed",
-                "← → ␣ on/off · , . preset · Enter or X: all of it",
-            ]),
-        },
+        Hit::Crossfeed(Xf::Model) | Hit::CrossfeedStep(Xf::Model, _) => lines(&[
+            "Crossfeed model",
+            "← → the models, round · X: the Space panel",
+        ]),
+        Hit::Crossfeed(Xf::Preset) | Hit::CrossfeedStep(Xf::Preset, _) => lines(&[
+            "Crossfeed preset",
+            "← → the model's presets, round · X: the Space panel",
+        ]),
         Hit::Crossfeed(Xf::Space) | Hit::CrossfeedStep(Xf::Space, _) => lines(&[
             "Space",
-            "← → Off · Crossfeed · Virtual speakers · ␣ on/off · Enter or S: sets",
+            "← → highlight Off · Crossfeed · Virtual speakers · Enter plays it · ␣ on/off · S: sets",
         ]),
         Hit::Crossfeed(Xf::Set) | Hit::CrossfeedStep(Xf::Set, _) => lines(&[
             "Virtual speakers set",
@@ -433,9 +434,13 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
             "Loudness strength",
             "click or drag the bar · the wheel steps it",
         ]),
+        Hit::Ld(Ld::On) | Hit::LdStep(Ld::On, _) => lines(&[
+            "Loudness",
+            "← → off · on · ␣ on/off · it follows the computer's volume",
+        ]),
         Hit::Ld(Ld::Reference) | Hit::LdStep(Ld::Reference, _) => lines(&[
             "Loudness reference",
-            "← → steps it · r: the current volume · flat at and above it",
+            "← → steps it · Enter types it · r: the volume now · flat at and above it",
         ]),
         Hit::Ld(Ld::Strength) | Hit::LdStep(Ld::Strength, _) => lines(&[
             "Loudness",

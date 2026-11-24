@@ -10,7 +10,7 @@ fn the_device_screen_draws_the_controls_the_tone_summary_and_the_status() {
     assert_rows(
         &screen(&mockup_app()),
         &[
-            " svolder  Gungnir 2 · fw 3 · 0102…08  ● connected                 mouse:on 14:02",
+            " svolder  Gungnir 2 · fw 3 · 0102…08  ● connected                mouse:on 14:02 ",
             "─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─",
             "┌ Controls ─────────── mute ─ 0 centre ┐┌ Tone control ──────── flat ─ presets ┐",
             "│ ▶ Input        ‹ 3 · Optical ›       ││   Mode      ‹ EQ ›                   │",
@@ -171,7 +171,7 @@ fn a_very_wide_terminal_centres_the_body_and_keeps_the_header_full_width() {
         ),
         "the tab strip is not full width"
     );
-    assert!(rows[1].ends_with("mouse:on 14:02"), "|{}|", rows[1]);
+    assert!(rows[1].ends_with("mouse:on 14:02 "), "|{}|", rows[1]);
     assert!(
         rows[59].trim().starts_with('└') && rows[59].trim().ends_with('┘'),
         "the body does not run to the last row: |{}|",

@@ -13,7 +13,7 @@ import { ROWS_SHOWN } from '../../../core/computer.js';
 import { isLong } from '../../../core/table.js';
 import { gainText, hzText, qText } from '../../../core/words.js';
 import {
-  COMPUTER, POINTS, SHELF, WORDS, rateWords,
+  CHAIN, COMPUTER, POINTS, SHELF, WORDS, rateWords,
 } from '../words.js';
 import { chip } from './choices.js';
 import { esc } from './esc.js';
@@ -55,12 +55,48 @@ export function computerVolume(volume, inert) {
     + `<span id="sg-cknob" class="sg-vknob" data-at="${at}"></span></div>${note}`;
 }
 
-/** The mode: `Off` and `EQ` as chips, as Signal draws a DAC's. */
-export function computerMode(tone, inert) {
+/** The words of one stage in the strip: its name and its level (`EQ −7.8`, `Loudness 60 %`, `Space
+ * speakers −7.0`), or its name and `off`. */
+const stageWords = (stage) => {
+  const kind = stage.kind && CHAIN.space[stage.kind] ? ` ${CHAIN.space[stage.kind]}` : '';
+  return stage.on ? `${stage.name}${kind} ${stage.text}` : `${stage.name} ${CHAIN.off}`;
+};
+
+/** The strip's inside: a word for each stage (a button that opens the Sound popup at its tab; plain
+ * text for a viewer who may not write, as that popup is a writer's) and the daemon's total. Each
+ * stage word has its own id, so the focus survives a redraw. `levels` is `core.computer.levelsOf`. */
+export function stripHtml(levels, inert = false) {
+  const dot = '<span class="sg-sep" aria-hidden="true"> · </span>';
+  const stages = levels.stages.map((s) => {
+    const words = stageWords(s);
+    const cls = `sg-stage${s.on ? ' on' : ''}`;
+    if (inert) return `<span id="sg-cstage-${esc(s.key)}" class="${cls}" data-stage="${esc(s.key)}">${esc(words)}</span>`;
+    return `<button type="button" id="sg-cstage-${esc(s.key)}" class="${cls}" data-act="cstage"`
+      + ` data-stage="${esc(s.key)}"${s.kind ? ` data-kind="${esc(s.kind)}"` : ''} aria-label="${esc(CHAIN.opens(words))}">`
+      + `${esc(words)}</button>`;
+  }).join(dot);
+  return levels.words ? `${stages}${dot}<span class="sg-total">${esc(levels.words)}</span>` : stages;
+}
+
+/** The Bypass chip, pressed while the bypass is on. It is dim while nothing plays and nothing is
+ * held, but a writer's tap still goes to the daemon, which says why in its own words; a viewer who
+ * may not write has it disabled. */
+export function bypassChip(bypass, inert) {
+  const dim = !bypass.can && !inert;
+  return button('cbypass', CHAIN.bypass, inert,
+    ` id="sg-cbypass" data-comp="bypass" aria-pressed="${bypass.on}"`, `sg-chip${bypass.on ? ' on' : ''}${dim ? ' quiet' : ''}`);
+}
+
+/** The mode: `Off` and `EQ` as chips, as Signal draws a DAC's, then `Bypass` and the strip of the
+ * stages' levels where the host has them. `chain` is `{ levels, bypass }` from the core. */
+export function computerMode(tone, inert, chain = null) {
   const chips = tone.modes.map((m) => chip('cmode', m.label, inert,
     ` id="sg-cm-${esc(m.name)}" data-mode="${esc(m.name)}"`, m.on)).join('');
+  const bypass = chain?.bypass ? bypassChip(chain.bypass, inert) : '';
+  const strip = chain?.levels ? `<p id="sg-cstrip" class="sg-strip" role="group" aria-label="${esc(CHAIN.label)}">`
+    + `${stripHtml(chain.levels, inert)}</p>` : '';
   return `<div id="sg-cmode" class="sg-mode"><span class="sg-lbl">${esc(WORDS.mode)}</span>`
-    + `<div class="sg-set">${chips}</div></div>`;
+    + `<div class="sg-set">${chips}${bypass}</div>${strip}</div>`;
 }
 
 /** The tone graph: the curve the points make, shaded (faint while the EQ is off) and a dot on it for
@@ -85,7 +121,7 @@ export function computerOpen(c, {
   const volume = c.volume ? `<section id="sg-cvolume" class="sg-vol">${computerVolume(c.volume, inert)}</section>` : '';
   const tone = c.tone
     ? `<section id="sg-ctone" class="sg-tone"><span class="sg-lbl">${esc(WORDS.tone)}</span>`
-      + `${computerGraph(c.tone, { inert, picked })}${phone ? computerMode(c.tone, inert) : ''}</section>` : '';
+      + `${computerGraph(c.tone, { inert, picked })}${phone ? computerMode(c.tone, inert, c.chain) : ''}</section>` : '';
   return volume + tone + (vu ? vuArea(vu) : '');
 }
 
@@ -237,5 +273,5 @@ export function computerShelf(page, c, { phone, inert, picked }) {
       + `<section id="sg-cbands" class="sg-col">${points}</section>${facts}`;
   }
   return `<div class="sg-cols"><section id="sg-cbands" class="sg-col">${points}</section>`
-    + `<section id="sg-cmid" class="sg-col">${computerMode(tone, inert)}${presets}</section>${facts}`;
+    + `<section id="sg-cmid" class="sg-col">${computerMode(tone, inert, c.chain)}${presets}</section>${facts}`;
 }

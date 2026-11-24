@@ -204,6 +204,10 @@ stage the node held, and the look settles it.
   it would leave loudness on with no chain after every daemon or TUI restart, because starting the
   service applies nothing outside a container. A crash leaves the last cut until the next owner:
   quieter, never louder.
+- **Loudness off as the last stage** with a stream playing keeps the chain as a pass-through and
+  glides the stage to the identity, 0.5 dB a tick like every other step, instead of snapping it
+  flat under the music; the chain is removed once it has been idle for 3 s. With nothing playing the
+  chain is removed at once.
 - **The configuration on disk never holds a non-identity stage.** A node found holding one while
   loudness is off is sent the identity.
 - **An output change or a new chain** resets nothing: it follows the new sink's volume. A rate

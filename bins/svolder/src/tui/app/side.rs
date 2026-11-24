@@ -277,8 +277,14 @@ impl App {
             self.tone.xf_note = note;
         }
         self.note_speakers_view();
-        // A section the view no longer has gives the keys back to the mode row.
-        if matches!(self.tone.row, ToneRow::Ld(_)) && !self.ld_shown() {
+        // A stage the view no longer has gives the keys back to the mode row.
+        let gone = match self.tone.row {
+            ToneRow::Ld(_) => !self.ld_shown(),
+            ToneRow::Bypass => self.bypass_view().is_none(),
+            ToneRow::Strip(stage) => !self.stages().contains(&stage),
+            _ => false,
+        };
+        if gone {
             self.tone.row = ToneRow::Mode;
         }
         let applied = self.computer_preset();
@@ -373,9 +379,14 @@ impl App {
         };
         self.tone.row = match (self.side, self.tone.row) {
             (Side::Computer, ToneRow::Band | ToneRow::Loudness) => ToneRow::Point(self.tone.point),
-            (Side::Dac, ToneRow::Point(_) | ToneRow::Crossfeed(_) | ToneRow::Ld(_)) => {
-                ToneRow::Band
-            }
+            (
+                Side::Dac,
+                ToneRow::Point(_)
+                | ToneRow::Crossfeed(_)
+                | ToneRow::Ld(_)
+                | ToneRow::Strip(_)
+                | ToneRow::Bypass,
+            ) => ToneRow::Band,
             (_, row) => row,
         };
         if self.screen == Screen::Device {
@@ -542,7 +553,7 @@ impl App {
         Some(match code {
             KeyCode::Char('a') => self.add_point(),
             KeyCode::Char('x') => self.remove_point(),
-            KeyCode::Char('f') => self.computer_mode(None),
+            KeyCode::Char('f') => self.bypass_set(None),
             KeyCode::Char('0') => self.flatten_computer(),
             KeyCode::Char(',') => self.step_point_frequency(-1.0 / 12.0),
             KeyCode::Char('.') => self.step_point_frequency(1.0 / 12.0),

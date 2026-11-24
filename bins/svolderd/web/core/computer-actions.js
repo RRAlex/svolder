@@ -110,6 +110,7 @@ export function createComputerActions({
   const volumeLane = lane('volume', 'api/v1/host/volume', (pct) => ({ pct }));
   const muteLane = lane('mute', 'api/v1/host/mute', (muted) => ({ muted }));
   const modeLane = lane('mode', 'api/v1/host/eq', (on) => ({ on }));
+  const bypassLane = lane('bypass', 'api/v1/host/bypass', (on) => ({ on }));
 
   // Crossfeed: one lane for every field, because the daemon takes the fields of one request
   // together. What has not been sent yet is one body, the fields merged newest-last, and `done` is
@@ -339,6 +340,10 @@ export function createComputerActions({
       return muteLane(!muted);
     },
     setMode: (mode) => modeLane(mode === 'eq'),
+
+    /** Turn the bypass on or off: every stage off as one change, brought back as it was. One
+     * request at a time, the newest waiting. */
+    setBypass: (on) => bypassLane(Boolean(on)),
 
     /** Change the crossfeed: `fields` is any of `on`, `model`, `preset`, `amount_pct`,
      * `crossover_hz`, `delay_ms`; `done` is false while a stepper repeats and true at its end

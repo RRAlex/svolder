@@ -8,7 +8,9 @@
 
 import { TITLE, statusOf } from '../../core/title.js';
 import { ASK_MS } from '../../core/volume-ask.js';
+import { CROSSFEED, LOUDNESS, SOUND, SPEAKERS } from '../../core/popups/listed.js';
 import { eqMarkup, noVolumeMarkup } from './draw/hud.js';
+import { inertOf } from './inert.js';
 import { outrunVolume } from './draw/volume.js';
 import { eqLine, topLine, volumeOf } from './hud.js';
 
@@ -178,7 +180,10 @@ export function wireHud({
   const put = (el, name, html) => {
     if (drawn[name] === html) return;
     drawn[name] = html;
+    // a stage word the keyboard is on is found again by its id once the line is drawn
+    const focus = el.contains?.(el.ownerDocument?.activeElement) ? el.ownerDocument.activeElement.id : '';
     el.innerHTML = html;
+    if (focus) el.querySelector(`#${CSS.escape(focus)}`)?.focus({ preventScroll: true });
   };
 
   function draw(model) {
@@ -190,8 +195,8 @@ export function wireHud({
     if (top.right) page.classList.add('nd-verdict');
     else page.classList.remove('nd-verdict');
     const comp = core.computer.view();
-    const line = eqLine(model, comp);
-    put(eq, 'eq', eqMarkup(line));
+    const line = eqLine(model, comp, comp ? core.computer.levelsOf(model) : null);
+    put(eq, 'eq', eqMarkup(line, !inertOf(model)));
     eq.hidden = !line;
     const v = volumeOf(model, comp);
     if (v.none) put(volume, 'volume', noVolumeMarkup(v.none));
@@ -200,6 +205,14 @@ export function wireHud({
     seenComputer ??= computerKey();
     fade.hold(statusOf(model, view.state) !== TITLE.connected);
   }
+
+  // A stage word of the EQ line opens the Sound popup at its tab (the Space word at Virtual speakers while they play,
+  // else Crossfeed); the line's other words take no pointer.
+  const TABS = { eq: null, speakers: SPEAKERS, crossfeed: CROSSFEED, off: CROSSFEED, loudness: LOUDNESS };
+  eq.addEventListener('click', (event) => {
+    const el = event.target.closest?.('[data-act="stage"]');
+    if (el) core.router.open(SOUND, TABS[el.dataset.stage === 'space' ? el.dataset.kind : el.dataset.stage]);
+  });
 
   const off = core.model.on('volume', (data) => {
     const store = core.model;

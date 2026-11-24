@@ -83,6 +83,13 @@ fn rig() -> (EqControl, FakeChain, FakeParams) {
     (control, chain, params)
 }
 
+/// [`rig`] with the curve in the chain's config, as a chain the command line applied has it.
+fn rig_curve() -> (EqControl, FakeChain, FakeParams) {
+    let (mut control, chain, params) = rig();
+    control.curve_in_conf();
+    (control, chain, params)
+}
+
 /// A controller with the speakers served: sets `set-a` and `set-b` fetched.
 fn spk_rig() -> (EqControl, FakeChain, FakeParams, Dir) {
     let dir = Dir::new();
@@ -229,7 +236,7 @@ fn hot() -> Correction {
 
 #[tokio::test]
 async fn a_part_that_needs_more_preamp_while_a_stream_plays_goes_live_at_the_cap_and_is_lifted() {
-    let (mut control, chain, params) = rig();
+    let (mut control, chain, params) = rig_curve();
     chain.restarts_node_of(&params);
     control.load("Hot".into(), None, hot()).await.unwrap();
     params.set_playing(true);
@@ -599,7 +606,7 @@ async fn a_held_level_is_promised_a_lift_only_while_the_eq_plays() {
 
 #[tokio::test]
 async fn a_cheaper_stage_over_a_bigger_boost_is_held_with_the_held_words_and_lifted_when_idle() {
-    let (mut control, chain, params) = rig();
+    let (mut control, chain, params) = rig_curve();
     chain.restarts_node_of(&params);
     control
         .recall(eq_part(vec![pk(100.0, 3.0, 1.0)], 0.0))
@@ -648,11 +655,12 @@ fn hooked() -> (EqControl, super::vs::HookChain, FakeParams) {
     let params = FakeParams::new();
     params.set_output(Some(sink("a")));
     params.with_loudness_ports();
-    let control = EqControl::new(
+    let mut control = EqControl::new(
         Arc::new(hook.clone()),
         Box::new(params.clone()),
         Keep::Memory,
     );
+    control.curve_in_conf();
     (control, hook, params)
 }
 

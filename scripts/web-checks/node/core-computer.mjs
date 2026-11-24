@@ -450,6 +450,7 @@ await ok('a_guest_flips_and_writes_nothing', async () => {
     await guest.actions.computer.step(1),
     await guest.actions.computer.setMute(true),
     await guest.actions.computer.setMode('eq'),
+    await guest.actions.computer.setBypass(true),
     await guest.actions.computer.recallPreset('Warm'),
     await guest.actions.computer.addPoint({ type: 'PK', f: 100, g: 0, q: 1 }),
     await guest.actions.computer.removePoint(1),
@@ -459,7 +460,7 @@ await ok('a_guest_flips_and_writes_nothing', async () => {
   ];
   assert.deepEqual(guest.posts, []);
   assert.deepEqual(guest.gets, []);
-  assert.equal(answers.filter((a) => a.ok === false && a.error === 'Sign in to change this').length, 10,
+  assert.equal(answers.filter((a) => a.ok === false && a.error === 'Sign in to change this').length, 11,
     JSON.stringify(answers));
   assert.equal(guest.pending.get('point:1'), null, 'a guest holds nothing');
   const readOnly = rig({ viewer: { signed_in: true, guest: false, writes: false, read_only: 'Read-only: [web] writes is off' } });
@@ -474,6 +475,8 @@ await ok('each_action_reaches_its_route_with_one_based_points', async () => {
     [(a) => a.setMute(true), 'api/v1/host/mute', { muted: true }],
     [(a) => a.setMode('eq'), 'api/v1/host/eq', { on: true }],
     [(a) => a.setMode('off'), 'api/v1/host/eq', { on: false }],
+    [(a) => a.setBypass(true), 'api/v1/host/bypass', { on: true }],
+    [(a) => a.setBypass(0), 'api/v1/host/bypass', { on: false }],
     [(a) => a.recallPreset('Warm'), 'api/v1/host/eq/preset', { name: 'Warm', device: 'Gungnir 2' }],
     [(a) => a.addPoint({ type: 'pk', f: 100, g: 1.5, q: 1 }), 'api/v1/host/eq/points',
       { type: 'PK', f: 100, g: 1.5, q: 1 }],
@@ -635,6 +638,112 @@ await ok('the_contract_lists_the_computers_targets', async () => {
     'a preset the computer cannot play is not a target');
   assert.deepEqual(computerTargetsOf(rig({ computer: null }).store.page()), []);
   assert.deepEqual(computerTargetsOf(rig({ device: null }).store.page()), []);
+});
+
+const LEVELS = {
+  eq_db: -7.8, space_db: -7, total_db: -14.8, climb_to_db: null, passthrough: false, untouched: false,
+  words: 'plays −14.8 dB in all',
+};
+const withChain = (over = {}) => {
+  const base = modelOf();
+  return modelOf({
+    eq: {
+      ...base.eq,
+      loudness: { on: true, strength_pct: 60 },
+      crossfeed: { on: false },
+      speakers: { on: true },
+      levels: LEVELS,
+      bypass: { on: false, held: { eq: false, loudness: false, crossfeed: false, speakers: false } },
+      ...over,
+    },
+  });
+};
+
+await ok('levelsOf_gives_the_stages_the_total_and_the_daemons_words', async () => {
+  const r = rig({ computer: withChain() });
+  const levels = r.computer.levelsOf(r.store.page());
+  assert.deepEqual(levels.stages.map((x) => [x.key, x.name, x.on, x.level, x.text]), [
+    ['eq', 'EQ', true, -7.8, '−7.8'],
+    ['loudness', 'Loudness', true, 60, '60 %'],
+    ['space', 'Space', true, -7, '−7.0'],
+  ]);
+  assert.equal(levels.stages[2].kind, 'speakers');
+  assert.equal(levels.total, -14.8);
+  assert.equal(levels.totalText, '−14.8');
+  assert.equal(levels.words, 'plays −14.8 dB in all', 'the words are the daemon\'s, not worked out here');
+  assert.equal(levels.passthrough, false);
+  assert.equal(levels.untouched, false);
+  assert.equal(levels.climbTo, null, 'no climb under way');
+  const climbing = rig({ computer: withChain({ levels: { ...LEVELS, climb_to_db: 0 } }) });
+  assert.equal(climbing.computer.levelsOf(climbing.store.page()).climbTo, 0, 'a climb to 0.0 dB is told as a number');
+  // a stage that is off has no level
+  const off = rig({ computer: withChain({ on: false, speakers: { on: false }, loudness: { on: false, strength_pct: 60 } }) });
+  const quiet = off.computer.levelsOf(off.store.page());
+  assert.deepEqual(quiet.stages.map((x) => [x.on, x.level, x.text]), [[false, null, ''], [false, null, ''], [false, null, '']]);
+  assert.equal(quiet.stages[2].kind, 'off');
+  // the words follow the daemon whatever the numbers say
+  const said = rig({ computer: withChain({ levels: { ...LEVELS, words: 'pass-through, untouched', untouched: true, passthrough: true } }) });
+  assert.equal(said.computer.levelsOf(said.store.page()).words, 'pass-through, untouched');
+  assert.equal(said.computer.levelsOf(said.store.page()).untouched, true);
+  // a host that sends none, or no computer
+  assert.equal(rig().computer.levelsOf(rig().store.page()), null);
+  const bare = rig({ computer: null });
+  assert.equal(bare.computer.levelsOf(bare.store.page()), null);
+});
+
+await ok('bypassOf_says_on_can_and_the_held_stages_and_setBypass_round_trips', async () => {
+  const r = rig({ computer: withChain() });
+  assert.deepEqual(r.computer.bypassOf(r.store.page()), {
+    on: false, can: true, held: { eq: false, loudness: false, crossfeed: false, speakers: false },
+  });
+  assert.equal(rig().computer.bypassOf(rig().store.page()), null, 'no bypass offered by a host without one');
+  // nothing plays and nothing is held: nothing to bypass
+  const idle = rig({ computer: withChain({ on: false, speakers: { on: false }, loudness: { on: false } }) });
+  assert.equal(idle.computer.bypassOf(idle.store.page()).can, false);
+  // a write is held as asked until the model says it
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const slow = rig({ computer: withChain(), reply: () => gate.then(() => ({ status: 200, ok: true })) });
+  const done = slow.actions.computer.setBypass(true);
+  await flush();
+  assert.deepEqual(slow.posts, [['api/v1/host/bypass', { on: true }]]);
+  assert.equal(slow.computer.bypassOf(slow.store.page()).on, true, 'drawn as asked');
+  slow.state.host = {
+    track: null, route: null,
+    computer: withChain({ on: false, speakers: { on: false }, loudness: { on: false },
+      bypass: { on: true, held: { eq: true, loudness: true, crossfeed: false, speakers: true } } }),
+  };
+  release();
+  await done;
+  await flush();
+  const after = slow.computer.bypassOf(slow.store.page());
+  assert.deepEqual(after, {
+    on: true, can: true, held: { eq: true, loudness: true, crossfeed: false, speakers: true },
+  });
+  assert.equal(slow.pending.get('bypass'), null, 'the hold went once the model said it');
+  // the other order: the answer comes, the page reads the model that still says off (held
+  // value goes), and the newer model event with the bypass on shows it
+  const order = rig({ computer: withChain() });
+  await order.actions.computer.setBypass(true);
+  await flush();
+  assert.equal(order.computer.bypassOf(order.store.page()).on, false, 'the read said off: that is shown');
+  order.store.emit('host', { track: null, route: null,
+    computer: withChain({ on: false, bypass: { on: true, held: { eq: true } } }) });
+  assert.equal(order.computer.bypassOf(order.store.page()).on, true);
+  assert.equal(order.pending.get('bypass'), null);
+  // a refusal toasts, shows what the daemon holds, and rereads
+  const refused = rig({ computer: withChain(), reply: () => ({ status: 409, error: 'nothing plays on the computer to bypass' }) });
+  await refused.actions.computer.setBypass(true);
+  await flush();
+  assert.equal(refused.computer.bypassOf(refused.store.page()).on, false);
+  assert.deepEqual(refused.toasts, ['nothing plays on the computer to bypass']);
+});
+
+await ok('the_contract_lists_bypass_after_mode_while_the_model_has_one', async () => {
+  const names = computerTargetsOf(rig({ computer: withChain() }).store.page()).map((t) => t.computer);
+  assert.deepEqual(names.slice(0, 5), ['flip', 'volume', 'mute', 'mode', 'bypass']);
+  const none = computerTargetsOf(rig().store.page()).map((t) => t.computer);
+  assert.equal(none.includes('bypass'), false, 'a host with no bypass offers none');
 });
 
 await ok('a_full_model_event_mid_drag_keeps_the_drags_holds_and_another_device_drops_them', async () => {

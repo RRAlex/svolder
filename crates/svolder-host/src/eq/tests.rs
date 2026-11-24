@@ -291,6 +291,7 @@ fn state() -> HostEqState {
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     }
 }
 

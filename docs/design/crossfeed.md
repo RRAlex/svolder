@@ -167,11 +167,15 @@ The controller keeps two facts apart: whether a chain runs (`runs`) and whether 
   turned on while it is flat sends the slots live; both off removes the chain, except that while a
   stream plays through it the chain stays as a flat pass-through (preamp 0 dB, lower only if the
   loaded configuration forces it, live with no sink swap, so the player is not paused) until nothing
-  has played through it for about 30 s (`IDLE_KEEP`; `SVOLDER_EQ_IDLE_TICKS` shortens it for tests);
-  "playing" is a `running` stream node linked into the chain's sink, never a monitor capture. A
-  graceful stop, an owner restart or a death removes it at once, and the view note says "chain kept
-  as a pass-through until idle". None of the first two applies or removes anything. Two chains never
-  stack.
+  has played through it for about 3 s (`IDLE_KEEP`, 60 ticks: three looks in a row;
+  `SVOLDER_EQ_IDLE_TICKS` sets it); "playing" is a `running` stream node linked into the chain's
+  sink, never a monitor capture. A graceful stop, an owner restart or a death removes it at once,
+  and the view note says "chain kept as a pass-through until idle". None of the first two applies or
+  removes anything. Two chains never stack.
+- **The level shown.** `EqView.levels.space_db` is the stage's cost (negative) and `eq_db` the EQ's
+  share of the preamp; `total_db` is their sum. Crossfeed off climbs from that total to the EQ's own
+  level at 0.32 dB a tick (`climbing to 0.0 dB`), so the sound does not jump
+  ([host-control-preamp.md](host-control-preamp.md#the-climb)).
 - **The level.** The stage costs `stage_cost_db`: the worst gain rounded up to 0.1 dB, with float
   noise as the only tolerance (the EQ's preamp beside it forgives 0.008 dB), subtracted from the
   EQ's preamp and re-folded whenever model, level, crossover or delay move it. One update lowers the
@@ -204,24 +208,24 @@ The controller keeps two facts apart: whether a chain runs (`runs`) and whether 
   rate, or turned off with a note when it cannot play there (no rate in the engine's ranges reaches
   that branch) or the rate is above 384 kHz, the highest the stage's cost is worked out for (the
   note says "crossfeed runs only up to 384 kHz"; turning it on there is refused in those words).
-- **Reverts are seen, mostly.** A look that finds any port (the preamp, the stage's mixer or a
-  slot) known to have taken its sent value at another value, at the same node and rate, sends
-  everything again (at most 4 times in 5 s, then crossfeed turns off with a note). A port is known
-  to have taken it when a look found it there, or when a look saw a port of the same line or a
-  later one move to its sent value (`pw-cli` applies each line whole and in order). A rebuild keeps
-  only the preamp, so a line that did not move it cannot be seen to land: a port of such a line
-  that a look still finds off its value a look after the line went is sent again once for that line
-  (whether a rebuild or a slow `pw-cli` kept it off), and is no revert. A line that is merely late
-  is sent at most once more. A third rebuild between that resend and the next look is not seen: the
-  port stays at the config's value until the next edit (under unity; a known limit).
+- **Reverts are seen, mostly.** A look that finds any port (the preamp, the stage's mixer or a slot)
+  known to have taken its sent value at another value, at the same node and rate, sends everything
+  again (at most 4 times in 5 s, then crossfeed turns off with a note). A port is known to have
+  taken it when a look found it there, or when a look saw a port of the same line or a later one
+  move to its sent value (`pw-cli` applies each line whole and in order). A rebuild keeps only the
+  preamp, so a line that did not move it cannot be seen to land: a port of such a line that a look
+  still finds off its value a look after the line went is sent again once for that line (whether a
+  rebuild or a slow `pw-cli` kept it off), and is no revert. A line that is merely late is sent at
+  most once more. A third rebuild between that resend and the next look is not seen: the port stays
+  at the config's value until the next edit (under unity; a known limit).
 - **A dead chain is noticed** through `Host::exited` (`control/exit.rs`), one task of the controller
   for the chain's life that only waits and then signals it: it follows the chain (an apply or remove
   is not an exit), resolves when an EQ is on and no process runs it (a unit: only when systemd
   answers inactive or failed), and never while no EQ is on or when the chain cannot be looked at
   until the next apply or remove looks again. The first death starts the chain again with crossfeed
   off; a second within 10 s of that restart is ridden out and starts it again too (a PipeWire
-  restart stops it once more), and only a third, again within 10 s, turns the EQ off with a note.
-  It is never recreated per tick, and after it resolves the controller applies or removes before
+  restart stops it once more), and only a third, again within 10 s, turns the EQ off with a note. It
+  is never recreated per tick, and after it resolves the controller applies or removes before
   waiting again.
 - **After a crash** the state's `crossfeed_on` and `flat` make the next owner start take the stage
   out of the chain, or remove it. Settings changed while no state file exists are kept in memory

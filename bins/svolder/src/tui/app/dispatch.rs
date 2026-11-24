@@ -135,9 +135,9 @@ impl App {
         }
         if self.tone.xf_line.is_some() {
             // A line whose row the keys have left closes, as Esc closes it; the key then acts.
-            match self.xf_row() {
-                Some(_) => return self.xf_key(key.code).unwrap_or_default(),
-                None => self.tone.xf_line = None,
+            match self.line_row_held() {
+                true => return self.xf_line_key(key.code),
+                false => self.tone.xf_line = None,
             }
         }
         // `Esc` lets go of a point being dragged on the tone curve, and does nothing else then.
@@ -173,8 +173,11 @@ impl App {
             KeyCode::BackTab => return self.cycle_pane(-1),
             _ => {}
         }
-        // The Loudness and Crossfeed rows take their keys (`Esc` folds the section) before the
-        // global ones.
+        // The computer side's stages take their keys before the global ones.
+        if let Some(intents) = self.stage_key(code) {
+            return intents;
+        }
+        // The device pane's Loudness and Space rows take theirs before the global ones.
         if let Some(intents) = self.ld_key(code) {
             return intents;
         }
@@ -364,6 +367,7 @@ impl App {
             KeyCode::Char('i') => self.flip_key("phase"),
             KeyCode::Char('o') => self.flip_key("nos"),
             KeyCode::Char('X') if self.crossfeed_shown() => self.jump_to_crossfeed(),
+            KeyCode::Char('L') if self.ld_shown() => self.jump_to_loudness(),
             KeyCode::Char('S') if self.space_shown() => self.open_sets(),
             KeyCode::Char('z') => self.open_scenes(),
             KeyCode::Char('k') if self.screen == Screen::Device && self.setup_offered() => {
@@ -478,7 +482,10 @@ impl App {
         if self.screen != screen {
             // The Crossfeed focus belongs to the screen it was made on; the screen shown next
             // opens on its own row (`X` and Enter put the keys in the section after this).
-            if matches!(self.tone.row, ToneRow::Crossfeed(_) | ToneRow::Ld(_)) {
+            if matches!(
+                self.tone.row,
+                ToneRow::Crossfeed(_) | ToneRow::Ld(_) | ToneRow::Strip(_) | ToneRow::Bypass
+            ) {
                 self.tone.row = ToneRow::Mode;
             }
             self.tone.xf_line = None;

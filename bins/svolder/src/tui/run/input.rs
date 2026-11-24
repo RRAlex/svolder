@@ -370,15 +370,9 @@ pub(super) async fn apply_action<O: Open, M: MouseCapture>(
             watching.app.touched(&intents);
             take_intents(intents, opener, watching, mouse, look, screen).await
         }
-        MouseAction::CrossfeedOn => {
-            let intents = watching.app.xf_toggle(None);
-            watching.app.touched(&intents);
-            take_intents(intents, opener, watching, mouse, look, screen).await
-        }
-        MouseAction::CrossfeedModel(dir) => {
-            let intents = watching.app.xf_model_step(dir);
-            watching.app.touched(&intents);
-            take_intents(intents, opener, watching, mouse, look, screen).await
+        MouseAction::Stage(stage) => {
+            watching.app.enter_stage(stage);
+            Flow::Continue(watching)
         }
         MouseAction::Target(side) => {
             let intents = watching.app.click_target(side);

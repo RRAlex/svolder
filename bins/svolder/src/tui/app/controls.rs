@@ -8,7 +8,10 @@ use std::time::Instant;
 
 use crossterm::event::KeyCode;
 use svolder_host::Button;
-use svolder_ipc::host::{DacFacts, DacStage, PathLine, ROUTE_NOT_READ, Verdict, path_line};
+use svolder_ipc::host::{
+    DacFacts, DacStage, NOTHING_PLAYING, PathLine, ROUTE_NOT_READ, Verdict, path_line,
+    plays_without_player,
+};
 use svolder_profiles::roles;
 use svolder_profiles::{Control, ControlKind, Family, Profile, Registry};
 
@@ -17,9 +20,6 @@ use crate::tui::host::{self, HostRow};
 
 use super::intent::{set, updown};
 use super::{App, Intent, Pane, Reading, Screen, Side, divider};
-
-/// What the Path row says with no player to follow.
-const NOTHING_PLAYING: &str = "nothing playing";
 
 /// The built-in profile called `name`, parsed once.
 fn built_in(name: &str) -> Option<&'static Profile> {
@@ -240,8 +240,8 @@ impl App {
     /// The path the sound takes from the player to this device, judged: only for a DAC, which
     /// is what takes sound over the computer's audio (an amp or a preamp has no path), and while
     /// the daemon speaks for the host, so the row does not come and go as playback does. With no
-    /// player it says so, and with a player and no route read yet it says that, as a line that
-    /// names what is not known.
+    /// player and no stream playing it says so, and with a player and no route read yet it says
+    /// that, as a line that names what is not known.
     pub(crate) fn host_path(&self) -> Option<PathLine> {
         if !self.host_shown() || self.profile.family != Family::Dac {
             return None;
@@ -253,10 +253,12 @@ impl App {
             words: vec![words.to_string()],
             dac_stage: None,
         };
-        if self.host.playing.is_none() {
+        let route = daemon.route.as_deref();
+        // With no MPRIS player the route still answers when a stream plays into the sink.
+        if self.host.playing.is_none() && !route.is_some_and(plays_without_player) {
             return Some(unknown(NOTHING_PLAYING));
         }
-        match daemon.route.as_deref() {
+        match route {
             Some(route) => Some(path_line(route, &self.dac_facts())),
             None => Some(unknown(ROUTE_NOT_READ)),
         }

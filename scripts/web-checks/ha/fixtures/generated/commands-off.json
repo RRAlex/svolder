@@ -197,6 +197,15 @@
         "platform": "mqtt",
         "unique_id": "svolder_2C3D4E5F6071A0B1_usb2_connected"
       },
+      "binary_sensor.living_room_bypass": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "binary_sensor.living_room_bypass",
+        "hidden": false,
+        "name": "Bypass",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_computer_bypass"
+      },
       "binary_sensor.living_room_crossfeed": {
         "device_id": "c2",
         "entity_category": null,
@@ -286,6 +295,15 @@
         "name": "Pre-out",
         "platform": "mqtt",
         "unique_id": "svolder_1B2C3D4E5F6071A0_preout"
+      },
+      "binary_sensor.reframe_bypass": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "binary_sensor.reframe_bypass",
+        "hidden": false,
+        "name": "Bypass",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_computer_bypass"
       },
       "binary_sensor.reframe_crossfeed": {
         "device_id": "c1",
@@ -782,6 +800,15 @@
         "platform": "mqtt",
         "unique_id": "svolder_2C3D4E5F6071A0B1_volume"
       },
+      "sensor.living_room_chain_level": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "sensor.living_room_chain_level",
+        "hidden": false,
+        "name": "Chain level",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_computer_level_chain"
+      },
       "sensor.living_room_crossfeed_preset": {
         "device_id": "c2",
         "entity_category": null,
@@ -790,6 +817,15 @@
         "name": "Crossfeed preset",
         "platform": "mqtt",
         "unique_id": "svolder_computer_living_room_computer_crossfeed_preset"
+      },
+      "sensor.living_room_eq_level": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "sensor.living_room_eq_level",
+        "hidden": false,
+        "name": "EQ level",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_computer_level_eq"
       },
       "sensor.living_room_eq_preset": {
         "device_id": "c2",
@@ -826,6 +862,15 @@
         "name": "Scene",
         "platform": "mqtt",
         "unique_id": "svolder_computer_living_room_scene"
+      },
+      "sensor.living_room_space_level": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "sensor.living_room_space_level",
+        "hidden": false,
+        "name": "Space level",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_computer_level_space"
       },
       "sensor.living_room_virtual_speakers_set": {
         "device_id": "c2",
@@ -890,6 +935,15 @@
         "platform": "mqtt",
         "unique_id": "svolder_1B2C3D4E5F6071A0_volume"
       },
+      "sensor.reframe_chain_level": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "sensor.reframe_chain_level",
+        "hidden": false,
+        "name": "Chain level",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_computer_level_chain"
+      },
       "sensor.reframe_crossfeed_preset": {
         "device_id": "c1",
         "entity_category": null,
@@ -898,6 +952,15 @@
         "name": "Crossfeed preset",
         "platform": "mqtt",
         "unique_id": "svolder_computer_reframe_computer_crossfeed_preset"
+      },
+      "sensor.reframe_eq_level": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "sensor.reframe_eq_level",
+        "hidden": false,
+        "name": "EQ level",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_computer_level_eq"
       },
       "sensor.reframe_eq_preset": {
         "device_id": "c1",
@@ -934,6 +997,15 @@
         "name": "Scene",
         "platform": "mqtt",
         "unique_id": "svolder_computer_reframe_scene"
+      },
+      "sensor.reframe_space_level": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "sensor.reframe_space_level",
+        "hidden": false,
+        "name": "Space level",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_computer_level_space"
       },
       "sensor.reframe_virtual_speakers_set": {
         "device_id": "c1",
@@ -1039,6 +1111,13 @@
         "entity_id": "binary_sensor.gungnir_usb_2_connected",
         "state": "unknown"
       },
+      "binary_sensor.living_room_bypass": {
+        "attributes": {
+          "friendly_name": "Living-Room Bypass"
+        },
+        "entity_id": "binary_sensor.living_room_bypass",
+        "state": "unknown"
+      },
       "binary_sensor.living_room_crossfeed": {
         "attributes": {
           "friendly_name": "Living-Room Crossfeed"
@@ -1111,6 +1190,13 @@
           "friendly_name": "Lyr 5 Pre-out"
         },
         "entity_id": "binary_sensor.lyr_5_pre_out",
+        "state": "unknown"
+      },
+      "binary_sensor.reframe_bypass": {
+        "attributes": {
+          "friendly_name": "reframe Bypass"
+        },
+        "entity_id": "binary_sensor.reframe_bypass",
         "state": "unknown"
       },
       "binary_sensor.reframe_crossfeed": {
@@ -1525,11 +1611,27 @@
         "entity_id": "sensor.gungnir_volume",
         "state": "unknown"
       },
+      "sensor.living_room_chain_level": {
+        "attributes": {
+          "friendly_name": "Living-Room Chain level",
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "sensor.living_room_chain_level",
+        "state": "unknown"
+      },
       "sensor.living_room_crossfeed_preset": {
         "attributes": {
           "friendly_name": "Living-Room Crossfeed preset"
         },
         "entity_id": "sensor.living_room_crossfeed_preset",
+        "state": "unknown"
+      },
+      "sensor.living_room_eq_level": {
+        "attributes": {
+          "friendly_name": "Living-Room EQ level",
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "sensor.living_room_eq_level",
         "state": "unknown"
       },
       "sensor.living_room_eq_preset": {
@@ -1568,6 +1670,14 @@
           "friendly_name": "Living-Room Scene"
         },
         "entity_id": "sensor.living_room_scene",
+        "state": "unknown"
+      },
+      "sensor.living_room_space_level": {
+        "attributes": {
+          "friendly_name": "Living-Room Space level",
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "sensor.living_room_space_level",
         "state": "unknown"
       },
       "sensor.living_room_virtual_speakers_set": {
@@ -1622,11 +1732,27 @@
         "entity_id": "sensor.lyr_5_volume",
         "state": "unknown"
       },
+      "sensor.reframe_chain_level": {
+        "attributes": {
+          "friendly_name": "reframe Chain level",
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "sensor.reframe_chain_level",
+        "state": "unknown"
+      },
       "sensor.reframe_crossfeed_preset": {
         "attributes": {
           "friendly_name": "reframe Crossfeed preset"
         },
         "entity_id": "sensor.reframe_crossfeed_preset",
+        "state": "unknown"
+      },
+      "sensor.reframe_eq_level": {
+        "attributes": {
+          "friendly_name": "reframe EQ level",
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "sensor.reframe_eq_level",
         "state": "unknown"
       },
       "sensor.reframe_eq_preset": {
@@ -1665,6 +1791,14 @@
           "friendly_name": "reframe Scene"
         },
         "entity_id": "sensor.reframe_scene",
+        "state": "unknown"
+      },
+      "sensor.reframe_space_level": {
+        "attributes": {
+          "friendly_name": "reframe Space level",
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "sensor.reframe_space_level",
         "state": "unknown"
       },
       "sensor.reframe_virtual_speakers_set": {

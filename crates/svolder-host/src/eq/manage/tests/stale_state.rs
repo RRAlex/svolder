@@ -47,6 +47,27 @@ async fn an_apply_keeps_the_crossfeed_settings_and_never_starts_with_it_on() {
 }
 
 #[tokio::test]
+async fn an_apply_keeps_the_held_bypass() {
+    let f = Fixture::new();
+    let host = f.host(Manager::Systemd);
+    host.apply(request("First")).await.unwrap();
+    let mut state = host.state().unwrap();
+    let held = crate::eq::HeldStages {
+        eq: true,
+        loudness: true,
+        crossfeed: false,
+        speakers: false,
+    };
+    state.bypass = Some(held);
+    state
+        .save(&f.dir.join("state/svolder/host-eq.toml"))
+        .unwrap();
+    let second = host.apply(request("Second")).await.unwrap();
+    assert_eq!(second.bypass, Some(held));
+    assert_eq!(host.state().unwrap().bypass, Some(held), "on disk too");
+}
+
+#[tokio::test]
 async fn a_remove_while_the_speakers_play_leaves_them_off_and_keeps_the_choice() {
     let f = Fixture::new();
     let host = f.host(Manager::Systemd);

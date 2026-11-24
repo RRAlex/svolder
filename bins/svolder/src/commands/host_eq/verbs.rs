@@ -15,7 +15,7 @@ use svolder_profiles::{EqSpec, Registry};
 
 use super::{apply, available, eq_op, remove, served, state, status};
 use crate::backend::{Backend, Globals};
-use crate::commands::device;
+use crate::commands::{device, host_bypass};
 use crate::recovery::{Failure, Kind};
 
 /// `svolder host eq apply TARGET`: a file when TARGET names one, else a preset. A preset that
@@ -82,6 +82,7 @@ pub async fn host_apply(g: &Globals<'_>, target: &str, sink: Option<&str>, yes: 
                 flat: false,
                 crossfeed: None,
                 speakers: None,
+                identity: None,
             };
             apply(request).await.map(Some)
         }
@@ -235,10 +236,13 @@ pub async fn host_remove(g: &Globals<'_>) -> ExitCode {
 /// `svolder host eq status [--json]`.
 pub async fn host_status(g: &Globals<'_>, json: bool) -> ExitCode {
     let mut status = status().await;
+    let daemon = match Config::load().ok() {
+        Some(config) => served(g, &config).await,
+        None => None,
+    };
     // A chain the daemon keeps as its own child is not one this process can see: the daemon's
     // view says whether it runs.
-    if let Some(config) = Config::load().ok()
-        && let Some((_, eq)) = served(g, &config).await
+    if let Some((_, eq)) = &daemon
         && status
             .state
             .as_ref()
@@ -251,9 +255,44 @@ pub async fn host_status(g: &Globals<'_>, json: bool) -> ExitCode {
                 || eq.note.as_deref() == Some(svolder_host::eq::PASSTHROUGH_NOTE),
         );
     }
+    // The daemon's levels and bypass are the live ones; with none, the bypass the state holds.
+    let levels = daemon.as_ref().and_then(|(_, eq)| eq.levels.clone());
+    let bypass = match daemon.as_ref().and_then(|(_, eq)| eq.bypass.clone()) {
+        Some(bypass) => Some(bypass),
+        None => status
+            .state
+            .as_ref()
+            .and_then(|state| state.bypass)
+            .map(|held| svolder_host::eq::BypassView { on: true, held }),
+    };
     match json {
-        true => println!("{}", status.json()),
-        false => status.lines().iter().for_each(|line| println!("{line}")),
+        true => {
+            let mut object = status.json();
+            if let Some(map) = object.as_object_mut() {
+                if let Some(levels) = &levels {
+                    map.insert("levels".to_string(), serde_json::json!(levels));
+                }
+                if let Some(bypass) = &bypass {
+                    map.insert("bypass".to_string(), serde_json::json!(bypass));
+                }
+            }
+            println!("{object}");
+        }
+        false => {
+            let mut lines = status.lines();
+            let words = levels
+                .map(|l| l.words)
+                .filter(|words| !words.is_empty())
+                .map(|words| format!("levels: {words}"));
+            // The levels follow the EQ's own line, ahead of any problem line.
+            lines.splice(1.min(lines.len())..1.min(lines.len()), words);
+            lines.extend(
+                bypass
+                    .filter(|bypass| bypass.on)
+                    .map(|bypass| host_bypass::status_line(&bypass, None)),
+            );
+            lines.iter().for_each(|line| println!("{line}"));
+        }
     }
     ExitCode::SUCCESS
 }
@@ -290,7 +329,9 @@ pub async fn move_to_dac(g: &Globals<'_>, preset: &Preset, yes: bool) -> Result<
 
 /// The socket of the daemon that serves the computer EQ, or the refusal that says why none does:
 /// these verbs change the computer's EQ through the daemon alone, which keeps the chain.
-async fn serving_daemon(g: &Globals<'_>) -> Result<std::path::PathBuf, Failure> {
+pub(in crate::commands) async fn serving_daemon(
+    g: &Globals<'_>,
+) -> Result<std::path::PathBuf, Failure> {
     use crate::commands::host_crossfeed::{Reach, reach};
     let config = Config::load().map_err(|e| Failure::of(Kind::ConfigUnreadable, e.to_string()))?;
     match reach(g, Some(&config)).await {

@@ -131,7 +131,12 @@ openers.player = (page, _hop, view) => playerScreen(page, view.now);
 function computerParts(page, view) {
   const computer = view.computer?.view(page);
   if (computer?.side !== 'computer') return null;
-  return { volume: computer.volume, tone: computer.tone, picked: computer.picked };
+  return {
+    volume: computer.volume,
+    tone: computer.tone,
+    picked: computer.picked,
+    chain: { levels: view.computer.levelsOf(page), bypass: view.computer.bypassOf(page) },
+  };
 }
 
 /** What the computer opens: choosing its hop is the flip, so the DAC's first screen, drawn for the

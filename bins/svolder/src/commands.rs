@@ -18,6 +18,8 @@
 //! - [`hops`]: `hops list|add|link|edit|remove|move`, what the sound goes through after the DAC.
 //! - [`host_crossfeed`]: `host crossfeed`, the crossfeed on what the computer plays, through the daemon.
 //! - [`host_eq`]: `host eq`, an equalizer on what the computer plays.
+//! - [`host_bypass`]: `host bypass`, every stage of the computer off in one change and back as it
+//!   was, through the daemon.
 //! - [`host_loudness`]: `host loudness`, the loudness on what the computer plays, through the
 //!   daemon.
 //! - [`host_speakers`]: `host speakers`, the virtual speakers on what the computer plays, and their
@@ -40,6 +42,7 @@ pub(crate) mod demo;
 pub(crate) mod device;
 pub(crate) mod doctor;
 pub(crate) mod hops;
+pub(crate) mod host_bypass;
 pub(crate) mod host_check;
 pub(crate) mod host_crossfeed;
 pub(crate) mod host_eq;

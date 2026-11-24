@@ -190,6 +190,17 @@
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
 }
 .nd-gains { letter-spacing: .06em; color: var(--nd-mid); text-shadow: none; margin-left: .6em; }
+.nd-levels { letter-spacing: .06em; color: var(--nd-mid); text-shadow: none; }
+.nd-lv { white-space: nowrap; }
+/* the stage words of the EQ line take a mouse press (the HUD's other words do not) and the keyboard; a faded line takes none */
+.nd-lw {
+  all: unset; cursor: pointer; pointer-events: auto; text-decoration: underline dotted; text-underline-offset: 3px;
+}
+.nd-lw:hover { color: var(--nd-ink); }
+.nd-lw:focus-visible { outline: 2px solid var(--nd-ink); outline-offset: 2px; }
+.nd-faded .nd-lw { pointer-events: none; }
+/* under a finger the line stays click-through, as the HUD's other words: a bubble under it is the scene's to grab */
+@media (pointer: coarse) { .nd-lw { pointer-events: none; } }
 .nd-fit {
   letter-spacing: .06em; color: var(--frame-graph-target); text-shadow: none; margin-left: .6em;
   text-transform: none;
@@ -651,6 +662,7 @@
   .nd-left { overflow-wrap: anywhere; }
   .nd-eq { white-space: normal; text-align: center; font-size: calc(var(--nd-hud) * .92); letter-spacing: .1em; }
   .nd-gains, .nd-fit { margin-left: .3em; letter-spacing: .04em; }
+  .nd-levels { letter-spacing: .04em; }
   .nd-debug { top: 150px; }
   .nd-eq { order: 1; }
   .nd-vol { order: 2; margin-top: 6px; }

@@ -93,7 +93,7 @@ function controlOf(key) {
 function onDash(target) {
   if (target === 'Cover') return true;
   if (typeof target === 'string') return false;
-  if ('computer' in target) return ['flip', 'volume', 'mute'].includes(target.computer);
+  if ('computer' in target) return ['flip', 'volume', 'mute', 'bypass'].includes(target.computer);
   if ('transport' in target) return true;
   if (!('control' in target)) return false;
   const kind = controlOf(target.control)?.kind;
@@ -109,6 +109,7 @@ function findComputer(target) {
     case 'flip': return byId('nd-side-computer');
     case 'volume': return one('#nd-dash [data-act="volume-up"]');
     case 'mute': return one('#nd-dash [data-act="mute"]');
+    case 'bypass': return one('#nd-dash [data-act="bypass"]');
     case 'mode': return one('#nd-mode [data-act="mode"][data-mode="eq"]');
     case 'add': return byId('nd-point-add');
     case 'remove': return byId(`nd-px-${target.n}`);
@@ -255,7 +256,7 @@ async function operateComputer(target, change) {
         }
       }
     } else tap(one(`#nd-dash [data-act="volume-${change.step < 0 ? 'down' : 'up'}"]`));
-  } else if (computer === 'mute') {
+  } else if (computer === 'mute' || computer === 'bypass') {
     if (!('on' in change) || !stands(element, change.on)) tap(element);
   } else if (computer === 'mode') {
     tap(one(`#nd-mode [data-mode="${'on' in change && !change.on ? 'off' : 'eq'}"]`));
@@ -281,6 +282,7 @@ function shownComputer(target, element) {
       return /not read/.test(aria) ? '—' : aria.replace(/^Volume ?/, '');
     }
     case 'mode': return one('#nd-mode [aria-pressed="true"]')?.textContent ?? null;
+    case 'bypass': return element.getAttribute('aria-pressed') === 'true' ? 'on' : 'off';
     case 'preset': return element.dataset.name;
     case 'point': return element.value;
     default: return element.textContent.trim();

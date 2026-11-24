@@ -72,6 +72,59 @@ async fn a_direct_tui_drives_its_own_controller() {
     );
 }
 
+/// With no daemon the TUI carries the bypass to its own controller like any other op: the EQ goes
+/// off and its view says the bypass is on, and a second `f` brings it back; a bypass with nothing
+/// to bypass is refused in the controller's words. Fakes only.
+#[tokio::test]
+async fn a_direct_tui_carries_the_bypass_to_its_own_controller() {
+    let chain = Arc::new(FakeChain::new());
+    let mut control = EqControl::new(chain.clone(), Box::new(FakeParams::new()), Keep::Memory);
+    control.set_on(true).await.unwrap();
+    let mut link = ComputerLink::over(control);
+
+    link.direct(HostEqOp::Bypass { on: true })
+        .expect("a controller");
+    let seen = tokio::time::timeout(WITHIN, async {
+        loop {
+            let view = next_view(&mut link.views).await;
+            if view.bypass.as_ref().is_some_and(|bypass| bypass.on) {
+                return view;
+            }
+        }
+    })
+    .await
+    .expect("the view says the bypass is on");
+    assert!(!seen.on, "the EQ is off while the bypass holds");
+    assert!(seen.bypass.is_some_and(|bypass| bypass.held.eq));
+
+    link.direct(HostEqOp::Bypass { on: false })
+        .expect("a controller");
+    let back = tokio::time::timeout(WITHIN, async {
+        loop {
+            let view = next_view(&mut link.views).await;
+            if view.on && view.bypass.as_ref().is_some_and(|bypass| !bypass.on) {
+                return view;
+            }
+        }
+    })
+    .await
+    .expect("the view says the EQ is back");
+    assert!(back.on);
+
+    // nothing plays and nothing is held: the controller says so
+    link.direct(HostEqOp::Mode { on: false })
+        .expect("a controller");
+    link.direct(HostEqOp::Bypass { on: true })
+        .expect("a controller");
+    let answer = tokio::time::timeout(WITHIN, answered(&mut link.answers))
+        .await
+        .expect("a refusal comes back");
+    assert!(
+        matches!(&*answer, Answer::Said(why) if why.contains("nothing plays")),
+        "{answer:?}"
+    );
+}
+
 /// With no controller the change says why and goes nowhere.
 #[test]
 fn a_link_with_no_controller_says_why() {
@@ -336,6 +389,7 @@ async fn a_direct_tui_never_shows_the_eq_on_with_no_chain() {
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     }
     .save(&path)
     .unwrap();
@@ -578,6 +632,41 @@ async fn a_quit_wins_over_a_queued_loudness_on() {
         chain.calls().is_empty(),
         "the queued loudness never ran: {:?}",
         chain.calls()
+    );
+}
+
+/// A bypass change still waiting its turn when the loop quits is dropped too: the stages it
+/// would bring back do not come on again after the quit.
+#[tokio::test]
+async fn a_quit_wins_over_a_queued_bypass_off() {
+    let chain = Arc::new(FakeChain::new());
+    let mut control = EqControl::new(chain.clone(), Box::new(FakeParams::new()), Keep::Memory);
+    control.set_on(true).await.unwrap();
+    control.bypass(true).await.unwrap();
+    let before = chain.calls().len();
+    let mut link = ComputerLink::over(control);
+    let held = link
+        .control
+        .clone()
+        .expect("a controller")
+        .lock_owned()
+        .await;
+    link.direct(HostEqOp::Bypass { on: false })
+        .expect("a controller");
+    tokio::task::yield_now().await;
+    let release = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(held);
+    });
+    link.shutdown().await;
+    release.await.unwrap();
+    let calls = chain.calls();
+    assert!(
+        !calls[before..]
+            .iter()
+            .any(|call| matches!(call, ChainCall::Apply(_))),
+        "the queued bypass never brought the EQ back: {:?}",
+        &calls[before..]
     );
 }
 

@@ -117,6 +117,14 @@ ok('no_host_means_the_line_starts_at_the_dac', () => {
   assert.deepEqual(ids(noRoute), ['player', 'computer', shownHopId(DAC.url)]);
   const noTrack = hopsOf(page({ withHost: host({ track: null }) }), DAC.url);
   assert.deepEqual(ids(noTrack), ['computer', shownHopId(DAC.url)]);
+  // A sound with no MPRIS player has no track but its path's player hop: the line keeps it.
+  const stream = page({
+    withHost: host({ track: null }),
+    path: { hops: [{ label: 'player (no MPRIS)', detail: '48 kHz' }] },
+  });
+  const named = hopsOf(stream, DAC.url);
+  assert.deepEqual(ids(named), ['player', 'computer', shownHopId(DAC.url)]);
+  assert.equal(named[0].name, 'player (no MPRIS)');
   assert.deepEqual(ids(hopsOf(page({ withHost: host({ track: null, route: null }) }), DAC.url)),
     ['computer', shownHopId(DAC.url)]);
 });

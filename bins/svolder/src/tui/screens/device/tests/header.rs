@@ -25,7 +25,7 @@ fn a_hundred_column_screen_carries_the_small_wordmark_in_its_header() {
         rows[0]
     );
     assert!(
-        rows[1].contains("Gungnir 2 · fw 3") && rows[1].ends_with("mouse:on 14:02"),
+        rows[1].contains("Gungnir 2 · fw 3") && rows[1].ends_with("mouse:on 14:02 "),
         "the device name does not sit beside the mark on row 2: |{}|",
         rows[1]
     );
@@ -58,7 +58,7 @@ fn the_header_fault_glyph_carries_the_fault_role() {
     );
     let buffer = screen(&app);
     let glyph = buffer
-        .cell((50, 0))
+        .cell((49, 0))
         .expect("the fault glyph cell in the header");
     assert_eq!(glyph.symbol(), "⚡");
     assert_eq!(
@@ -78,7 +78,7 @@ fn a_link_that_went_down_hollows_the_header_dot_and_dims_the_rows() {
     let buffer = screen(&app);
     assert_eq!(
         text(&buffer)[0],
-        " svolder  Gungnir 2 · fw 3 · 0102…08  ⠋ ○ disconnected · stale    mouse:on 14:02",
+        " svolder  Gungnir 2 · fw 3 · 0102…08  ⠋ ○ disconnected · stale   mouse:on 14:02 ",
     );
     // The first letter of the label of the focused row, then of a row that is not.
     for (y, letter, row) in [(3, "I", "Input"), (4, "P", "Phase invert")] {
@@ -117,6 +117,23 @@ fn a_closed_feed_hollows_the_header_dot_with_no_spinner() {
         "a closed feed still turned the spinner: |{}|",
         rows[0]
     );
+}
+
+/// The clock is followed by one blank cell at every width, so the corner never touches the
+/// window's right edge, and the mouse indicator keeps one blank before the clock.
+#[test]
+fn the_clock_keeps_one_blank_cell_before_the_right_edge() {
+    for width in [80, 100, 120, 200] {
+        let mut app = mockup_app();
+        app.clock = "14:02".into();
+        let rows = text(&frame(&app, width, 30));
+        let row = rows
+            .iter()
+            .find(|row| row.contains("mouse:"))
+            .unwrap_or_else(|| panic!("the header row in {rows:#?}"));
+        assert!(row.ends_with("mouse:on 14:02 "), "{width}: |{row}|");
+        assert_eq!(row.chars().count(), usize::from(width), "{width}: |{row}|");
+    }
 }
 
 /// A device name too long for the header's text row at 100 columns, where the small wordmark
@@ -248,7 +265,7 @@ fn a_link_down_marks_the_readings_as_from_before_the_drop_until_a_fresh_one() {
         down.contains("○ disconnected · readings from before the link dropped"),
         "{down}"
     );
-    assert!(down.ends_with("mouse:on 14:02"), "{down}");
+    assert!(down.ends_with("mouse:on 14:02 "), "{down}");
     assert_eq!(down.chars().count(), live.chars().count());
     // A row narrower than the long words has the shorter ones, and the narrowest the shortest.
     let narrow = device_row(&frame_with_theme(&app, 110, 24, &theme));

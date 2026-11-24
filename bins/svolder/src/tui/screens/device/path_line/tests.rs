@@ -15,6 +15,7 @@ fn word(text: &str, tone: Tone) -> RowWord {
 /// A hop of the row model.
 fn hop(label: &str, words: &[RowWord]) -> RowHop {
     RowHop {
+        key: "computer",
         label: label.to_string(),
         words: words.to_vec(),
     }
@@ -30,6 +31,7 @@ fn row(hops: Vec<RowHop>, values: Vec<RowWord>) -> PathRow {
         hops,
         values,
         words: None,
+        changes: Vec::new(),
     }
 }
 

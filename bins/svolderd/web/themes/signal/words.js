@@ -67,6 +67,7 @@ export const WORDS = {
   preset: 'Preset',
   devices: 'Show another device',
   nothingPlaying: 'Nothing playing',
+  noMpris: 'No MPRIS player',
   previous: 'Previous',
   next: 'Next',
   pause: 'Pause',
@@ -172,6 +173,8 @@ export const PLAYER = {
   path: 'The way to the headphones',
   noPath: 'The path is not read yet.',
   noTrack: 'Nothing is playing.',
+  noMpris: 'No MPRIS player: the sound is read from its stream.',
+  several: 'No MPRIS player: several sounds play, none is judged.',
 };
 
 /** The facts of the route that are not controls, shown under the computer's controls. */
@@ -186,6 +189,15 @@ export const COMPUTER = {
   noSink: 'no sound card found',
   unread: ROUTE_NOT_READ,
   note: 'Read only: what happens to the sound before it reaches the DAC.',
+};
+
+/** The stage strip of the computer side and its Bypass chip. */
+export const CHAIN = {
+  label: 'Stages of the sound',
+  bypass: 'Bypass',
+  off: 'off',
+  space: { speakers: 'speakers', crossfeed: 'crossfeed' },
+  opens: (words) => `${words}: open its settings`,
 };
 
 /** The computer's volume, tone and points, in the words the DAC's screen uses where there are any. */

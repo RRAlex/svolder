@@ -80,6 +80,7 @@ fn route(edit: impl FnOnce(&mut RouteFacts)) -> RouteFacts {
             rate_hz: Some(48_000),
             format: Some("S16LE".into()),
             volume_milli: Some(1000),
+            channels: None,
             muted: false,
         }),
         player_match: PlayerMatch::Pid,
@@ -494,10 +495,44 @@ async fn a_dac_has_a_steady_path_row_while_the_daemon_speaks_for_the_host() {
 
     let no_player = HostView {
         playing: None,
+        route: Some(route(|route| {
+            route.player = None;
+            route.player_match = PlayerMatch::NoPlayer;
+        })),
         ..full.clone()
     };
     app.host.fold_daemon(no_player, Instant::now());
     assert_eq!(words(&app), Some(vec!["nothing playing".to_string()]));
+
+    // No MPRIS player but one stream into the sink: the route is judged from the stream on, and
+    // the player hop says it is not an MPRIS player.
+    let no_mpris = HostView {
+        playing: None,
+        route: Some(route(|route| route.player_match = PlayerMatch::NoMpris)),
+        ..full.clone()
+    };
+    app.host.fold_daemon(no_mpris, Instant::now());
+    let line = app.host_path().expect("a path row");
+    assert_eq!(line.hops[0].label, "player (no MPRIS)");
+    assert_eq!(
+        line.words,
+        vec!["untouched".to_string(), "no MPRIS player".to_string()]
+    );
+
+    // Several streams and no MPRIS player: not judged, and says so.
+    let several = HostView {
+        playing: None,
+        route: Some(route(|route| {
+            route.player = None;
+            route.player_match = PlayerMatch::NoPlayer;
+            route.others_mixing = 2;
+            route.host_eq = false;
+        })),
+        ..full.clone()
+    };
+    app.host.fold_daemon(several, Instant::now());
+    assert_eq!(words(&app), Some(vec!["no MPRIS player".to_string()]));
+    assert!(app.host_path().expect("a path row").hops.is_empty());
 
     let no_route = HostView {
         route: None,
@@ -686,7 +721,10 @@ async fn a_joined_press_with_no_player_says_so_and_asks_nothing() {
     daemon.version(env!("CARGO_PKG_VERSION"));
     daemon.hosts(HostView {
         playing: None,
-        route: Some(route(|_| {})),
+        route: Some(route(|route| {
+            route.player = None;
+            route.player_match = PlayerMatch::NoPlayer;
+        })),
         ..view("", "")
     });
     let watching = joined(&daemon, TuiConfig::default(), counting(&Arc::default())).await;

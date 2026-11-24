@@ -102,6 +102,7 @@ pub async fn run_eq_op(control: &mut EqControl, op: HostEqOp) -> Result<(), EqFa
                 })
                 .await
         }
+        HostEqOp::Bypass { on } => control.bypass(on).await,
         HostEqOp::Preset { .. } | HostEqOp::SaveAs { .. } => Err(EqFailure {
             what: "this request is not a change of the controller's".to_string(),
             next: "Recall a preset through the daemon".to_string(),

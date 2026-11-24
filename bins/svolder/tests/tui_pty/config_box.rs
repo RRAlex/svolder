@@ -46,6 +46,14 @@ fn k_opens_the_config_box_over_the_demo_daemons_route_and_closes_it() {
         assert!(text.contains(label), "{label}:\n{text}");
     }
     assert!(text.contains("k or esc close"), "{text}");
+    // The demo's fake DAC sits below 0 dB, so the box has a `What changes the sound` section with
+    // the DAC's row (the Path row under the box keeps its label and its volume on other lines).
+    assert!(text.contains("What changes the sound"), "{text}");
+    assert!(
+        text.lines()
+            .any(|line| line.contains("DAC USB") && line.contains("volume -")),
+        "{text}"
+    );
     tui.send_keys("k");
     tui.wait_for("the box closed", WAIT, |s| {
         !s.contents().contains("lets it through untouched")

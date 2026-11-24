@@ -40,8 +40,11 @@ impl Drop for Dir {
     }
 }
 
+mod bypass;
+mod climb;
 mod exit;
 mod held;
+mod identity;
 mod idle;
 mod kept;
 mod ld;
@@ -64,6 +67,14 @@ fn setup(keep: Keep) -> (EqControl, FakeChain, FakeParams) {
     let chain = FakeChain::new();
     let params = FakeParams::new();
     let control = EqControl::new(Arc::new(chain.clone()), Box::new(params.clone()), keep);
+    (control, chain, params)
+}
+
+/// A controller whose chain is applied with the curve in its config, as one the command line
+/// applied and the daemon adopted is: the loaded curve caps every preamp sent.
+fn setup_curve(keep: Keep) -> (EqControl, FakeChain, FakeParams) {
+    let (mut control, chain, params) = setup(keep);
+    control.curve_in_conf();
     (control, chain, params)
 }
 
@@ -112,6 +123,7 @@ fn saved(path: &Path, filters: Vec<SourceFilter>, slots: Vec<u8>, on: bool) {
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     }
     .save(path)
     .unwrap();
@@ -266,7 +278,7 @@ async fn the_preamp_keeps_every_live_update_under_unity() {
 
 #[tokio::test]
 async fn a_value_that_does_not_take_falls_back_to_apply_on_release_and_says_so_once() {
-    let (mut control, chain, params) = setup(Keep::Memory);
+    let (mut control, chain, params) = setup_curve(Keep::Memory);
     params.holds(false);
     control.set_on(true).await.unwrap();
     control.edit(gain(0, 3.0, false)).await.unwrap();
@@ -304,7 +316,7 @@ async fn a_value_that_does_not_take_falls_back_to_apply_on_release_and_says_so_o
 
 #[tokio::test]
 async fn a_pw_cli_that_keeps_failing_is_unavailable_and_applies_on_release() {
-    let (mut control, chain, params) = setup(Keep::Memory);
+    let (mut control, chain, params) = setup_curve(Keep::Memory);
     control.set_on(true).await.unwrap();
     params.takes(false);
     control.edit(gain(0, 3.0, false)).await.unwrap();
@@ -693,7 +705,7 @@ fn node(id: u32, rate_hz: Option<u32>) -> LiveNode {
 
 #[tokio::test]
 async fn a_new_rate_or_a_restarted_chain_sends_every_slot_again() {
-    let (mut control, _, params) = setup(Keep::Memory);
+    let (mut control, _, params) = setup_curve(Keep::Memory);
     control.set_on(true).await.unwrap();
     control.tick().await;
     assert!(params.sent().is_empty(), "looking sends nothing");
@@ -823,7 +835,7 @@ async fn a_presets_stated_preamp_is_sent_live_until_the_first_hand_edit() {
 #[tokio::test]
 async fn a_chain_turned_on_is_written_at_the_rate_the_sink_runs_at() {
     for rate in [44_100, 96_000] {
-        let (mut control, chain, params) = setup(Keep::Memory);
+        let (mut control, chain, params) = setup_curve(Keep::Memory);
         params.set_node(Some(node(1, Some(rate))));
         control.set_on(true).await.unwrap();
         control.set_on(false).await.unwrap();
@@ -1241,7 +1253,7 @@ async fn a_reload_forgets_the_node_so_the_next_send_names_the_new_one() {
 async fn a_softer_edit_right_after_an_apply_keeps_the_applied_preamp() {
     let dir = Dir::new();
     saved(&dir.state(), vec![pk(1000.0, 9.0, 1.0)], vec![1], false);
-    let (mut control, _, params) = setup(Keep::File(dir.state()));
+    let (mut control, _, params) = setup_curve(Keep::File(dir.state()));
     control.set_on(true).await.unwrap();
     let applied = control.view().preamp_db;
     control.edit(gain(0, 1.0, true)).await.unwrap();
@@ -1580,7 +1592,7 @@ fn over_unity(
 
 #[tokio::test]
 async fn a_curve_softened_live_never_sends_a_preamp_above_the_applied_ones() {
-    let (mut control, _, params) = setup(Keep::Memory);
+    let (mut control, _, params) = setup_curve(Keep::Memory);
     control
         .load(
             "Hot".into(),
@@ -1626,7 +1638,7 @@ async fn a_curve_softened_live_never_sends_a_preamp_above_the_applied_ones() {
 
 #[tokio::test]
 async fn a_preset_softer_than_the_applied_curve_is_applied() {
-    let (mut control, chain, _) = setup(Keep::Memory);
+    let (mut control, chain, _) = setup_curve(Keep::Memory);
     control
         .load(
             "Hot".into(),
@@ -1721,7 +1733,7 @@ async fn the_eq_turns_on_again_at_the_sinks_rate_after_a_rate_change_turned_it_o
 /// the EQ stays on.
 #[tokio::test]
 async fn a_rate_the_loaded_curve_cannot_play_at_applies_the_points_again() {
-    let (mut control, chain, params) = setup(Keep::Memory);
+    let (mut control, chain, params) = setup_curve(Keep::Memory);
     params.set_node(Some(node(1, Some(48_000))));
     let low = vec![hsc(14.6, -8.59, 2.35), hsc(49.7, -1.65, 0.32)];
     control

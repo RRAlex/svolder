@@ -73,6 +73,7 @@ HOOK = ("window.__posts = []; const f = window.fetch; window.fetch = (...a) => {
 BOOT = """import(new URL('assets/core/boot.js', document.baseURI)).then(async (m) => {
   await m.mounted; window.__core = m.core; return m.core.theme.id; })"""
 COMPUTER = '__core.model.page().host?.computer'
+TOGGLE = '#part-tone [data-comp="bypass"]'
 POINTS = f'{COMPUTER}.eq.points'
 TONE = 'JSON.stringify(__core.computer.toneOf(__core.model.page()).points.map((p) => [p.type, p.f, p.g, p.q]))'
 CARD = "document.querySelector('.ask')"
@@ -263,7 +264,7 @@ def pill(b, d):
     pct = b.page(f'{COMPUTER}.volume.pct')
     check('the_pill_flips_volume_and_tone_together: the knob reads the computer, in %',
           volume.replace(' ', '') == f'{pct}%', [volume, pct])
-    mode = b.page("[...document.querySelectorAll('#part-tone .seg .opt')].map((o) => o.textContent + o.getAttribute('aria-pressed'))")
+    mode = b.page("[...document.querySelectorAll('#part-tone > .seg .opt')].map((o) => o.textContent + o.getAttribute('aria-pressed'))")
     check('the_pill_flips_volume_and_tone_together: the tone control reads Off | EQ',
           mode == ['Offtrue', 'EQfalse'], mode)
     check('the_pill_flips_volume_and_tone_together: a flip posts nothing', posts(b) == [], posts(b))
@@ -947,6 +948,84 @@ def guest(b, d):
           b.page("!!document.querySelector('#toasts .toast, .signin, [data-signin]')") is not None)
 
 
+def stages(b, d):
+    """The chain's stage line and the Bypass toggle, from the model's `levels` and `bypass`."""
+    name = 'the_stages_line_and_the_bypass_round_trip'
+    load(b, d)
+    flip(b, 'computer')
+    seed(b, 4)
+    eq = f'{COMPUTER}.eq'
+    check(f'{name}: the daemon sends levels and a bypass', b.page(f'!!({eq}.levels && {eq}.bypass)') is True,
+          b.page(f'JSON.stringify({eq}.levels)'))
+    line = lambda: b.page("(document.querySelector('#part-tone .chain')?.textContent ?? '').replace(/\\s+/g, ' ').trim()")
+    total = b.page(f'{eq}.levels?.words')
+    check(f'{name}: the line has the three stages and the daemon\'s words',
+          line().startswith('EQ ') and 'Loudness ' in line() and ' Space ' in f' {line()}' and line().endswith(total) and bool(total),
+          [line(), total])
+    toggle = '#part-tone [data-comp="bypass"]'
+    pressed = lambda: b.page(f"document.querySelector('{toggle}')?.getAttribute('aria-pressed')")
+    check(f'{name}: the toggle is a pressed-state button beside the mode, not pressed',
+          pressed() == 'false'
+          and b.page("document.querySelector('#part-tone .stages')?.previousElementSibling?.className") == 'seg')
+    forget(b)
+    tap(b, toggle)
+    got = poll(lambda: posts(b, 'api/v1/host/bypass'))
+    check(f'{name}: a press posts bypass on', bool(got) and got[0][1] == {'on': True}, got)
+    check(f'{name}: the model has it, the toggle is pressed and the stages read off',
+          poll(lambda: b.page(f'{eq}.bypass.on') is True and pressed() == 'true' and line().startswith('EQ off')
+               and b.page(f'{eq}.on') is False), [pressed(), line()])
+    forget(b)
+    tap(b, toggle)
+    got = poll(lambda: posts(b, 'api/v1/host/bypass'))
+    check(f'{name}: a second press posts bypass off', bool(got) and got[0][1] == {'on': False}, got)
+    check(f'{name}: the stages come back as they were',
+          poll(lambda: b.page(f'{eq}.bypass.on') is False and b.page(f'{eq}.on') is True and pressed() == 'false'
+               and line().startswith('EQ ') and not line().startswith('EQ off')), line())
+    # a keyboard press keeps the focus across the redraw the answer causes (htmx gives it back by id)
+    forget(b)
+    b.page("document.querySelector('#ember-cbypass').focus()")
+    b.press('Enter')
+    got = poll(lambda: posts(b, 'api/v1/host/bypass'))
+    check(f'{name}: Enter on the toggle posts bypass on', bool(got) and got[0][1] == {'on': True}, got)
+    poll(lambda: b.page(f'{eq}.bypass.on') is True and pressed() == 'true'
+         and b.page('document.activeElement.id') == 'ember-cbypass')
+    active = b.page('document.activeElement.id')
+    check(f'{name}: and the focus is still on the toggle after the redraw', active == 'ember-cbypass', active)
+    forget(b)
+    b.press('Enter')
+    poll(lambda: b.page(f'{eq}.bypass.on') is False and pressed() == 'false')
+    active = b.page('document.activeElement.id')
+    check(f'{name}: and after it comes back', active == 'ember-cbypass', active)
+    # a stage word opens the Sound popup at its tab (Space: the crossfeed's while it is off)
+    def opens(stage, page):
+        tap(b, f'#part-tone [data-stage="{stage}"]')
+        state = poll(lambda: b.page('__core.router.state().popup') == 'sound' and b.page('JSON.stringify(__core.router.state())'))
+        check(f'{name}: the {stage} word opens the Sound popup at {page or "its first tab"}',
+              bool(state) and json.loads(state).get('page') == page, state)
+        b.page('__core.router.close()')
+        poll(lambda: b.page('__core.router.state().popup') is None)
+    opens('loudness', 'loudness')
+    opens('eq', None)
+    opens('space', 'crossfeed')
+    b.page("fetch('api/v1/host/speakers', { method: 'POST', headers: { 'content-type': 'application/json' },"
+           " body: JSON.stringify({ on: true, set: 'fake-with-room' }) }).then(() => 1)")
+    poll(lambda: b.page(f'{eq}.speakers?.on') is True and 'speakers' in line())
+    opens('space', 'speakers')
+    # the test driver reaches and operates the target (the core's contract lists it later)
+    check(f'{name}: the driver finds the toggle',
+          b.page("__core.theme.driver.reach({ computer: 'bypass' })") is True)
+    forget(b)
+    b.page("__core.theme.driver.operate({ computer: 'bypass' }, { on: true }).then(() => 1)")
+    check(f'{name}: the driver presses it and reads it back',
+          poll(lambda: b.page(f'{eq}.bypass.on') is True and b.page("__core.theme.driver.shown({ computer: 'bypass' })") == 'on'),
+          b.page("__core.theme.driver.shown({ computer: 'bypass' })"))
+    # on a phone the toggle stays a touch target
+    b.resize(390, 900)
+    height = poll(lambda: b.page(f"document.querySelector('{toggle}').getBoundingClientRect().height") >= 44
+                  and b.page(f"document.querySelector('{toggle}').getBoundingClientRect().height"))
+    check(f'{name}: at 390 wide the toggle is at least 44 px tall', bool(height), height)
+
+
 def kept(b, d):
     load(b, d)
     flip(b, 'computer')
@@ -1172,6 +1251,76 @@ def pictures():
         d.stop()
 
 
+def dim_bypass(b, d):
+    """With nothing playing Bypass is drawn dim, a writer's tap still posts, and the daemon's own words
+    for the refusal are the toast."""
+    name = 'a_dim_bypass_is_sent_and_the_daemons_words_are_the_toast'
+    load(b, d)
+    flip(b, 'computer')
+    check(f'{name}: nothing plays and the toggle is dim, not disabled',
+          poll(lambda: b.page(f'{COMPUTER}.eq.on') is False and b.page(f"document.querySelector('{TOGGLE}')?.classList.contains('idle')") is True)
+          and b.page(f"document.querySelector('{TOGGLE}').getAttribute('aria-disabled')") is None)
+    words = b.page("(async () => (await (await fetch('api/v1/host/bypass', { method: 'POST',"
+                   " headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: true }) })).json()).error)()")
+    check(f'{name}: the daemon refuses with words', bool(words), words)
+    b.page("document.querySelectorAll('#toasts .toast').forEach((t) => t.remove())")
+    forget(b)
+    tap(b, TOGGLE)
+    got = poll(lambda: posts(b, 'api/v1/host/bypass'))
+    check(f'{name}: the tap posts bypass on', bool(got) and got[0][1] == {'on': True} and got[0][2] == 409, got)
+    shown = poll(lambda: b.page("[...document.querySelectorAll('#toasts .toast')].map((t) => t.dataset.text)"))
+    check(f'{name}: the toast is the daemon\'s words', shown == [words], [shown, words])
+
+
+def stills(d, theme_query, folder, tag):
+    """With WEB_CHECK_SHOTS=<dir>: the computer side, EQ with a Bass preset and the speakers on, then
+    bypassed, at 1280x800 and 390x844 (Chromium); each still waits for the state it shows."""
+    post = ("fetch(%s, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(%s) })"
+            ".then(() => 1)")
+    for size, label, dpr in (((1280, 800), 'wide', 1), ((390, 844), 'phone', 2)):
+        shot = common.Chromium(size=size, dpr=dpr)
+        shot.preload(HOOK)
+        try:
+            shot.goto(f'{d.url}{theme_query}', settle=1.0)
+            shot.page(BOOT)
+            poll(lambda: shot.page(f'!!({COMPUTER}?.volume && {COMPUTER}?.eq)'))
+            shot.page("__core.computer.flip('computer')")
+            preset = ("(__core.model.page().host.computer.presets.find((p) => /bass/i.test(p.name) && p.playable)"
+                      " ?? __core.model.page().host.computer.presets.find((p) => p.playable)).name")
+            shot.page(post % ("'api/v1/host/eq/preset'", '{ name: ' + preset + ' }'))
+            shot.page(post % ("'api/v1/host/speakers'", "{ on: true, set: 'fake-with-room' }"))
+            for state in ('on', 'bypassed'):
+                if state == 'bypassed':
+                    shot.page("__core.actions.computer.setBypass(true).then(() => 1)")
+                want = 'true' if state == 'bypassed' else 'false'
+                poll(lambda: shot.page(f'{COMPUTER}.eq.bypass.on') is (state == 'bypassed')
+                     and shot.page(f"document.querySelector('{TOGGLE}')?.getAttribute('aria-pressed')") == want
+                     and (state == 'bypassed' or (shot.page(f'{COMPUTER}.eq.speakers?.on') is True
+                                              and shot.page(f'{COMPUTER}.eq.on') is True)))
+                if label == 'phone':
+                    shot.resize(390, max(shot.page('document.documentElement.scrollHeight'), 844))
+                os.makedirs(folder, exist_ok=True)
+                path = f'{folder}/{tag}-computer-{label}-{state}.png'
+                with open(path, 'wb') as f:
+                    f.write(shot.shot())
+                print('shot', path)
+                if label == 'phone':
+                    shot.resize(390, 844)
+        finally:
+            shot.close()
+
+
+def still_run():
+    folder = os.environ.get('WEB_CHECK_SHOTS')
+    if browser != 'chromium' or not folder or (ONLY and 'stills' not in ONLY):
+        return
+    d = common.Daemon('gungnir2-v2', host='fake', env={'SVOLDER_FAKE_SIGNAL': '1'}, web='auth = "none"')
+    try:
+        stills(d, '?theme=ember&effects=off', folder, 'ember')
+    finally:
+        d.stop()
+
+
 one('the_pill_flips_volume_and_tone_together', pill)
 one('minus_plus_mute_set_the_computer_volume', volume)
 one('a_point_drag_posts_live_and_done_at_release', drag)
@@ -1189,6 +1338,8 @@ if browser == 'chromium':
     one('a_flip_mid_drag_writes_nothing', mid_drag)
     one('a_held_volume_button_ends_at_a_flip', volume_flip)
 one('a_guest_sees_the_computer_inert', guest, web='guest = "read"')
+one('the_stages_line_and_the_bypass_round_trip', stages)
+one('a_dim_bypass_is_sent_and_the_daemons_words_are_the_toast', dim_bypass)
 one('the_side_survives_a_reload', kept)
 one('the_pill_keeps_the_focus_across_a_keyboard_flip', keyboard)
 one('presets_save_rename_delete_from_the_computer_side', save_as)
@@ -1199,5 +1350,6 @@ if browser == 'chromium' and (not ONLY or 'touch' in ONLY):
     touch()
 if browser == 'chromium' and not ONLY:
     pictures()
+still_run()
 print(f'computer_ember.py {browser}: {passed} passed, {len(fails)} failed in {time.time() - t0:.0f} s')
 sys.exit(1 if fails else 0)

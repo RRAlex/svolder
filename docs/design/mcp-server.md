@@ -45,14 +45,15 @@ a secret the owner has replaced.
 
 ## The tools
 
-`Tools` (`bins/svolderd/src/mcp/tools.rs`) offers twenty, listed in `TOOLS`: `list_devices`,
+`Tools` (`bins/svolderd/src/mcp/tools.rs`) offers twenty-one, listed in `TOOLS`: `list_devices`,
 `get_state`, `get_link_history`, `list_presets`, `get_host` and `list_scenes` read; `set_control`,
 `load_preset`, `mute`, `identify`, `set_host_volume`, `host_mute`, `set_host_eq`,
-`set_host_crossfeed`, `set_host_loudness`, `set_host_speakers`, `load_scene`, `save_scene`,
-`rename_scene` and `delete_scene` write. `get_host`, `set_host_volume`, `host_mute`,
-`set_host_eq`, `set_host_crossfeed`, `set_host_loudness` and `set_host_speakers` are the computer's
-(`bins/svolderd/src/mcp/tools/host.rs`): a percent from 0 to 100 becomes dB as `60 * log10(percent /
-100)`, the floors hold it under `host:volume`, and a rise past `MAX_RISE_DB` asks as the device's
+`set_host_crossfeed`, `set_host_loudness`, `set_host_speakers`, `set_host_bypass`, `load_scene`,
+`save_scene`, `rename_scene` and `delete_scene` write. `get_host`, `set_host_volume`, `host_mute`,
+`set_host_eq`, `set_host_crossfeed`, `set_host_loudness`, `set_host_speakers` and
+`set_host_bypass` are the computer's (`bins/svolderd/src/mcp/tools/host.rs`): a percent from 0 to
+100 becomes dB as `60 * log10(percent / 100)`, the floors hold it under `host:volume`, and a
+rise past `MAX_RISE_DB` asks as the device's
 does; a volume not read yet counts as 1 %. An unmute always asks, as the device's does.
 `max_volume_db` does not cover the computer, whose cap is 100 %. The floors see only this server's
 own computer writes and reads. A preset another device plays too asks, and repeats with `confirm`.
@@ -65,6 +66,9 @@ it cannot raise the level. `get_host` also reads the loudness (the view without 
 `set_host_loudness {on?, strength_pct?, reference_pct?, reference?: "now"}` sends one
 `HostEqOp::Loudness`. It never asks either, since loudness only cuts; it refuses `reference_pct`
 together with `reference: "now"`, and a refusal of the controller is a tool error the model reads.
+`set_host_bypass {on}` sends one `HostEqOp::Bypass` and never asks: the preamp falls first and a
+rise climbs at a fixed pace, so it cannot make the output suddenly louder; it answers with the
+`bypass` and `levels` that `get_host` also carries.
 `get_host` also carries `path` (the untouched-path verdict, judged against the DACs it knows, or the
 computer's side alone for another sink) and `config` (the PipeWire config check), both from
 `svolder-ipc`'s judges, read once per call within a second

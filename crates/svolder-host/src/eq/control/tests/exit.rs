@@ -190,7 +190,7 @@ async fn ticks_of(control: &mut EqControl, count: u64) {
 async fn a_chain_another_svolder_removed_is_not_started_again() {
     let dir = Dir::new();
     saved(&dir.state(), vec![pk(1000.0, 1.0, 1.0)], vec![1], true);
-    let (mut control, chain, _) = setup(Keep::File(dir.state()));
+    let (mut control, chain, _) = setup_curve(Keep::File(dir.state()));
     control.set_on(true).await.unwrap();
     let applied = applies(&chain);
     // The command line (no daemon behind it) took the chain away and wrote the state.

@@ -341,7 +341,13 @@ function playing(device, page, { oob } = {}) {
   const p = device.playing;
   if (!p) return '';
   const t = p.track;
-  const root = `<section id="part-playing" class="p-playing${t ? '' : ' idle'}" aria-label="Now playing"${attr('data-now', p.now_ms)}${attr('data-sink-label', p.sink_label)}${swap(oob)}>`;
+  const root = `<section id="part-playing" class="p-playing${t ? '' : ` idle${p.path ? ' nompris' : ''}`}" aria-label="Now playing"${attr('data-now', p.now_ms)}${attr('data-sink-label', p.sink_label)}${swap(oob)}>`;
+  // A sound with no MPRIS player behind it has no track, but its path from the stream on.
+  // Several streams and no MPRIS player is a row with no hops that says it itself.
+  if (!t && p.path) {
+    const said = p.path.row?.hops?.length ? '<p class="np-none">No MPRIS player</p> ' : '';
+    return `${root} ${said}${pathRow(p.path)} </section>`;
+  }
   if (!t) return `${root} <p class="np-none">No player</p> </section>`;
   const g = t.progress;
   const np = `<div class="np"${attr('data-status', t.status)}${none(t.length_us) ? '' : attr('data-length', t.length_us)}${g ? `${attr('data-position', g.position_us)}${attr('data-rate', g.rate_milli)}${attr('data-read-at', g.read_at_ms)}` : ''}>`;

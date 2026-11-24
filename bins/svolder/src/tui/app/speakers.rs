@@ -65,12 +65,10 @@ impl App {
         }
     }
 
-    /// The row the keys land on first in the section: the choice where it is shown.
+    /// The row the keys land on first in the section: Plays, which is crossfeed's own on/off row
+    /// where the view carries no virtual speakers.
     pub(crate) fn xf_first(&self) -> Xf {
-        match self.space_shown() {
-            true => Xf::Space,
-            false => Xf::Preset,
-        }
+        Xf::Space
     }
 
     /// After the view changed, a row the section no longer has (the crossfeed's rows while the
@@ -120,22 +118,6 @@ impl App {
         }
         self.notify("no virtual speaker set is fetched yet: pick one");
         self.open_sets()
-    }
-
-    /// The choice `dir` steps from the one that plays: nothing at either end.
-    pub(crate) fn space_step(&mut self, dir: i64) -> Vec<Intent> {
-        let at = Space::ALL
-            .iter()
-            .position(|space| *space == self.space_now())
-            .unwrap_or(0);
-        let next = match dir > 0 {
-            true => at + 1,
-            false => at.wrapping_sub(1),
-        };
-        match Space::ALL.get(next) {
-            Some(space) => self.space_go(*space),
-            None => Vec::new(),
-        }
     }
 
     /// `␣` on the choice or the set: what plays goes off; from off, the virtual speakers where a
@@ -213,11 +195,6 @@ pub(crate) fn level_short(view: &SpeakersView) -> String {
         db if db < 0.0 => format!("{:.0} dB quieter", -db),
         db => format!("{db:.0} dB louder"),
     }
-}
-
-/// The level as a signed number, for a line with little room: `−7 dB`.
-pub(crate) fn level_signed(view: &SpeakersView) -> String {
-    format!("{:.0} dB", view.loudness_db.round()).replace('-', "\u{2212}")
 }
 
 /// How long the responses are: `5.3 ms`, `0.5 s`, `cut to 0.5 s` where they were cut.

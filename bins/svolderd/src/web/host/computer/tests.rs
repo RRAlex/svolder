@@ -13,13 +13,14 @@ use crate::web::test_support::{
 };
 
 /// Every route of the computer, with a body each would accept.
-const ROUTES: [(&str, &str); 10] = [
+const ROUTES: [(&str, &str); 11] = [
     ("/api/v1/host/volume", r#"{"pct":40}"#),
     ("/api/v1/host/mute", r#"{"muted":true}"#),
     ("/api/v1/host/eq", r#"{"on":true}"#),
     ("/api/v1/host/crossfeed", r#"{"on":true}"#),
     ("/api/v1/host/speakers", r#"{"on":true}"#),
     ("/api/v1/host/loudness", r#"{"on":true}"#),
+    ("/api/v1/host/bypass", r#"{"on":true}"#),
     ("/api/v1/host/eq/preset", r#"{"name":"Warm"}"#),
     (
         "/api/v1/host/eq/points",
@@ -491,6 +492,49 @@ async fn the_loudness_route_changes_the_computers_loudness_settings() {
     assert_eq!(reply.status, Code::BAD_REQUEST, "{}", reply.body);
     let reply = call(&web, post("/api/v1/host/loudness", r#"{"on":"yes"}"#)).await;
     assert_eq!(reply.status, Code::BAD_REQUEST, "{}", reply.body);
+    daemon.stop().await;
+}
+
+/// The bypass route: nothing playing is a 409 in the daemon's words, with the EQ on it turns
+/// every stage off and off brings it back, and a body that is not `{"on": bool}` is a 422.
+#[tokio::test]
+async fn the_bypass_route_turns_the_computer_off_and_back() {
+    let daemon = fake_daemon_playing("gungnir2-v2", "dac").await;
+    let web = web_over(&daemon);
+    let bypass = |daemon: &FakeDaemon| {
+        let fleet = Arc::clone(&daemon.fleet);
+        async move {
+            match fleet.request(Request::Host).await {
+                Response::Host(view) => view.eq.expect("eq").bypass.expect("bypass"),
+                other => panic!("no host view: {other:?}"),
+            }
+        }
+    };
+    let reply = call(&web, post("/api/v1/host/bypass", r#"{"on":true}"#)).await;
+    assert_eq!(reply.status, Code::CONFLICT, "{}", reply.body);
+    assert!(
+        json(&reply.body)["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("nothing plays on the computer to bypass")
+    );
+    let reply = call(&web, post("/api/v1/host/eq", r#"{"on":true}"#)).await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    let reply = call(&web, post("/api/v1/host/bypass", r#"{"on":true}"#)).await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    assert_eq!(json(&reply.body), serde_json::json!({ "ok": true }));
+    let now = bypass(&daemon).await;
+    assert!(now.on && now.held.eq);
+    let eq = view_of(&daemon).await.eq.expect("eq");
+    assert!(!eq.on);
+    let reply = call(&web, post("/api/v1/host/bypass", r#"{"on":false}"#)).await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    assert!(!bypass(&daemon).await.on);
+    assert!(view_of(&daemon).await.eq.expect("eq").on);
+    for body in ["{}", r#"{"on":"yes"}"#, r#"{"on":true,"x":1}"#, "nope"] {
+        let reply = call(&web, post("/api/v1/host/bypass", body)).await;
+        assert_eq!(reply.status, Code::UNPROCESSABLE_ENTITY, "{body}");
+    }
     daemon.stop().await;
 }
 

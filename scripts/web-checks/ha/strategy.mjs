@@ -81,6 +81,17 @@ test('a: the scene pair and the loudness tiles are on the computer section', () 
   assert.ok(ids.has('number.bifrost_3_loudness_strength'));
 });
 
+test('a2: the bypass switch and the three level sensors are on the computer section', () => {
+  const { hass } = load('generated-on');
+  const view = buildDashboard(hass).views.find((v) => v.title === 'reframe');
+  const ids = entityIds(view);
+  for (const id of ['switch.reframe_bypass', 'sensor.reframe_chain_level', 'sensor.reframe_eq_level', 'sensor.reframe_space_level']) {
+    assert.ok(ids.has(id), id);
+  }
+  const off = entityIds(buildDashboard(load('generated-off').hass).views.find((v) => v.title === 'reframe'));
+  assert.ok(off.has('binary_sensor.reframe_bypass'));
+});
+
 test('b: the older single "This computer" is one view', () => {
   const { hass } = load('older-single');
   const dash = buildDashboard(hass);

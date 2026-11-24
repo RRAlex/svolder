@@ -189,6 +189,10 @@ fn every_hint_on_a_screen_does_something_when_pressed() {
                     &[("PK", 1000.0, 0.0, 1.0), ("LSC", 100.0, 1.0, 1.0)],
                 ));
                 if hint.when == When::OnComputer {
+                    // the bypass key needs a controller that serves a bypass
+                    if let Some(eq) = app.host.computer.eq.as_mut() {
+                        eq.bypass = Some(svolder_host::eq::BypassView::default());
+                    }
                     app.flip_side();
                 }
             }
@@ -212,7 +216,7 @@ fn every_hint_on_a_screen_does_something_when_pressed() {
                 app.flip_side();
                 if hint.label.ends_with("on Crossfeed") {
                     // the section's own keys act with the keys in it
-                    app.focus_crossfeed(crate::tui::app::Xf::Preset);
+                    app.focus_crossfeed(crate::tui::app::Xf::Space);
                 }
             }
             if hint.when == When::HasSpace {

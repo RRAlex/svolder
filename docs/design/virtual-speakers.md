@@ -213,6 +213,15 @@ stack; the config never holds the stage on; a WAV that fails the check never rea
 **Preamp.** The set is already scaled to never boost, so the speakers take no part in the EQ's
 preamp and the preamp lab needs no speakers event.
 
+## The level shown
+
+`EqView.levels.space_db` is the chosen set's level against Off while the speakers play (about −7 dB
+for a typical set) and `total_db` is the preamp sent plus that level. The speakers turned off switch
+the mixers back to the dry sound, which is that much louder: the same line carries a preamp that
+falls by the set's level (before the mixers), so the sound stays where it was, and the level then
+climbs to the EQ's own at 0.32 dB a tick (`climbing to 0.0 dB`; see
+[host-control-preamp.md](host-control-preamp.md#the-climb)).
+
 ## State and contract
 
 `host-eq.toml` gains `speakers` (the chosen set's id, kept while off), `speakers_on` (crash

@@ -401,6 +401,20 @@ body.signin { min-height: 100vh; display: grid; align-items: center; padding: 28
 .sideseg .opt { padding: 0 18px; white-space: nowrap; }
 .sideseg .why { font: 500 var(--t-xs)/1.3 var(--f-ui); color: var(--faint); }
 .tone.comp > .seg { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.stages { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 14px; }
+.chain { margin: 0; min-width: 0; font: 500 var(--t-s)/1.5 var(--f-ui); color: var(--faint); font-variant-numeric: tabular-nums; }
+.chain .it { display: inline-block; white-space: nowrap; }
+.chain .dot { color: var(--hair-3); padding-left: .3em; }
+.chain .stage { color: var(--dim); }
+.chain .stage.on { color: var(--ink); }
+.chain button.stage { min-height: var(--tap); padding: 0 2px; border-radius: 6px; }
+.chain button.stage:hover { color: var(--acc); text-decoration: underline; }
+.chain .total { color: var(--dim); }
+.bypassw { display: grid; padding: 3px; border-radius: 999px; background: var(--card); border: 1px solid var(--hair); }
+.bypassw .opt { padding: 0 20px; white-space: nowrap; }
+.bypassw .opt[aria-disabled=true] { opacity: .5; cursor: default; }
+.bypassw .opt.idle { opacity: .5; }
+@media (max-width: 559px) { .stages { display: grid; justify-items: stretch; } }
 .eqg.pts .plot.hot { cursor: grab; }
 .pts-table { --prow: 42px; display: grid; font-variant-numeric: tabular-nums; }
 .ph, .pt {
@@ -677,6 +691,13 @@ button.np-label:hover { text-decoration: underline; }
 .np-setup:hover { border-color: currentColor; }
 .p-playing.idle { display: flex; align-items: center; height: 72px; padding-block: 0; }
 .np-none { font: var(--t-s)/1.4 var(--f-ui); color: var(--faint); }
+/* no MPRIS player: the quiet words, then the Path row (shown whole, the card is never folded) */
+.p-playing.nompris {
+  flex-direction: column; align-items: stretch; justify-content: center; gap: 6px;
+  height: auto; min-height: 72px; padding-block: 10px 14px; /* below the chips: more than fitPath's foot */
+}
+/* (one class more than the folded card's rule that hides the row in a narrow container) */
+.p-playing.idle.nompris .np-path { display: flex; }
 
 /* the visualizer: a fixed box (its height is the band's on a desktop, 180 px on a phone), the
    canvas filling it, the face a button that a tap or Enter turns to the next look. What stands on

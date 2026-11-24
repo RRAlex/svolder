@@ -651,13 +651,14 @@ impl Chain for FakeChain {
                 .as_ref()
                 .map(|speakers| speakers.id.clone()),
             loudness: inner.state.as_ref().and_then(|s| s.loudness),
+            bypass: None,
         };
         inner.state = Some(state.clone());
         inner.dead = false;
         if let Some(params) = inner.restarts.as_ref() {
             params.restart_node();
             if inner.reads_config {
-                params.start_from_config(state.preamp_db);
+                params.start_from_config(request.identity.unwrap_or(state.preamp_db));
             }
         }
         Ok(state)
@@ -1091,6 +1092,7 @@ mod tests {
             flat: false,
             crossfeed: None,
             speakers: None,
+            identity: None,
         };
         assert_eq!(chain.state(), None);
         let state = chain.apply(request.clone()).await.expect("applies");
@@ -1140,6 +1142,7 @@ mod tests {
             flat: false,
             crossfeed: None,
             speakers: None,
+            identity: None,
         }
     }
 

@@ -38,8 +38,17 @@ export function muteArgs(actions, muted) {
     return muted ? actions.mute_off : actions.mute_on;
 }
 
-export function eqSwitchArgs(actions, on) {
-    return on ? actions.eq_off : actions.eq_on;
+// The arguments that flip the Computer EQ row's switch: the ones svolder sends in the row's
+// `switch` (built in Rust: the bypass, or the EQ's own on), else, from an older svolder, `host eq
+// on|off` from the state shown.
+export function eqSwitchArgs(actions, on, computerEq = null) {
+    return computerEq?.switch?.args ?? (on ? actions.eq_off : actions.eq_on);
+}
+
+// Whether a toggle of the Computer EQ row to `wanted` has nothing to run: the line's switch
+// already shows that state (a second quick click before the next line), so the drawing settles it.
+export function eqSwitchSettled(computerEq, wanted) {
+    return computerEq?.switch != null && computerEq.switch.on === wanted;
 }
 
 export const BACKOFF_SECONDS = [1, 2, 4, 8, 16, 30];

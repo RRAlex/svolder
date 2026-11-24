@@ -334,6 +334,17 @@
 .sg-chip.on { color: var(--sg-on-accent); background: var(--sg-accent); border-color: var(--sg-accent); }
 /* the mode under the curve; Loudness, while on, carries the strength's round − and + over its ends */
 #sg-tone .sg-mode, #sg-ctone .sg-mode { margin-top: 14px; }
+/* the strip under the mode chips: each stage with its level, then the daemon's total; it wraps at the dots */
+.sg-strip { margin: 8px 0 0; font-size: 13px; line-height: 1.7; color: var(--sg-mid); }
+.sg-stage {
+  display: inline; padding: 0; border: 0; background: none; font: inherit; color: var(--sg-mid); cursor: pointer;
+  text-decoration: underline dotted; text-underline-offset: 3px;
+}
+span.sg-stage { cursor: default; text-decoration: none; }
+.sg-stage, .sg-total { white-space: nowrap; }
+.sg-stage.on { color: var(--sg-ink); }
+.sg-stage:hover { color: var(--sg-accent); }
+.sg-total { color: var(--sg-ink); }
 .sg-loudw { position: relative; display: inline-grid; }
 .sg-chip.sg-loudc { flex-direction: column; gap: 0; padding: 3px 38px; line-height: 1.15; }
 .sg-lv { font-size: 11px; opacity: .85; white-space: nowrap; }
@@ -711,6 +722,7 @@ span.sg-prm { border-color: transparent; cursor: default; }
   .sg-btn.sg-pill { width: auto; padding: 0 16px; }
   .sg-st { font-size: 18px; }
   .sg-chip { min-height: 44px; padding: 0 14px; }
+  .sg-stage { min-height: 44px; padding: 0 2px; display: inline-flex; align-items: center; }
   .sg-config { min-height: 44px; }
   .sg-chip.sg-loudc { padding: 3px 48px; }
   .sg-st.sg-rb { width: 38px; height: 38px; margin-top: -19px; font-size: 19px; }

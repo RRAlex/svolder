@@ -76,7 +76,7 @@ export function drawPlaying(page, localMs = Date.now()) {
   const p = page.device?.playing ?? page.host;
   if (!p) return '';
   const track = p.track;
-  if (!track) return `<div class="sg-np"><span class="sg-track"><i>${esc(WORDS.nothingPlaying)}</i></span></div>`;
+  if (!track) return `<div class="sg-np"><span class="sg-track"><i>${esc(p.path ? WORDS.noMpris : WORDS.nothingPlaying)}</i></span></div>`;
   const inert = inertPage(page) || Boolean(page.device?.inert);
   const prog = progressOf(p, track, localMs);
   const at = prog ? fraction(prog.elapsed, prog.length) : 0;

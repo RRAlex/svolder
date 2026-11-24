@@ -321,6 +321,8 @@ impl EqControl {
     /// Set the speakers off in the state and the view, with `why` and `note`, and owe the chain
     /// the rest ([`EqControl::finish_reset`]); `plays` says whether the stage may be on it.
     pub(super) fn reset_sp(&mut self, why: SpeakersOff, note: String, plays: bool) {
+        // The stage goes off by itself: the sound climbs back as it does for a hand's off.
+        self.arm_climb();
         self.sp.on = false;
         self.sp.for_output = None;
         self.sp.note = Some(note);
@@ -553,6 +555,17 @@ impl EqControl {
         }
     }
 
+    /// The chosen set's level against Off in dB (at most 0), from the catalogue alone: 0 with none
+    /// chosen or the catalogue not read yet.
+    pub(super) fn chosen_set_level_db(&self) -> f64 {
+        let cache = crate::locked(&self.sp.cache);
+        self.sp
+            .chosen
+            .as_ref()
+            .and_then(|id| cache.sets.iter().find(|set| &set.id == id))
+            .map_or(0.0, |set| set.loudness_db.min(0.0))
+    }
+
     /// The speakers as a screen shows it, `None` when the controller does not serve them.
     pub(super) fn speakers_view(&self) -> Option<SpeakersView> {
         self.sp.store.as_ref()?;
@@ -592,8 +605,11 @@ impl EqControl {
     /// rules](SpeakersEdit): `on` is applied last, a set that is not fetched is refused, and
     /// turning them on turns crossfeed off in the same update (and the other way round).
     pub async fn speakers(&mut self, edit: SpeakersEdit) -> Result<(), EqFailure> {
+        self.rise_ok_until = self.ticks + RISE_OK_TICKS;
         let result = self.speakers_inner(edit).await;
+        self.disarm_climb();
         self.refresh_sets();
+        self.end_bypass_if_on();
         self.publish();
         result
     }
@@ -667,7 +683,10 @@ impl EqControl {
             (true, true) if target == self.sp.chosen => Ok(()),
             (true, true) => self.sp_choose(target).await,
             (false, true) => self.sp_start(target).await,
-            (true, false) => self.sp_stop(target).await,
+            (true, false) => {
+                self.arm_climb();
+                self.sp_stop(target).await
+            }
         };
         if result.is_err() {
             (

@@ -76,6 +76,9 @@ pub enum When {
     HasComputer,
     /// Only while the computer's side is shown.
     OnComputer,
+    /// Only on a profile with a tone control, on the device's own side: the keys that are the
+    /// tone control's own, where the computer's side has keys of its own in their place.
+    DacEq,
     /// Only while the computer's side is shown and its controller serves loudness.
     HasLoudness,
     /// Only while the computer's side is shown and its controller serves crossfeed.
@@ -443,6 +446,17 @@ static HINTS: &[KeyHint] = &[
         toggles: None,
         long: None,
     },
+    // On the computer's side of the tone screen `Tab` steps the stages' panels.
+    KeyHint {
+        code: KeyCode::Tab,
+        label: "Tab/⇧Tab",
+        does: "stage",
+        screens: &[Screen::Tone],
+        when: When::OnComputer,
+        group: ACTIONS,
+        toggles: None,
+        long: Some("next / previous stage: EQ, Loudness, Space, Bypass"),
+    },
     KeyHint {
         code: KeyCode::Char('2'),
         label: BAND_KEYS,
@@ -505,10 +519,22 @@ static HINTS: &[KeyHint] = &[
         label: "f",
         does: "flat on/off",
         screens: &[Screen::Device, Screen::Tone],
-        when: When::HasEq,
+        when: When::DacEq,
         group: ACTIONS,
         toggles: None,
         long: None,
+    },
+    // On the computer's side `f` is the bypass: every stage off at once, each back as it was
+    // when pressed again.
+    KeyHint {
+        code: KeyCode::Char('f'),
+        label: "f",
+        does: "bypass",
+        screens: &[Screen::Device, Screen::Tone],
+        when: When::OnComputer,
+        group: ACTIONS,
+        toggles: None,
+        long: Some("bypass: every stage off, each back as it was"),
     },
     // The bar between the Controls and Tone panes, which the mouse drags: `<` and `>` nudge it a
     // few columns, `|` puts it back to an even split. At exactly 80 columns the
@@ -551,24 +577,34 @@ static HINTS: &[KeyHint] = &[
     KeyHint {
         code: KeyCode::Right,
         label: "\u{2190}\u{2192} on Loudness",
-        does: "strength / reference · r: volume",
+        does: "on/off / strength / reference · r: volume now",
         screens: &[Screen::Device, Screen::Tone],
         when: When::HasLoudness,
         group: ACTIONS,
         toggles: None,
         long: None,
     },
-    // The computer's crossfeed: `X` goes to its section on the tone screen (unfolding it) and
-    // out of it again (folding it); the other keys act on its rows while the keys are in them.
+    // `L` and `X` jump to the Loudness and Space panels of the tone screen; the other keys act on
+    // a panel's rows while the keys are in them.
+    KeyHint {
+        code: KeyCode::Char('L'),
+        label: "L",
+        does: "toggle Loudness panel",
+        screens: &[Screen::Device, Screen::Tone],
+        when: When::HasLoudness,
+        group: ACTIONS,
+        toggles: None,
+        long: Some("open the Loudness panel on the tone screen (again: back to the strip)"),
+    },
     KeyHint {
         code: KeyCode::Char('X'),
         label: "X",
-        does: "toggle crossfeed",
+        does: "toggle Space panel",
         screens: &[Screen::Device, Screen::Tone],
         when: When::HasCrossfeed,
         group: ACTIONS,
         toggles: None,
-        long: Some("toggle the crossfeed section (unfold / fold)"),
+        long: Some("open the Space panel on the tone screen (again: back to the strip)"),
     },
     KeyHint {
         code: KeyCode::Char(' '),
@@ -583,18 +619,8 @@ static HINTS: &[KeyHint] = &[
     KeyHint {
         code: KeyCode::Right,
         label: "\u{2190}\u{2192} on Crossfeed",
-        does: "preset / step",
+        does: "model / preset / value",
         screens: &[Screen::Tone],
-        when: When::HasCrossfeed,
-        group: ACTIONS,
-        toggles: None,
-        long: None,
-    },
-    KeyHint {
-        code: KeyCode::Char('.'),
-        label: ", . on Crossfeed",
-        does: "model / preset",
-        screens: &[Screen::Device, Screen::Tone],
         when: When::HasCrossfeed,
         group: ACTIONS,
         toggles: None,
@@ -1045,6 +1071,77 @@ static HINTS: &[KeyHint] = &[
     },
 ];
 
+/// The keys that act where the keys are on the computer side's tone screen right now, as (label,
+/// what it does, a key that does it; a test presses each): the strip's, or the open panel's, after
+/// the two that act from everywhere on the side. Empty on every other screen and on the device's side.
+pub fn this_screen(app: &App) -> Vec<(&'static str, &'static str, KeyCode)> {
+    use super::app::ToneRow;
+    if !app.stages_shown() {
+        return Vec::new();
+    }
+    let mut keys = vec![
+        ("Tab/⇧Tab", "next / previous stage", KeyCode::Tab),
+        (
+            "f",
+            "bypass: every stage off, each back as it was",
+            KeyCode::Char('f'),
+        ),
+    ];
+    keys.extend(match app.tone.row {
+        ToneRow::Strip(_) => vec![
+            ("←→", "move between the stops", KeyCode::Right),
+            ("↓ Enter", "open the stage's panel", KeyCode::Enter),
+            ("␣", "turn the stop on or off", KeyCode::Char(' ')),
+            ("↑", "the header", KeyCode::Up),
+            ("Esc", "leave the screen", KeyCode::Esc),
+        ],
+        ToneRow::Point(_) => vec![
+            ("↑↓", "point (↑ on the first: the strip)", KeyCode::Up),
+            ("←→", "gain", KeyCode::Right),
+            ("Enter", "type the point's values", KeyCode::Enter),
+            ("a x", "add or remove a point", KeyCode::Char('a')),
+            ("y", "point type", KeyCode::Char('y')),
+            (", .  [ ]", "frequency, Q", KeyCode::Char('.')),
+            ("␣", "EQ on or off", KeyCode::Char(' ')),
+            ("Esc", "back to the strip", KeyCode::Esc),
+        ],
+        ToneRow::Ld(_) => vec![
+            ("↑↓", "row (↑ on the first: the strip)", KeyCode::Up),
+            ("←→", "change the row", KeyCode::Right),
+            (
+                "Enter",
+                "type a number (on/off on the first row)",
+                KeyCode::Enter,
+            ),
+            ("r", "reference = the volume now", KeyCode::Char('r')),
+            ("␣", "Loudness on or off", KeyCode::Char(' ')),
+            ("Esc", "back to the strip", KeyCode::Esc),
+        ],
+        ToneRow::Crossfeed(_) => vec![
+            ("↑↓", "row (↑ on the first: the strip)", KeyCode::Up),
+            ("←→", "change; on Plays only highlight", KeyCode::Right),
+            (
+                "Enter",
+                "apply Plays, type a number, open the sets",
+                KeyCode::Enter,
+            ),
+            ("S", "the virtual speakers' sets", KeyCode::Char('S')),
+            ("␣", "Space on or off", KeyCode::Char(' ')),
+            ("Esc", "back to the strip", KeyCode::Esc),
+        ],
+        ToneRow::Bypass => vec![
+            ("␣ Enter", "bypass on or off", KeyCode::Enter),
+            ("L X", "Loudness, Space panel", KeyCode::Char('L')),
+            ("Esc", "back to the strip", KeyCode::Esc),
+        ],
+        _ => vec![
+            ("↓", "the strip", KeyCode::Down),
+            ("L X", "Loudness, Space panel", KeyCode::Char('L')),
+        ],
+    });
+    keys
+}
+
 /// Every key the table names, whichever screen takes it.
 ///
 /// This is the whole of what the TUI listens for, which is what the rules the help overlay
@@ -1117,6 +1214,8 @@ pub fn hidden_in(hint: &KeyHint, context: KeyContext) -> bool {
         When::HasPhase | When::HasNos => !available_in(hint, context),
         // The computer's keys are not listed where its controls are not there at all.
         When::HasComputer | When::OnComputer => !context.has_computer,
+        // The device's own keys are not listed over the computer's side.
+        When::DacEq => context.on_computer,
         // Crossfeed's keys are not listed where the computer serves none.
         When::HasLoudness => !context.has_loudness,
         When::HasCrossfeed => !context.has_crossfeed,
@@ -1151,6 +1250,7 @@ pub fn available_in(hint: &KeyHint, context: KeyContext) -> bool {
         When::CanIdentify => !context.no_identify,
         When::HasComputer => context.has_computer,
         When::OnComputer => context.on_computer,
+        When::DacEq => context.has_eq && !context.on_computer,
         When::HasLoudness => context.has_loudness,
         When::HasCrossfeed => context.has_crossfeed,
         When::HasSpace => context.has_space,

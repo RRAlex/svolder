@@ -281,9 +281,12 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme, hits: &mut HitMap) -> F
     let cursor = hits.selection();
     // The toast goes on last of all, over any box, at full strength, and its hit is the last
     // pushed.
-    let toast = app
-        .toast()
-        .map(|toast| toast::draw(frame, area, toast, theme, hits));
+    let toast = app.toast().map(|toast| match app.stages_shown() {
+        // The computer side's panel reaches the row above the last: the toast is the one line
+        // the last row keeps for it, never a box over the panel.
+        true => toast::draw_row(frame, area, toast, theme, hits),
+        false => toast::draw(frame, area, toast, theme, hits),
+    });
     // The tooltip goes after the toast and clear of it, and only while its target is still
     // under its cell and no box is open.
     let standing = tooltip::standing(app, hits);
@@ -384,6 +387,14 @@ fn frame_areas(
     let wanted = match app.screen {
         Screen::Device => Some(FrameId::Pane(app.pane)),
         Screen::Tone if app.tone.row == ToneRow::Band => Some(FrameId::Bands),
+        // The computer side's panel is the frame the keys are in while they are in one of its rows.
+        Screen::Tone
+            if app.stages_shown()
+                && App::row_is_stage(app.tone.row)
+                && !matches!(app.tone.row, ToneRow::Strip(_)) =>
+        {
+            Some(FrameId::Bands)
+        }
         Screen::Tone => None,
         _ => Some(FrameId::Screen),
     };

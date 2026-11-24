@@ -1303,3 +1303,146 @@ async fn crossfeed_verbs_go_through_a_running_daemon() {
     .await
     .expect("the case finishes in time");
 }
+
+// ---- the bypass ----
+
+/// With a daemon, `host bypass` tells the levels, `on` holds the EQ and says what it brings back,
+/// `off` brings it back; `--json` is the bypass and the levels as the daemon sends them.
+#[tokio::test]
+async fn host_bypass_goes_through_a_running_daemon() {
+    let svolderd = common::daemon_binary();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut home = Home::new();
+        home.start_daemon_on(&svolderd, "fake").await;
+        import(&home, "My Phones");
+        let (code, _out, err) = home.run(&["host", "eq", "apply", "My Phones"]);
+        assert_eq!(code, 0, "{err}");
+
+        let (code, out, err) = home.run(&["host", "bypass"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(
+            out.starts_with("bypass: off \u{b7} plays \u{2212}"),
+            "{out}"
+        );
+        assert!(out.trim_end().ends_with("dB in all"), "{out}");
+
+        let (code, _out, err) = home.run(&["host", "bypass", "on"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(
+            err.contains("svolder: bypass: on \u{b7} brings back EQ"),
+            "{err}"
+        );
+        let eq = daemon_eq(&home).await;
+        assert!(eq.bypass.as_ref().is_some_and(|b| b.on && b.held.eq));
+        assert!(!eq.on, "the EQ is off while the bypass holds");
+
+        let (code, out, err) = home.run(&["host", "bypass", "--json"]);
+        assert_eq!(code, 0, "{err}");
+        let json: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+        assert_eq!(json["bypass"]["on"], true);
+        assert_eq!(json["bypass"]["held"]["eq"], true);
+        assert!(json["levels"]["words"].is_string(), "{json}");
+
+        let (code, out, err) = home.run(&["host", "eq", "status"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(out.contains("bypass: on \u{b7} brings back EQ"), "{out}");
+
+        let (code, _out, err) = home.run(&["host", "bypass", "off"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(err.contains("svolder: bypass: off"), "{err}");
+        let eq = daemon_eq(&home).await;
+        assert!(eq.on && eq.bypass.is_some_and(|b| !b.on));
+    })
+    .await
+    .expect("the case finishes in time");
+}
+
+/// `host eq status` prints the levels' words while a chain plays.
+#[tokio::test]
+async fn host_eq_status_prints_the_levels_words() {
+    let svolderd = common::daemon_binary();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut home = Home::new();
+        home.start_daemon_on(&svolderd, "fake").await;
+        import(&home, "My Phones");
+        let (code, _out, err) = home.run(&["host", "eq", "apply", "My Phones"]);
+        assert_eq!(code, 0, "{err}");
+        let words = daemon_eq(&home).await.levels.expect("levels").words;
+        assert!(words.starts_with("plays "), "{words}");
+        let (code, out, err) = home.run(&["host", "eq", "status"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(out.contains(&format!("levels: {words}")), "{out}");
+        let (_code, out, _err) = home.run(&["host", "eq", "status", "--json"]);
+        let json: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+        assert_eq!(json["levels"]["words"], words.as_str());
+    })
+    .await
+    .expect("the case finishes in time");
+}
+
+/// Nothing on and nothing held: the daemon's refusal comes back in its words, exit 1.
+#[tokio::test]
+async fn host_bypass_with_nothing_playing_is_refused_in_the_daemons_words() {
+    let svolderd = common::daemon_binary();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut home = Home::new();
+        home.start_daemon_on(&svolderd, "fake").await;
+        let (code, _out, err) = home.run(&["host", "bypass", "on"]);
+        assert_eq!(code, 1, "{err}");
+        assert!(
+            err.contains("nothing plays on the computer to bypass"),
+            "{err}"
+        );
+    })
+    .await
+    .expect("the case finishes in time");
+}
+
+/// With no daemon the bare command reads the held stages the saved state keeps, and says no
+/// levels; a change needs the daemon.
+#[test]
+fn host_bypass_with_no_daemon_reads_the_saved_state() {
+    let home = Home::new();
+    import(&home, "My Phones");
+    let (code, _out, err) = home.run(&["host", "eq", "apply", "My Phones"]);
+    assert_eq!(code, 0, "{err}");
+    let (_code, out, _err) = home.run(&["host", "bypass"]);
+    assert!(
+        out.starts_with("bypass: unknown: no daemon is running"),
+        "{out}"
+    );
+    assert!(
+        out.trim_end().ends_with("(the saved state says off)"),
+        "{out}"
+    );
+    let state = home.path().join("svolder/host-eq.toml");
+    let mut text = std::fs::read_to_string(&state).unwrap();
+    text.push_str("\n[bypass]\neq = true\nloudness = true\n");
+    std::fs::write(&state, &text).unwrap();
+    // A stage is on in the saved state: the held set is not a bypass (the daemon's start rule).
+    let (_code, out, _err) = home.run(&["host", "bypass"]);
+    assert!(
+        out.trim_end().ends_with("(the saved state says off)"),
+        "{out}"
+    );
+    // Nothing is on: it is.
+    assert!(
+        text.contains("\non = true\n") || text.starts_with("on = true\n"),
+        "{text}"
+    );
+    let text = text.replacen("on = true", "on = false", 1);
+    std::fs::write(&state, text).unwrap();
+    let (code, out, err) = home.run(&["host", "bypass"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(
+        out.contains("(the saved state says on \u{b7} brings back EQ, loudness)"),
+        "{out}"
+    );
+    let (_code, out, _err) = home.run(&["host", "eq", "status"]);
+    assert!(
+        out.contains("bypass: on \u{b7} brings back EQ, loudness"),
+        "{out}"
+    );
+    let (code, _out, err) = home.run(&["host", "bypass", "on"]);
+    assert_eq!(code, 3, "a change with no daemon is refused: {err}");
+}

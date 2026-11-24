@@ -10,7 +10,8 @@
 use svolder_host::Progress;
 use svolder_ipc::host::{
     DacFacts, DacStage, EndToEnd, HostView, PathLine, PathRow, PlayingView, ROUTE_NOT_READ,
-    SETUP_LIMIT, SetupCheck, Verdict, path_line, path_row, setup_check, sink_is_dac,
+    SETUP_LIMIT, SetupCheck, Verdict, path_line, path_row, plays_without_player, setup_check,
+    sink_is_dac,
 };
 use svolder_profiles::Family;
 
@@ -94,6 +95,11 @@ pub(crate) struct SetupView {
     pub(crate) summary: String,
     /// The sink the check judges, as people name it.
     pub(crate) sink: String,
+    /// What comes in from the player, in the judge's words (`44.1 kHz · S16LE · stereo`).
+    pub(crate) from_player: String,
+    /// What the card is open at, in the judge's words (`44.1 kHz · 32-bit (S32_LE) · stereo ·
+    /// hw:2`, or `not open`).
+    pub(crate) to_dac: String,
     /// The lines of the check, in the judge's order.
     pub(crate) lines: Vec<SetupLineView>,
 }
@@ -173,8 +179,13 @@ impl Playing {
                 None => key.push_str(&format!("{SEP}config=none")),
                 Some(setup) => {
                     key.push_str(&format!(
-                        "{SEP}config={}{SEP}{}{SEP}{}{SEP}{}",
-                        setup.outcome, setup.chip, setup.summary, setup.sink
+                        "{SEP}config={}{SEP}{}{SEP}{}{SEP}{}{SEP}{}{SEP}{}",
+                        setup.outcome,
+                        setup.chip,
+                        setup.summary,
+                        setup.sink,
+                        setup.from_player,
+                        setup.to_dac
                     ));
                     for line in &setup.lines {
                         key.push_str(&format!(
@@ -206,9 +217,11 @@ pub(crate) fn playing_of(
         return None;
     }
     let track = host.playing.as_ref().map(track);
-    let path = match (&track, &host.route, &device) {
+    // A player's card has its path; so has a sound that plays with no MPRIS player to follow.
+    let plays = track.is_some() || host.route.as_ref().is_some_and(plays_without_player);
+    let path = match (plays, &host.route, &device) {
         // Only a DAC takes sound over the computer's audio: an amp or a preamp has no path.
-        (Some(_), Some(route), Some((Family::Dac, dac))) => {
+        (true, Some(route), Some((Family::Dac, dac))) => {
             let check = route
                 .sink
                 .as_ref()
@@ -217,7 +230,7 @@ pub(crate) fn playing_of(
             Some(path(&path_line(route, dac), check.as_ref()))
         }
         // The first read still in flight, or no `pw-dump`: the line says so, as the TUI's does.
-        (Some(_), None, Some((Family::Dac, _))) => Some(Path {
+        (_, None, Some((Family::Dac, _))) if track.is_some() => Some(Path {
             verdict: Verdict::Unknown.key(),
             end_to_end: EndToEnd::Unknown.key(),
             row: PathRow::not_read(),
@@ -313,6 +326,8 @@ fn setup_view(check: &SetupCheck) -> SetupView {
         chip: check.chip(),
         summary: check.summary_words(),
         sink: check.sink.clone(),
+        from_player: check.io.from_player.clone(),
+        to_dac: check.io.to_dac.clone(),
         lines: check
             .lines
             .iter()

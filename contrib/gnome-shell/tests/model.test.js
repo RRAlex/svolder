@@ -3,8 +3,8 @@
 
 import {equal, fixture, ok, patched, run, test} from './harness.js';
 import {
-    ageText, B17_LEGEND, barView, dbFromFraction, dbText, offMarkup, parseLine, popupView, sliderFraction,
-    tintFor,
+    ageText, B17_LEGEND, barView, COLORS, dbFromFraction, dbText, lineCandidates, nobreak, offMarkup, parseLine, popupView, sliderFraction,
+    stripLine, tintFor,
 } from '../svolder-indicator@rralex.github.io/model.js';
 
 const [untouched] = fixture('untouched');
@@ -13,6 +13,15 @@ const [away, awayBack] = fixture('away');
 const [oldSignal] = fixture('old_signal');
 // Three minutes after the old reading was heard.
 const NOW = oldSignal.device.signal.heard_at_ms + 180000;
+
+// The invisible mark of the dB unit's size that ends every strip line, so all lines share a height.
+const MARK = '<span size="70%" rise="-2028" alpha="90%">\u200b</span>';
+// A strip line without that mark, for the tests about its words.
+const plainLine = (path, hovered = null) => {
+    const line = stripLine(path, hovered);
+    equal(line.markup.startsWith(MARK), true, 'every line starts with the height mark');
+    return {...line, markup: line.markup.slice(MARK.length)};
+};
 
 const UNIT_12 = '<span size="72%" rise="-2028" alpha="90%">dB</span>';
 const gapped = (digits, last) => `${digits}<span letter_spacing="768">${last}</span>`;
@@ -93,6 +102,43 @@ test('config_fail: the Path row is warn, so the LED is yellow though the sound i
     equal(popupView(bad, NOW).path.off, 'config 1');
 });
 
+test('config_io: the DAC segment words end with what the card is open at, the rest line is unchanged', () => {
+    const [open] = fixture('config_io');
+    const path = popupView(open, NOW).path;
+    equal(path.segments.map(s => s.words), [
+        'Player: untouched', 'Computer: untouched', 'DAC: untouched \u00b7 44.1 kHz \u00b7 32-bit \u00b7 stereo']);
+    equal(plainLine(path, 2).markup.includes('44.1 kHz \u00b7 32-bit \u00b7 stereo'), true, 'hovering the DAC shows it');
+    equal(plainLine(path).markup.includes('32-bit'), false, 'the line at rest does not');
+});
+
+test('the line candidates are the rest line and every segments words, the visible ones', () => {
+    const [open] = fixture('config_io');
+    const path = popupView(open, NOW).path;
+    const all = lineCandidates(path);
+    equal(all.length, 4, 'the rest line and three segments');
+    equal(all.some(m => m.includes('44.1 kHz \u00b7 32-bit \u00b7 stereo')), true, 'the DAC segment is one');
+    const [changed] = fixture('dac_io_changed');
+    const wide = lineCandidates(popupView(changed, NOW).path);
+    equal(wide.some(m => m.includes('tone control') && m.includes('32-bit')), true);
+    const [unknown] = fixture('player_unknown');
+    equal(lineCandidates(popupView(unknown, NOW).path).length, 3, 'no rest line to say: its segments only');
+    equal(lineCandidates(null), []);
+    // The words the line is already sized for stay a candidate (once), so an open menu never shrinks.
+    const old = 'DAC: volume \u22129.1 dB \u00b7 old words';
+    equal(lineCandidates(path, old), [...all, old]);
+    equal(lineCandidates(path, all[1]), all, 'a candidate that is already there is not added twice');
+    equal(lineCandidates(path, null), all);
+    equal(lineCandidates({segments: [], rest: {text: '', tone: 'plain'}}), []);
+});
+
+test('nobreak: a part never splits, a line breaks only after a dot, tags stay as they are', () => {
+    equal(nobreak('DAC: volume 3 dB \u00b7 tone control'), 'DAC:\u00a0volume\u00a03\u00a0dB\u00a0\u00b7 tone\u00a0control');
+    equal(nobreak('<span size="70%">a b</span> \u00b7 c d'), '<span size="70%">a\u00a0b</span>\u00a0\u00b7 c\u00a0d');
+    equal(nobreak('untouched end to end'), 'untouched\u00a0end\u00a0to\u00a0end');
+    equal(nobreak('44.1 kHz \u00b7 32-bit'), '44.1\u00a0kHz\u00a0\u00b7 32-\u2060bit');
+    equal(nobreak(''), '');
+});
+
 test('no verdict (not_this_dac, other_input, player_unknown): a ring, the tint stays, the words show', () => {
     const words = {not_this_dac: '\u2192 Monitor HDMI', other_input: 'the DAC listens to Optical', player_unknown: ''};
     for (const [name, off] of Object.entries(words)) {
@@ -158,6 +204,30 @@ test('rows: input, computer EQ and scenes as the fixtures give them', () => {
     equal(scenes.choices.filter(c => c.on).map(c => c.name), ['Night']);
 });
 
+test('the computer row: the switch and the level come from the line, an older line keeps the EQ', () => {
+    const [playing] = fixture('computer_playing');
+    const row = popupView(playing, NOW).computerEq;
+    equal(row.on, true);
+    equal(row.switchName, 'The computer changes the sound, on or off');
+    equal(row.value, 'Late night \u00b7 plays \u22127.8 dB in all');
+    const [bypass] = fixture('computer_bypass');
+    const held = popupView(bypass, NOW).computerEq;
+    // The bypass holds a set: the switch is off whatever the EQ says, and the total is the words.
+    equal(held.on, false);
+    equal(held.value, 'pass-through \u22127.6 dB until the music pauses');
+    // An untouched pass-through says so in the daemon's words and the switch is off.
+    const [clean] = fixture('passthrough_untouched');
+    const quiet = popupView(clean, NOW).computerEq;
+    equal(quiet.on, false);
+    equal(quiet.value, 'pass-through, untouched');
+    // An older svolder's line has neither: the switch is the EQ's own and the value the preset.
+    const [old] = fixture('computer_old_daemon');
+    const older = popupView(old, NOW).computerEq;
+    equal(older.on, old.computer_eq.on);
+    equal(older.switchName, 'Computer EQ on or off');
+    equal(older.value, old.computer_eq.preset);
+});
+
 test('no computer EQ and no device', () => {
     const [noEq] = fixture('no_computer_eq');
     equal(popupView(noEq, NOW).computerEq, null);
@@ -182,6 +252,70 @@ test('the Path strip: tones to colours, the off-only words in markup, nothing wh
         {hop: 'player', tone: 'unknown'}, {hop: 'computer', tone: 'good'}, {hop: 'dac', tone: 'good'}]}});
     equal(popupView(unknown, NOW).path.segments[0].color, '#666666');
     equal(popupView({...untouched, path: null}, NOW).path, null);
+});
+
+test('the rest line beside the strip: untouched in green, what is off in yellow, nothing to say hides', () => {
+    const clean = popupView(untouched, NOW).path;
+    equal(plainLine(clean), {visible: true, tone: 'good', color: COLORS.green, markup: 'untouched end to end'});
+    const changed = popupView(dacChanged, NOW).path;
+    const line = plainLine(changed);
+    equal([line.visible, line.tone], [true, 'warn']);
+    equal(line.markup, changed.offMarkup);
+    const [failing] = fixture('config_fail');
+    equal(plainLine(popupView(failing, NOW).path), {visible: true, tone: 'warn', color: COLORS.yellow, markup: 'config 1'});
+    const [unknown] = fixture('player_unknown');
+    equal(plainLine(popupView(unknown, NOW).path).visible, false);
+    equal(plainLine(null).visible, false);
+});
+
+test('hovering a segment shows its words, escaped, and leaving returns to the rest line', () => {
+    const path = popupView(dacChanged, NOW).path;
+    equal(path.segments.map(s => s.words), [
+        'Player: untouched', 'Computer: untouched', 'DAC: volume \u221224.1 dB \u00b7 tone control']);
+    equal(plainLine(path, 0), {visible: true, tone: 'good', color: COLORS.green, markup: 'Player: untouched'});
+    equal(plainLine(path, 2), {visible: true, tone: 'warn', color: COLORS.yellow, markup: 'DAC: volume \u221224.1 dB \u00b7 tone control'});
+    equal(plainLine(path, null), plainLine(path));
+    const [unknown] = fixture('player_unknown');
+    const grey = popupView(unknown, NOW).path;
+    equal(plainLine(grey, 0), {visible: true, tone: 'plain', color: COLORS.dim, markup: 'Player: not read'});
+    const evil = popupView(patched(dacChanged, {path: {segments: [
+        {hop: 'player', tone: 'good', words: 'Player: <b>&'}, {hop: 'computer', tone: 'good', words: ''},
+        {hop: 'dac', tone: 'warn', words: 'x'}]}}), NOW).path;
+    equal(plainLine(evil, 0).markup, 'Player: &lt;b&gt;&amp;');
+    equal(plainLine(evil, 1), plainLine(evil));
+    const [other] = fixture('not_this_dac');
+    const elsewhere = popupView(other, NOW).path;
+    equal(plainLine(elsewhere, 1).markup, elsewhere.off);
+});
+
+test('a line from a 0.39.1 svolder (no rest, no words) draws without throwing', () => {
+    const old = JSON.parse(JSON.stringify(dacChanged));
+    delete old.path.rest;
+    for (const s of old.path.segments)
+        delete s.words;
+    const path = popupView(old, NOW).path;
+    // What the 0.39.1 extension drew: the off words in yellow.
+    equal(path.rest, {text: path.off, tone: 'warn'});
+    equal(path.segments.map(s => s.words), ['', '', '']);
+    equal(plainLine(path).markup, popupView(dacChanged, NOW).path.offMarkup);
+    equal(plainLine(path, 2), plainLine(path));
+    equal(path.offMarkup, popupView(dacChanged, NOW).path.offMarkup);
+    const [fine] = fixture('untouched');
+    delete fine.path.rest;
+    for (const s of fine.path.segments)
+        delete s.words;
+    const quiet = popupView(fine, NOW).path;
+    equal(quiet.rest, {text: '', tone: 'plain'});
+    equal(plainLine(quiet).visible, false);
+});
+
+test('the strip line carries its colour from the table', () => {
+    const path = popupView(dacChanged, NOW).path;
+    equal(plainLine(path).color, COLORS.yellow);
+    equal(plainLine(path, 0).color, COLORS.green);
+    equal(plainLine(popupView(untouched, NOW).path).color, COLORS.green);
+    const [unknown] = fixture('player_unknown');
+    equal(plainLine(popupView(unknown, NOW).path, 0).color, COLORS.dim);
 });
 
 test('away hides the DAC rows and keeps the computer EQ and the scenes', () => {

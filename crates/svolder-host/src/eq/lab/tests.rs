@@ -124,6 +124,20 @@ fn the_lab_finds_nothing_in_a_short_scene_run() {
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 
+/// The short run of the climb profile ([`generate_climb`]): stages, the EQ and the bypass going
+/// off over a playing stream, rate changes up to 768 kHz, rebuilds and `pw-cli` deaths, under both
+/// models of ids. The level rule (never up by more than 0.5 dB between two states) and the
+/// climb's liveness hold in every profile, this one asks them most.
+const CLIMB_FIRST: u64 = 1;
+const CLIMB_RUNS: u64 = 300;
+
+#[test]
+fn the_lab_finds_nothing_in_a_short_climb_run() {
+    let mut failures = run_climb_seeds(CLIMB_FIRST, CLIMB_RUNS, Ids::Fresh);
+    failures.extend(run_climb_seeds(CLIMB_FIRST, CLIMB_RUNS, Ids::Reused));
+    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+}
+
 /// A block of seeds of one profile: the first seed, how many, the model of ids.
 type RunSeeds = fn(u64, u64, Ids) -> Vec<String>;
 
@@ -136,15 +150,16 @@ fn the_lab_finds_nothing_in_a_long_run() {
     let runs = from_env("SVOLDER_LAB_RUNS", 5_000);
     let started = std::time::Instant::now();
     let mut failures = Vec::new();
-    let profiles: [(&str, RunSeeds); 6] = [
+    let profiles: [(&str, RunSeeds); 7] = [
         ("ordinary", run_seeds),
         ("targeted", run_targeted_seeds),
         ("speakers", run_speakers_seeds),
         ("high-rate", run_highrate_seeds),
         ("loudness", run_loudness_seeds),
         ("scene", run_scene_seeds),
+        ("climb", run_climb_seeds),
     ];
-    let mut took = [std::time::Duration::ZERO; 6];
+    let mut took = [std::time::Duration::ZERO; 7];
     for ids in [Ids::Fresh, Ids::Reused] {
         for ((_, run), took) in profiles.iter().zip(&mut took) {
             let at = std::time::Instant::now();
@@ -156,7 +171,7 @@ fn the_lab_finds_nothing_in_a_long_run() {
         eprintln!("preamp lab: the {name} profile took {took:.0?}");
     }
     eprintln!(
-        "preamp lab: seeds {first}..{} ({runs} runs of each of the six profiles, fresh and reused ids) in {:.0?}, {} failed",
+        "preamp lab: seeds {first}..{} ({runs} runs of each of the seven profiles, fresh and reused ids) in {:.0?}, {} failed",
         first + runs,
         started.elapsed(),
         failures.len()
@@ -172,6 +187,8 @@ fn a_seed_makes_the_same_sequence_every_time() {
     assert_ne!(sequence_of_loudness(7).1, sequence_of(7).1);
     assert_eq!(sequence_of_scene(7), sequence_of_scene(7));
     assert_ne!(sequence_of_scene(7).1, sequence_of(7).1);
+    assert_eq!(sequence_of_climb(7), sequence_of_climb(7));
+    assert_ne!(sequence_of_climb(7).1, sequence_of(7).1);
 }
 
 /// The model reads the loudness stage from a config, a rate change puts it back to the config's
@@ -192,6 +209,7 @@ fn the_model_keeps_the_loudness_stage_and_its_settings() {
         flat: true,
         crossfeed: None,
         speakers: None,
+        identity: None,
     };
     let (_, conf) = World::stage_apply(request.clone()).unwrap();
     let identity = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
@@ -633,8 +651,12 @@ fn chosen_sequence(seed: u64) -> (u32, Vec<Event>) {
         return loudness;
     }
     let scene = sequence_of_scene(seed);
-    match run_sequence(scene.0, &scene.1).is_err() {
-        true => scene,
+    if run_sequence(scene.0, &scene.1).is_err() {
+        return scene;
+    }
+    let climb = sequence_of_climb(seed);
+    match run_sequence(climb.0, &climb.1).is_err() {
+        true => climb,
         false => ordinary,
     }
 }
@@ -1556,7 +1578,7 @@ fn serial(lab: &Lab) -> Option<u64> {
 /// level held), and the node is started again with the curve's own preamp once nothing has
 /// played for the idle time; every step at or under unity, under both models of ids.
 #[test]
-fn a_recall_while_playing_keeps_the_node_and_the_idle_restart_lifts_the_level() {
+fn a_recall_while_playing_over_a_chain_the_daemon_applied_keeps_the_node_and_rises_at_once() {
     for ids in [Ids::Fresh, Ids::Reused] {
         IDS.set(ids);
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -1565,6 +1587,52 @@ fn a_recall_while_playing_keeps_the_node_and_the_idle_restart_lifts_the_level() 
         runtime.block_on(async {
             let mut lab = Lab::new(48_000);
             for event in [load(hot()), Event::Ticks(30), Event::Playing(true)] {
+                lab.run(&event).await.unwrap();
+            }
+            let started = serial(&lab);
+            let cut = lab.control.view().preamp_db;
+            assert!(cut < -9.0, "{cut}");
+            for event in [
+                load(gentle()),
+                Event::Ticks(30),
+                Event::Rate(44_100),
+                Event::Ticks(30),
+                Event::Rate(96_000),
+                Event::Ticks(60),
+            ] {
+                lab.run(&event).await.unwrap();
+            }
+            assert_eq!(serial(&lab), started, "[{ids:?}] no restart while playing");
+            let view = lab.control.view();
+            assert_eq!(view.note, None);
+            assert!(view.preamp_db > cut + 5.0, "{} over {cut}", view.preamp_db);
+            lab.quiet_tail(0).await.unwrap();
+        });
+    }
+    IDS.set(Ids::Fresh);
+}
+
+#[test]
+fn a_recall_while_playing_over_a_command_line_chain_keeps_the_node_and_the_idle_restart_lifts_the_level()
+ {
+    for ids in [Ids::Fresh, Ids::Reused] {
+        IDS.set(ids);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("a runtime");
+        runtime.block_on(async {
+            let mut lab = Lab::new(48_000);
+            for event in [
+                Event::Cli {
+                    filters: hot(),
+                    stated: 0.0,
+                    gap_ticks: 0,
+                },
+                Event::Ticks(30),
+                Event::Reload,
+                Event::Ticks(30),
+                Event::Playing(true),
+            ] {
                 lab.run(&event).await.unwrap();
             }
             let started = serial(&lab);
@@ -2390,13 +2458,14 @@ fn lab_outcomes() {
     let out = std::env::var_os("SVOLDER_LAB_OUT").expect("SVOLDER_LAB_OUT names the file");
     let traced = std::env::var_os("SVOLDER_LAB_TRACE").is_some();
     type Sequence = fn(u64) -> (u32, Vec<Event>);
-    let profiles: [(&str, Sequence); 6] = [
+    let profiles: [(&str, Sequence); 7] = [
         ("plain", sequence_of),
         ("targeted", sequence_of_targeted),
         ("speakers", sequence_of_speakers),
         ("highrate", sequence_of_highrate),
         ("loudness", sequence_of_loudness),
         ("scene", sequence_of_scene),
+        ("climb", sequence_of_climb),
     ];
     let jobs: Vec<(usize, Ids, u64)> = (0..profiles.len())
         .flat_map(|profile| {
@@ -2908,4 +2977,427 @@ fn a_lone_crossfeed_change_with_loudness_on_is_not_held() {
             view.preamp_db
         );
     });
+}
+
+/// Each way the level goes up at once (a stage off, the EQ off, the bypass) over a stream that
+/// plays, with a rate change among them: the level rule (never up by more than 0.5 dB between two
+/// states, every line boundary included) and the climb's liveness hold at every rate. Against a
+/// controller whose speakers-off line puts the mixers before the preamp, or whose climb takes 1 dB
+/// a tick, each of these fails.
+#[test]
+fn the_level_climbs_after_each_stage_off_without_a_jump() {
+    let crossfeed = |on| Event::Crossfeed {
+        on: Some(on),
+        model: Some(3),
+        amount_pct: None,
+        delay_ms: None,
+        done: true,
+    };
+    let speakers = |on| Event::Speakers {
+        on: Some(on),
+        set: Some(0),
+    };
+    let curve = Event::Load {
+        filters: hot(),
+        stated: 0.0,
+    };
+    for rate in [44_100, 48_000, 192_000, 768_000] {
+        for off in [
+            vec![crossfeed(true), Event::Ticks(8), crossfeed(false)],
+            vec![speakers(true), Event::Ticks(8), speakers(false)],
+            vec![Event::Ticks(8), Event::Toggle(false)],
+            vec![
+                crossfeed(true),
+                speakers(true),
+                Event::Ticks(8),
+                Event::Bypass(true),
+            ],
+            vec![
+                speakers(true),
+                Event::Ticks(4),
+                Event::Rate(96_000),
+                Event::Bypass(true),
+            ],
+        ] {
+            let mut events = vec![curve.clone(), Event::Playing(true), Event::Ticks(20)];
+            events.extend(off);
+            events.extend([Event::Rate(rate), Event::Ticks(60)]);
+            holds(rate, &events);
+        }
+    }
+}
+
+/// Seed 2880: a climb that an EQ toggle restarts during the bypass must still end exactly at its
+/// target, under both models of ids.
+#[test]
+fn a_climb_restarted_by_a_toggle_during_the_bypass_ends_at_its_target() {
+    holds_both(
+        88_200,
+        &[
+            Event::Playing(true),
+            load(vec![
+                point(
+                    FilterKind::HighShelf,
+                    897.0811403537493,
+                    7.502792245793842,
+                    0.7418325107339799,
+                ),
+                point(
+                    FilterKind::Peaking,
+                    27.870319397931226,
+                    -9.21361860035018,
+                    0.7603633850061893,
+                ),
+                point(
+                    FilterKind::HighShelf,
+                    2944.763802890558,
+                    10.615737640520173,
+                    1.3462502427390832,
+                ),
+            ]),
+            Event::Bypass(true),
+            Event::Ticks(4),
+            Event::Ticks(21),
+            Event::Ticks(12),
+            Event::Ticks(25),
+            Event::Toggle(true),
+            Event::Toggle(false),
+        ],
+    );
+}
+
+/// Seed 5001: a failed start, a rate, a node restart, then a recall that turns the stages off
+/// and a second at a new rate that turns them on, never raise the level part way through a line.
+#[test]
+fn recalls_after_a_node_restart_across_rates_never_raise_the_level_inside_a_line() {
+    let part = |eq_on,
+                preamp_db,
+                filters,
+                ld: (f64, f64),
+                xf: Option<(CrossfeedModel, &str)>,
+                sp: &str,
+                sp_on| {
+        Event::Scene(Box::new(ComputerPart {
+            eq_on,
+            name: "Scene".to_string(),
+            origin: None,
+            preamp_db,
+            filters,
+            loudness: Some(LoudnessSettings {
+                on: true,
+                strength_pct: ld.0,
+                reference_pct: ld.1,
+            }),
+            crossfeed_on: xf.as_ref().is_some_and(|(_, on)| *on == "on"),
+            crossfeed: xf.map(|(model, _)| CrossfeedSettings::for_model(model)),
+            speakers_on: sp_on,
+            speakers: Some(sp.to_string()),
+        }))
+    };
+    holds_both(
+        352_800,
+        &[
+            Event::Fail { kind: 1 },
+            load(vec![
+                point(
+                    FilterKind::HighShelf,
+                    3558.9178437040546,
+                    -7.560429385789075,
+                    0.10037775620673332,
+                ),
+                point(
+                    FilterKind::LowShelf,
+                    46.567545437832685,
+                    -11.26978490375708,
+                    0.1140617517452741,
+                ),
+                point(
+                    FilterKind::Peaking,
+                    328.3388962685526,
+                    9.402328501231302,
+                    3.0737909377384494,
+                ),
+            ]),
+            Event::Rate(48_000),
+            Event::NodeRestart,
+            part(
+                false,
+                4.422957859139218,
+                vec![
+                    point(
+                        FilterKind::HighShelf,
+                        7696.984556825301,
+                        -2.960749478304386,
+                        0.4300516878674517,
+                    ),
+                    point(
+                        FilterKind::LowShelf,
+                        56.16903881833734,
+                        7.7460404787070125,
+                        1.582799326345856,
+                    ),
+                ],
+                (41.684194031915766, 37.19299549577253),
+                Some((CrossfeedModel::Linkwitz, "on")),
+                "set-a",
+                false,
+            ),
+            Event::Rate(352_800),
+            part(
+                true,
+                0.0,
+                vec![
+                    point(
+                        FilterKind::Peaking,
+                        372.63685846864195,
+                        -2.552314690015434,
+                        0.999689893958125,
+                    ),
+                    point(
+                        FilterKind::HighShelf,
+                        120.99414969640542,
+                        5.822251136885335,
+                        1.5494181632055315,
+                    ),
+                    point(
+                        FilterKind::Peaking,
+                        80.4180861816654,
+                        -4.93066803043023,
+                        0.24915127941392468,
+                    ),
+                    point(
+                        FilterKind::HighShelf,
+                        21.84846116682449,
+                        -8.973754406081742,
+                        0.25150492235645155,
+                    ),
+                    point(
+                        FilterKind::LowShelf,
+                        293.2662034102139,
+                        -0.9229075203384802,
+                        6.840486505821186,
+                    ),
+                    point(
+                        FilterKind::HighShelf,
+                        238.20768211997427,
+                        -7.930118710413367,
+                        5.919882670956284,
+                    ),
+                    point(
+                        FilterKind::LowShelf,
+                        23.4244677600808,
+                        10.148339937629004,
+                        0.1930590093444516,
+                    ),
+                    point(
+                        FilterKind::Peaking,
+                        101.8875795438175,
+                        5.823463396093224,
+                        8.633142531871865,
+                    ),
+                ],
+                (87.71756555846531, 53.83431641557312),
+                Some((CrossfeedModel::Bauer, "off")),
+                "set-b",
+                true,
+            ),
+        ],
+    );
+}
+
+/// The climb rule is not loosened by a drop: a climb that is cut back again and again with only
+/// time going by (a controller that keeps restarting it in the quiet tail) never reaches its
+/// target and fails the rule, while one restarted by an event (the 2880 toggles) does not.
+#[test]
+fn a_climb_cut_again_and_again_by_ticks_alone_fails_the_liveness_rule() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("a runtime");
+    runtime.block_on(async {
+        let mut lab = Lab::new(88_200);
+        for event in [
+            Event::Playing(true),
+            load(vec![
+                point(FilterKind::HighShelf, 897.0, 7.5, 0.74),
+                point(FilterKind::Peaking, 27.9, -9.2, 0.76),
+                point(FilterKind::HighShelf, 2944.0, 10.6, 1.35),
+            ]),
+            Event::Bypass(true),
+            Event::Ticks(4),
+        ] {
+            lab.run(&event).await.unwrap();
+        }
+        assert!(lab.control.climb_progress().is_some(), "a climb runs");
+        let mut failure = None;
+        // Each cut goes a little lower than the last, so the level the rule reads after the tick
+        // is under the one it read before: a drop, on ticks alone.
+        for step in 0..400 {
+            lab.control.cut_climb_to(-20.0 - 0.05 * f64::from(step));
+            if let Err(found) = lab.run(&Event::Ticks(1)).await {
+                failure = Some(found);
+                break;
+            }
+        }
+        let failure = failure.expect("a climb cut back by ticks alone must fail the rule");
+        assert!(failure.what.contains("still at"), "{}", failure.what);
+    });
+}
+
+/// Seed 2118: a first line that climbs (the curve removed after the speakers' stage went out)
+/// must not hold the stage's repeat back: a node that lost the stage has it again when the world
+/// is quiet, under both models of ids.
+#[test]
+fn a_climb_does_not_starve_the_stages_repeat() {
+    holds_both(
+        48_000,
+        &[
+            Event::Load {
+                filters: vec![
+                    point(
+                        FilterKind::HighShelf,
+                        2380.24380049368,
+                        -5.310300622584923,
+                        0.11955047395835892,
+                    ),
+                    point(
+                        FilterKind::LowShelf,
+                        1745.0860655484587,
+                        -4.311887646015033,
+                        5.427275080935455,
+                    ),
+                    point(
+                        FilterKind::Peaking,
+                        296.0717843246645,
+                        3.0426473593154775,
+                        1.4689147562256935,
+                    ),
+                    point(
+                        FilterKind::HighShelf,
+                        5279.883965232054,
+                        -4.5800884196659295,
+                        1.0005894227548098,
+                    ),
+                    point(
+                        FilterKind::Peaking,
+                        11521.984620208472,
+                        11.06850167955793,
+                        0.19268700712553907,
+                    ),
+                    point(
+                        FilterKind::LowShelf,
+                        433.7220792677685,
+                        -8.136495699418434,
+                        6.567084432224391,
+                    ),
+                    point(
+                        FilterKind::HighShelf,
+                        2923.517035560125,
+                        -3.3083427189633277,
+                        0.7092045409624471,
+                    ),
+                    point(
+                        FilterKind::LowShelf,
+                        306.74301611551186,
+                        -2.1243732449711104,
+                        1.654788826433765,
+                    ),
+                    point(
+                        FilterKind::Peaking,
+                        4530.776174588886,
+                        -0.8045504008215989,
+                        0.14987741570676041,
+                    ),
+                    point(
+                        FilterKind::LowShelf,
+                        43.229148553359046,
+                        11.529302315456079,
+                        0.9984301075645837,
+                    ),
+                    point(
+                        FilterKind::Peaking,
+                        25.392954867613525,
+                        -3.7480790626151794,
+                        0.2616021912858038,
+                    ),
+                    point(
+                        FilterKind::Peaking,
+                        2340.5994268863683,
+                        1.2310425374415992,
+                        0.14176004426707842,
+                    ),
+                    point(
+                        FilterKind::Peaking,
+                        16078.937868215624,
+                        6.030809990579172,
+                        0.10845198129777815,
+                    ),
+                    point(
+                        FilterKind::Peaking,
+                        777.4548501425166,
+                        -4.113295088047199,
+                        3.1671057247564316,
+                    ),
+                    point(
+                        FilterKind::LowShelf,
+                        5673.591164693962,
+                        -5.962707256192829,
+                        0.3612940914120135,
+                    ),
+                    point(
+                        FilterKind::Peaking,
+                        47.19027110742163,
+                        -6.165525623219615,
+                        0.6662514865515259,
+                    ),
+                ],
+                stated: 0.0,
+            },
+            Event::RefuseSends { ms: 6000 },
+            Event::Ticks(38),
+            Event::Load {
+                filters: vec![point(
+                    FilterKind::LowShelf,
+                    620.9327979942498,
+                    29.407885271642286,
+                    14.550049453090745,
+                )],
+                stated: -4.0932049418398915,
+            },
+            Event::Fail { kind: 3 },
+            Event::Drag {
+                pick: 10,
+                kind: None,
+                f: None,
+                g: None,
+                q: None,
+                steps: 1,
+                gap_ticks: 2,
+            },
+            Event::Ticks(41),
+            Event::Drag {
+                pick: 5,
+                kind: None,
+                f: Some(2587.273808888053),
+                g: Some(5.275256521578505),
+                q: None,
+                steps: 3,
+                gap_ticks: 1,
+            },
+            Event::Drag {
+                pick: 12,
+                kind: None,
+                f: None,
+                g: None,
+                q: None,
+                steps: 4,
+                gap_ticks: 2,
+            },
+            Event::Speakers {
+                on: Some(true),
+                set: Some(0),
+            },
+            Event::SlotRevert,
+            Event::Remove { pick: 1 },
+        ],
+    );
 }

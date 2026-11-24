@@ -83,6 +83,7 @@ headless() {
     if env HOME="$run/home" TMPDIR="$run/tmp" XDG_RUNTIME_DIR="$run/runtime" \
         XDG_CONFIG_HOME="$run/home/.config" XDG_DATA_HOME="$run/home/.local/share" \
         XDG_STATE_HOME="$run/home/.local/state" XDG_CACHE_HOME="$run/home/.cache" \
+        SVOLDER_HEADLESS_TEXT_SCALE="${SVOLDER_HEADLESS_TEXT_SCALE:-}" \
         PATH="$run/bin:$PATH" SVOLDER_HEADLESS_MODE="$mode" SVOLDER_HEADLESS_RESULT="$run/result" \
         SVOLDER_FAKE_FIXTURE="$fixture" SVOLDER_FAKE_LOG="$run/log" SVOLDER_FAKE_PIDFILE="$run/pid" \
         SVOLDER_FAKE_EXIT="$([ "$mode" = exit3 ] && echo 3 || { [ "$mode" = exit0 ] && echo 0; } || true)" \
@@ -135,7 +136,8 @@ install)
     pack
     gnome-extensions install --force "$zip"
     echo "gnome-extension: installed $uuid for this user, not enabled."
-    echo "On Wayland a new extension shows after you log out and in. Then:"
+    echo "GNOME Shell on Wayland only finds a new extension when you log in: until you log out and"
+    echo "back in, \`gnome-extensions enable\` says it does not exist. After logging back in:"
     echo "  gnome-extensions enable $uuid"
     ;;
 uninstall)
@@ -157,8 +159,20 @@ check)
     for f in "$SVOLDER_FIXTURES_DIR"/*.jsonl "$scratch/away_first.jsonl"; do
         headless "$(basename "$f" .jsonl)" ok "$f"
     done
+    # Large Text: the line's height and place and the menu's width hold at a text scale of 1.25.
+    for f in dac_changed player_unknown untouched config_io dac_io_changed no_mpris; do
+        SVOLDER_HEADLESS_TEXT_SCALE=1.25 headless "large-$f" ok "$SVOLDER_FIXTURES_DIR/$f.jsonl"
+    done
     headless exit3 exit3 "$SVOLDER_FIXTURES_DIR/untouched.jsonl"
     headless exit0 exit0 "$SVOLDER_FIXTURES_DIR/no_device.jsonl"
+    ;;
+only)
+    # One fixture in one headless load: `only FIXTURE [TEXT_SCALE [SHOT_PREFIX]]`.
+    name=${2:?usage: gnome-extension.sh only FIXTURE [TEXT_SCALE]}
+    pack
+    headless_possible || exit 0
+    scratch_dir
+    SVOLDER_HEADLESS_TEXT_SCALE=${3:-} headless "only-$name" ok "$SVOLDER_FIXTURES_DIR/$name.jsonl" "${4:-}"
     ;;
 shots)
     dir=${2:?usage: gnome-extension.sh shots DIR}
@@ -166,7 +180,7 @@ shots)
     scratch_dir
     mkdir -p "$dir"
     head -n 1 "$SVOLDER_FIXTURES_DIR/away.jsonl" > "$scratch/away_first.jsonl"
-    for f in untouched dac_changed muted weak_signal away_first old_signal no_device several_scenes resampled not_this_dac other_input player_unknown config_fail; do
+    for f in untouched dac_changed muted weak_signal away_first old_signal no_device several_scenes resampled not_this_dac other_input player_unknown config_fail config_io dac_io_changed no_mpris; do
         fixture=$SVOLDER_FIXTURES_DIR/$f.jsonl
         [ "$f" != away_first ] || fixture=$scratch/away_first.jsonl
         [ -f "$fixture" ] || {
@@ -186,7 +200,7 @@ shots3)
     done
     ;;
 *)
-    echo "usage: gnome-extension.sh pack|install|uninstall|check|shots DIR|shots3 DIR" >&2
+    echo "usage: gnome-extension.sh pack|install|uninstall|check|only FIXTURE [SCALE [PREFIX]]|shots DIR|shots3 DIR" >&2
     exit 1
     ;;
 esac

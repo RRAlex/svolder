@@ -264,14 +264,14 @@ daemon with `SVOLDER_HOST=off` draws nothing, and an amp or a preamp gets the ca
   visualizer in the band's right half has the same box, so starting it, or having no capture, moves
   nothing. The band is Now playing and the visualizer in halves from 1100 px (the cover 84 px);
   below that Now playing takes three fifths, with a 64 px cover and a smaller title. The path row
-  puts the label `Path` first and the DAC's chip last The arrow belongs to the chip before it (its
+  puts the label `Path` first and the DAC's chip last. The arrow belongs to the chip before it (its
   `::after`) and the values are nowrap units with each `·` glued to the value before it, so no
-  wrapped line starts with an arrow or a dot (an arrow in `::before` breaks that). With no player
-  the card is the one line `No player` in the same box. On a phone the folded line is 72 px whatever
-  it says ([what it holds](web-visualizer.md#the-phones-folded-line)). A tap on the line (or its
-  chevron) opens the full card in place; `data-expanded` is kept in the module and put on each
-  incoming card, so the stream's swaps do not fold it. A card with no player has nothing to open: an
-  open card whose player quits folds to the quiet line and stays folded when a player returns.
+  wrapped line starts with an arrow or a dot. With no player the card is the one line `No player` in
+  the same box; a sound with no MPRIS player (`nompris`) adds its Path row, never folded. Any other
+  phone line is 72 px ([what it holds](web-visualizer.md#the-phones-folded-line)). A tap on the
+  line opens the full card in place; `data-expanded` is kept in the module and put on each incoming
+  card, so the stream's swaps do not fold it. A card with no player has nothing to open: an open
+  card whose player quits folds to the quiet line and stays folded when a player returns.
 - **Where it sits.** On a desktop it is a band under the header, across both columns, with the
   volume and the tone control in their two columns below it; the visualizer
   ([web-visualizer.md](web-visualizer.md)) joins it on its right. On a phone it is a line above the

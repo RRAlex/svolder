@@ -1412,12 +1412,20 @@ Every line is one object with these members (each `null` when there is nothing t
   (`good`, `warn` or `plain`: how the Path row's label is drawn, which is what the indicator's LED
   follows: a failing PipeWire config check is `warn` while `end_to_end` still reads `untouched`),
   `label` (the words for a screen reader), `segments` (the player, the computer and the DAC, each
-  `good`, `warn` or `unknown`) and `off`, the words for what is off grouped by hop (`DAC: volume
-  −24.1 dB · tone control`; empty when untouched end to end; `config N` is added for a failing
-  PipeWire config check; for a sound that goes to another sink or input there are no hops, and the
-  row's words stand here, such as `→ Monitor HDMI`). The path is judged whenever the computer's
-  route is read, with or without a player playing (the TUI says "nothing playing" and the web page
-  shows no path then; the indicator keeps its strip and the DAC's own changes in view).
+  `good`, `warn` or `unknown`, with its `words`, such as `Player: untouched` or `Computer:
+  resampled`; the DAC's ends with what the card is open at, `DAC: untouched · 44.1 kHz · 32-bit ·
+  stereo` or `· not open`, nothing when the card is not read; with no hops every segment has the
+  `off` words), `rest`, the line the indicator shows beside the strip (`text` and `tone`:
+  `untouched end to end` in `good` when `tone` is `good`, else the `off` words in `warn`, else empty
+  in `plain`) and `off`, the words for what is off grouped by hop (`DAC: volume −24.1 dB · tone
+  control`; empty when untouched end to end; `config N` is added for a failing PipeWire config
+  check; for a sound that goes to another sink or input there are no hops, and the row's words
+  stand here, such as `→ Monitor HDMI`). The path is judged whenever the computer's route is read,
+  with or without a player playing. With no MPRIS player and one stream playing into the sink the
+  stream is judged: the player hop reads `player (no MPRIS)` with a dim `?`, the segment says
+  `Player (no MPRIS)`, and the words add `no MPRIS player`. With several streams and no MPRIS
+  player nothing is judged (the segments are grey and the words say `no MPRIS player`); with nothing
+  playing the TUI says "nothing playing" and the web page shows no path.
 - `scenes`: `on` and `choices`.
 - `actions`: the arguments, after the program name and the global flags, of `volume_up` and
   `volume_down` (a caller adds `--step N` for N notches), `mute_on`, `mute_off`, `volume_set` (the
@@ -1445,6 +1453,7 @@ Commands:
   check      Check what the computer and its PipeWire config do to the sound
   crossfeed  Cross a little of each channel into the other for headphones, through the daemon
   loudness   Give the bass and the treble back at a low volume, through the daemon
+  bypass     Turn every stage of the computer off in one change, and bring them back as they were
   speakers   Two virtual speakers on headphones, through the daemon
   help       Print this message or the help of the given subcommand(s)
 
@@ -1461,8 +1470,8 @@ Options:
 ### host eq
 
 The group's first subcommand, with `apply`, `remove`, `on`, `off`, `preset` and `status` below
-it. (`host crossfeed`,
-`host loudness` and `host speakers`, the group's other ones, are described in their own sections.)
+it. (`host crossfeed`, `host loudness`, `host bypass` and `host speakers`, the group's other ones,
+are described in their own sections.)
 
 ```
 An equalizer on what the computer plays
@@ -1669,7 +1678,10 @@ the chain runs reads `the unit is still running: svolder host eq remove`. `--jso
 with `on`, `running` (`null` when it could not be told), `name`, `origin`, `target`, `route`,
 `manager`, `previous_default`, `preamp_db`, `filters` (each `type`, `f`, `g`, `q`) and `problem`;
 with nothing ever applied it prints `{"on":false,"running":null}`; a state file that cannot be read
-says so, `host EQ: unknown: …`, instead of reading as off.
+says so, `host EQ: unknown: …`, instead of reading as off. While a daemon answers, `status` adds the
+levels' words on a line of their own (`levels: plays −14.8 dB in all`) and, while the bypass holds
+stages, `bypass: on · brings back EQ, loudness` (with no daemon, from the saved state); `--json`
+adds `levels` and `bypass` when there are any (the shapes above are unchanged otherwise).
 
 ### host eq on
 
@@ -1733,10 +1745,11 @@ Options:
 
 Say whether the computer lets a player's sound through to the DAC untouched, and why not when it
 does not. It prints the path from the player through the computer to the sink, with the verdict
-(`untouched`, or what changes the sound), then the **PipeWire config** check: seven conditions of
-the PipeWire config (rates, forced rate, dither, 24-bit output, no plug, stereo to stereo, no
-filter in the sink), each `pass`, `fail` or `unknown`, and what they add up to. It only reads, and
-the only thing it runs is `pw-dump`.
+(`untouched`, or what changes the sound), then the **PipeWire config** check: the `From player` and
+`To DAC` lines (the stream's negotiated format and what the card is open at, `not read` or `not
+open` when there is none) and seven conditions of the PipeWire config (rates, forced rate, dither,
+24-bit output, no plug, stereo to stereo, no filter in the sink), each `pass`, `fail` or `unknown`,
+and what they add up to. It only reads, and the only thing it runs is `pw-dump`.
 
 ```
 $ svolder host check --player "Fixture Player"
@@ -1744,6 +1757,8 @@ player → computer → bits S16LE triangular dither: resampled 48 → 96 kHz (r
   player: 48 kHz S16LE, volume 100 %
   computer: 48 kHz S16LE, volume 100 %
 PipeWire config changes the sound: 3
+  From player            48 kHz · S16LE · stereo
+  To DAC                 not read
   rates                  pass     48 kHz allowed
   forced rate            fail     96 kHz forced: every other rate is resampled
   dither                 fail     triangular
@@ -1773,9 +1788,11 @@ readings: when the sink is one of your DACs the verdict is the DAC's, with its i
 any other sink it is the computer's side alone (`path.dac` is null, and the path may read
 `untouched` up to that sink: a Bluetooth or virtual sink changes the sound past it, which the
 check cannot see). The TUI, the web page and Home Assistant judge against your DACs only, and
-read `not_this_dac` for a sink that is none of them. With no daemon the player is not known, so the
-verdict reads `unknown` until `--player NAME` names it (an application name or a process id), which
-also makes the command read the graph itself instead of using the daemon's route. When it reads the
+read `not_this_dac` for a sink that is none of them. With no daemon the player is not known: a lone
+running stream is taken as the player's (`player assumed`), and with several the verdict reads
+`unknown` with the words `no MPRIS player` (they mean the command did not read MPRIS, not that
+there is none) until `--player NAME` names it (an application name or a process id), which also
+makes the command read the graph itself instead of using the daemon's route. When it reads the
 graph itself (no daemon route, or `--player`), `SVOLDER_HOST=off` or `fake` gives exit 6 with "host
 audio is off for this process", and a graph `pw-dump` cannot print gives exit 6 too ([exit
 codes](exit-codes.md)); with a daemon's route printed the exit is 0.
@@ -1788,6 +1805,8 @@ codes](exit-codes.md)); with a daemon's route printed the exit is 0.
          "dac":"Bifrost 3"},
  "config":{"sink":"Bifrost 3","outcome":"untouched",
            "summary":"PipeWire config lets it through untouched",
+           "from_player":"44.1 kHz · S16LE · stereo",
+           "to_dac":"44.1 kHz · 32-bit (S32_LE) · stereo · hw:2",
            "limit":"...","lines":[{"key":"rates","outcome":"pass","words":"..."}, ...]}}
 ```
 
@@ -1957,6 +1976,59 @@ off, whatever the saved state holds. Every verb with no daemon exits 3, naming
 older one) exits 7 (`svolder daemon restart`); a refusal or a bad value exits 1. See [exit
 codes](exit-codes.md).
 
+### host bypass
+
+Turn every stage of the computer that plays (the EQ, the loudness, the crossfeed, the virtual
+speakers) off in one change, and bring them back as they were. `on` holds which stages played and
+turns them all off together; the sound then plays as the pass-through, which climbs toward 0 dB (the
+climb is gentle: `bypass: on` says `climbing to 0.0 dB`, then `pass-through, untouched` once the
+chain is proven untouched). `off` brings back exactly those stages, with their settings as they are
+now, and the preamp falls at once to the level they play at. Nothing on and nothing held is refused
+(`nothing plays on the computer to bypass`). Turning any stage on from anywhere (a preset, a scene,
+a switch) ends the bypass. The held stages are kept, so `off` works after a restart. Changing goes
+through `svolderd`, which owns the chain, so the CLI never starts one (`--transport` does not change
+that).
+
+```
+Turn every stage of the computer off in one change, and bring them back as they were
+
+Usage: svolder host bypass [OPTIONS] [COMMAND]
+
+Commands:
+  on    Turn every stage that plays off, remembering which
+  off   Bring back the stages the bypass turned off
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --json                   Print the bypass and the levels as one JSON object
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+      --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help (see more with '--help')
+```
+
+With no verb it prints one line: whether the bypass is on, which stages it brings back, and what
+the chain plays at. `on` and `off` print the same line on standard error after the change.
+
+```
+$ svolder host bypass
+bypass: off · plays −6.4 dB in all
+$ svolder host bypass on
+svolder: bypass: on · brings back EQ
+$ svolder host bypass off
+svolder: bypass: off · plays −6.4 dB in all
+```
+
+`--json` prints `{"bypass": {"on", "held": {"eq", "loudness", "crossfeed", "speakers"}}, "levels":
+{"eq_db", "space_db", "total_db", "climb_to_db", "passthrough", "untouched", "words"}}`, each `null`
+where the daemon has none. With no daemon (or one that does not answer) the bare command prints no
+levels and does not state the saved state as fact: `bypass: unknown: no daemon is running, so
+nothing says whether it plays now (the saved state says on · brings back EQ, loudness)`; `--json`
+adds `unknown` with the reason. A change with no daemon exits 3.
+
 ### host speakers
 
 Hear the computer's sound as from two speakers in front of you, on headphones: the computer's
@@ -2122,7 +2194,7 @@ svolder: recording every frame for 2 s; press the device's buttons now (Ctrl-C e
 capture.txt
 $ head -4 capture.txt
 svolder capture
-svolder 0.39.0
+svolder 0.39.4
 taken 2026-10-23 07:33:02 UTC, frame window 2 s
 unit ids, passphrase bytes, the home directory and Bluetooth addresses are scrubbed (--keep-ids keeps them)
 $ grep -A5 '== adverts' capture.txt

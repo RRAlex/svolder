@@ -6,8 +6,8 @@
 
 use crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use svolder_host::{
-    AlsaFacts, ClockFacts, Dither, HwState, KernelOffer, Layout, PlayerMatch, Rates, RouteFacts,
-    SetupFacts, SinkOffer,
+    AlsaFacts, ClockFacts, Dither, HwParams, HwState, KernelOffer, Layout, PlayerMatch, Rates,
+    RouteFacts, SetupFacts, SinkOffer,
 };
 
 use super::host_group::{daemon_hosting, gungnir_route};
@@ -293,7 +293,9 @@ fn k_opens_the_box_on_a_dacs_screen_at_80x24() {
     assert_eq!(
         inner(&rows, modal),
         [
-            "Sink  Gungnir 2 Analog Stereo",
+            "Sink         Gungnir 2 Analog Stereo",
+            "From player  48 kHz · S16LE · stereo",
+            "To DAC       not read",
             "✓ rates                  44.1-48 kHz all allowed",
             "✓ forced rate            none",
             "✓ dither                 off",
@@ -302,6 +304,8 @@ fn k_opens_the_box_on_a_dacs_screen_at_80x24() {
             "✓ stereo to stereo       FL FR",
             "✓ no filter in the sink  none",
             "PipeWire config lets it through untouched",
+            "What changes the sound",
+            "DAC USB 1              volume -6.0 dB · tone control · NOS filter",
         ]
     );
     assert!(boxed(&rows, modal)[0].contains("PipeWire config"));
@@ -310,9 +314,163 @@ fn k_opens_the_box_on_a_dacs_screen_at_80x24() {
     assert_eq!(limit(&rows, modal), svolder_ipc::host::SETUP_LIMIT);
     assert_eq!(
         boxed(&rows, modal).len(),
-        17,
-        "sink, 7 lines, summary, limit x3, 3 blanks, border"
+        22,
+        "sink, 2 io lines, 7 lines, summary, section x3, limit x3, 3 blanks, border"
     );
+}
+
+/// The hop's row is one line: its words in the row's yellow, the joins dim.
+#[test]
+fn the_box_names_the_dac_in_the_rows_yellow() {
+    let mut app = daemon_hosting(route_with(|_| {}));
+    press(&mut app, KeyCode::Char('k'));
+    let (rows, _, modal) = drawn(&app, 120, 40);
+    let lines = inner(&rows, modal.unwrap());
+    assert_eq!(
+        &lines[10..13],
+        [
+            "PipeWire config lets it through untouched",
+            "What changes the sound",
+            "DAC USB 1              volume -6.0 dB · tone control · NOS filter",
+        ]
+    );
+    // The words are in the Path row's yellow, the joins are dim.
+    let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+    let theme = Theme::new(false);
+    terminal
+        .draw(|f| {
+            render::draw(f, &app, &theme, &mut HitMap::default());
+        })
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    let at = rows
+        .iter()
+        .position(|row| row.contains("tone control · NOS filter"))
+        .unwrap();
+    let col = |needle: &str| {
+        rows[at]
+            .find(needle)
+            .map(|byte| rows[at][..byte].chars().count())
+            .unwrap()
+    };
+    let fg = |needle: &str| buffer[(col(needle) as u16, at as u16)].fg;
+    assert_eq!(fg("tone control"), theme.style(Role::Warn).fg.unwrap());
+    let dim = theme.style(Role::Dim).add_modifier;
+    let modifier = |needle: &str| buffer[(col(needle) as u16, at as u16)].modifier;
+    assert!(modifier("· tone").contains(dim), "the join is dim");
+    assert!(!modifier("tone control").contains(dim), "the words are not");
+}
+
+/// A daemon route with a DAC that changes nothing (0 dB, flat, no NOS filter) draws no section:
+/// the box ends at its summary and the limit.
+#[test]
+fn an_untouched_path_draws_no_section() {
+    let mut app = daemon_hosting(route_with(|_| {}));
+    hear(
+        &mut app,
+        vec![
+            converted("10", "volume", 127, "127 (0.0 dB)", 0.0, "dB"),
+            vo("4", Some("nos"), json!(false), "off"),
+            vo("12.50", None, json!(0), "0"),
+        ],
+    );
+    assert_eq!(
+        app.path_row().map(|row| row.label.words),
+        Some("Path: untouched end to end".to_string())
+    );
+    press(&mut app, KeyCode::Char('k'));
+    let (rows, _, modal) = drawn(&app, 80, 24);
+    let lines = inner_all(&rows, modal.unwrap());
+    assert_eq!(lines[10], "PipeWire config lets it through untouched");
+    assert!(
+        lines
+            .iter()
+            .all(|line| !line.contains("What changes the sound")),
+        "{lines:?}"
+    );
+}
+
+/// Many stage words break between whole words: no line starts with the join, no value splits.
+#[test]
+fn a_long_list_of_dac_words_breaks_between_whole_words_at_80x24() {
+    let mut app = daemon_hosting(route_with(|_| {}));
+    hear(
+        &mut app,
+        vec![
+            converted("10", "volume", 85, "85 (-18.0 dB)", -18.0, "dB"),
+            vo("3", Some("phase"), json!(true), "on"),
+            vo("5", Some("mute"), json!(true), "on"),
+            vo("11", Some("balance"), json!(40), "40"),
+        ],
+    );
+    press(&mut app, KeyCode::Char('k'));
+    let (rows, _, modal) = drawn(&app, 80, 24);
+    let lines = inner_all(&rows, modal.unwrap());
+    let at = lines
+        .iter()
+        .position(|l| l == "What changes the sound")
+        .unwrap();
+    let section: Vec<&String> = lines[at + 1..]
+        .iter()
+        .take_while(|line| !line.starts_with("svolder judges"))
+        .collect();
+    assert!(section.len() >= 2, "{section:?}");
+    assert!(
+        section.iter().all(|line| !line.starts_with('·')),
+        "{section:?}"
+    );
+    for word in [
+        "volume -15.1 dB",
+        "balance off centre",
+        "muted",
+        "phase inverted",
+        "tone control",
+    ] {
+        assert!(
+            section.iter().any(|line| line.contains(word)),
+            "{word} whole on one line: {section:?}"
+        );
+    }
+}
+
+/// A player below full volume, a computer below full volume with another sound mixing, and the
+/// DAC's own words: one row per hop in path order, three rows under the heading at 80x24.
+#[test]
+fn every_hop_that_changes_the_sound_has_its_row_at_80x24() {
+    let mut app = daemon_hosting(gungnir_route(|route| {
+        route.setup = Some(clean_setup());
+        route.player.as_mut().unwrap().volume_milli = Some(500);
+        route.sink.as_mut().unwrap().volume_milli = Some(800);
+        route.others_mixing = 1;
+    }));
+    press(&mut app, KeyCode::Char('k'));
+    let (rows, _, modal) = drawn(&app, 80, 24);
+    let modal = modal.unwrap();
+    let lines = inner_all(&rows, modal);
+    let at = lines
+        .iter()
+        .position(|l| l == "What changes the sound")
+        .unwrap();
+    assert_eq!(lines[at - 1], "PipeWire config lets it through untouched");
+    assert_eq!(
+        &lines[at + 1..at + 4],
+        [
+            "player                 volume 50 %",
+            "computer               volume 80 % · 1 other sound mixing",
+            "DAC USB 1              volume -6.0 dB · tone control · NOS filter",
+        ]
+    );
+    assert!(
+        boxed(&rows, modal).len() <= 22,
+        "the 80x24 cap: the separating blanks went before the limit did"
+    );
+    assert!(
+        boxed(&rows, modal)
+            .iter()
+            .all(|row| !row.trim_matches(|c| c == '│' || c == ' ').is_empty()),
+        "no blank row is left once the box is tight"
+    );
+    assert_eq!(limit(&rows, modal), svolder_ipc::host::SETUP_LIMIT);
 }
 
 #[test]
@@ -321,15 +479,14 @@ fn a_failing_line_says_so_in_full_at_120x40() {
     press(&mut app, KeyCode::Char('k'));
     let (rows, _, modal) = drawn(&app, 120, 40);
     let lines = inner(&rows, modal.unwrap());
-    assert_eq!(lines[3], "✗ dither                 triangular");
+    assert_eq!(lines[5], "✗ dither                 triangular");
     assert_eq!(
-        lines[7],
+        lines[9],
         "✗ no filter in the sink  a filter inside the sink"
     );
-    assert_eq!(
-        lines.last().unwrap(),
-        "PipeWire config changes the sound: 2"
-    );
+    // The section under the summary names the DAC's hop whatever the check says.
+    assert_eq!(lines[10], "PipeWire config changes the sound: 2");
+    assert_eq!(lines[11], "What changes the sound");
 }
 
 #[test]
@@ -445,16 +602,16 @@ fn the_box_says_not_read_with_no_route_and_what_the_loop_found_without_a_daemon(
     press(&mut app, KeyCode::Char('k'));
     let (rows, _, modal) = drawn(&app, 120, 40);
     let lines = inner(&rows, modal.unwrap());
-    assert_eq!(lines[0], "Sink  not read");
-    assert_eq!(lines[1], "? rates                  not read");
-    assert_eq!(lines[8], "PipeWire config not read");
-    assert_eq!(lines[9], "reading the PipeWire graph…");
+    assert_eq!(lines[0], "Sink         not read");
+    assert_eq!(lines[3], "? rates                  not read");
+    assert_eq!(lines[10], "PipeWire config not read");
+    assert_eq!(lines[11], "reading the PipeWire graph…");
     // The loop's read lands: the judge's words for it.
     let own = route_with(|_| {});
     app.overlays.setup.as_mut().unwrap().own = Some(Box::new(own));
     let (rows, _, modal) = drawn(&app, 120, 40);
     let lines = inner(&rows, modal.unwrap());
-    assert_eq!(lines[0], "Sink  Gungnir 2 Analog Stereo");
+    assert_eq!(lines[0], "Sink         Gungnir 2 Analog Stereo");
     assert_eq!(
         lines.last().unwrap(),
         "PipeWire config lets it through untouched"
@@ -468,8 +625,8 @@ fn the_box_says_not_read_with_no_route_and_what_the_loop_found_without_a_daemon(
         lines.last().unwrap(),
         "svolder could not read the PipeWire graph (pw-dump)"
     );
-    assert_eq!(lines[0], "Sink  not read");
-    assert_eq!(lines[8], "PipeWire config not read");
+    assert_eq!(lines[0], "Sink         not read");
+    assert_eq!(lines[10], "PipeWire config not read");
     assert!(
         !lines.iter().any(|line| line.contains('✓')),
         "no old marks: {lines:?}"
@@ -484,7 +641,7 @@ fn an_older_daemon_is_named_in_the_box() {
     let (rows, _, modal) = drawn(&app, 120, 40);
     let lines = inner(&rows, modal.unwrap());
     assert_eq!(
-        lines.last().unwrap(),
+        lines[10],
         "PipeWire config not read (svolderd's version differs)"
     );
 }
@@ -577,4 +734,41 @@ fn a_click_anywhere_on_the_path_row_opens_the_box() {
             bottom - top
         );
     }
+}
+
+/// The two lines under the sink: the player stream's format and what the open card runs at.
+#[test]
+fn the_box_shows_what_comes_in_and_what_the_card_is_open_at() {
+    let mut app = daemon_hosting(route_with(|setup| {
+        setup.alsa.as_mut().unwrap().hw = HwState::Open(HwParams {
+            format: "S32_LE".into(),
+            rate: 44_100,
+            channels: 2,
+        });
+    }));
+    press(&mut app, KeyCode::Char('k'));
+    let (rows, _, modal) = drawn(&app, 120, 40);
+    let lines = inner(&rows, modal.unwrap());
+    assert_eq!(
+        &lines[..3],
+        [
+            "Sink         Gungnir 2 Analog Stereo",
+            "From player  48 kHz · S16LE · stereo",
+            "To DAC       44.1 kHz · 32-bit (S32_LE) · stereo · hw:3",
+        ]
+    );
+    // The first of the seven lines follows right after: the lines keep their place.
+    assert!(lines[3].starts_with("✓ rates"), "{lines:?}");
+}
+
+#[test]
+fn a_closed_card_and_no_stream_read_as_not_open_and_not_read() {
+    let mut route = route_with(|setup| setup.alsa.as_mut().unwrap().hw = HwState::Closed);
+    route.player = None;
+    let mut app = daemon_hosting(route);
+    press(&mut app, KeyCode::Char('k'));
+    let (rows, _, modal) = drawn(&app, 120, 40);
+    let lines = inner(&rows, modal.unwrap());
+    assert_eq!(lines[1], "From player  not read");
+    assert_eq!(lines[2], "To DAC       not open");
 }

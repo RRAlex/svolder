@@ -66,6 +66,7 @@ function findComputer(target) {
     case 'volume': return one('#p-needle');
     case 'mute': return one('[data-act="c-mute"]');
     case 'mode': return one('[data-act="c-mode"][aria-pressed="true"]') ?? one('[data-act="c-mode"]');
+    case 'bypass': return one('[data-act="c-bypass"]');
     case 'add': return one('[data-act="c-add"]');
     case 'point': return target.param === 'type' ? one(`[data-act="c-type"][data-n="${n}"]`)
       : one(`.p-cell[data-n="${n}"][data-param="${q(target.param)}"]`);
@@ -189,6 +190,8 @@ async function operateComputer(target, change) {
   } else if (target.computer === 'mute') {
     const muted = Boolean(core.computer.volumeOf(core.model.page())?.muted);
     if (!('on' in change) || muted !== change.on) tap(element);
+  } else if (target.computer === 'bypass') {
+    if (!('on' in change) || element.getAttribute('aria-pressed') !== String(change.on)) tap(element);
   } else if (target.computer === 'mode') {
     const mode = change.mode ?? (change.on === false ? 'off' : 'eq');
     tap(one(`[data-act="c-mode"][data-mode="${q(mode)}"]`));
@@ -272,6 +275,7 @@ export const driver = {
     if ('computer' in target) {
       if (target.computer === 'volume') return one('#p-volume-text')?.textContent || one('.p-num')?.textContent || null;
       if (target.computer === 'point' && target.param !== 'type') return element.value;
+      if (target.computer === 'bypass') return element.getAttribute('aria-pressed') === 'true' ? 'on' : 'off';
       return element.textContent.trim();
     }
     if ('control' in target) {

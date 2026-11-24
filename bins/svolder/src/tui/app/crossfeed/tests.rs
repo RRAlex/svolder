@@ -46,40 +46,40 @@ fn only(
 }
 
 #[test]
-fn x_puts_the_keys_in_the_section_and_unfolds_it_on_the_tone_screen() {
+fn x_puts_the_keys_in_the_space_panel_on_the_tone_screen() {
     let mut app = app_on(Screen::Device, false, "bauer", None);
     assert!(press(&mut app, KeyCode::Char('X')).is_empty());
     assert_eq!(app.screen, Screen::Tone);
-    assert_eq!(app.tone.row, ToneRow::Crossfeed(Xf::Preset));
-    assert!(app.xf_unfolded());
+    assert_eq!(app.tone.row, ToneRow::Crossfeed(Xf::Space));
+    assert_eq!(app.open_stage(), crate::tui::app::Stage::Space);
 }
 
 #[test]
-fn the_section_folds_when_the_keys_leave_it() {
+fn tab_goes_from_the_header_through_the_stages_and_esc_goes_up_a_level() {
     let mut app = app_on(Screen::Tone, false, "bauer", None);
     press(&mut app, KeyCode::Char('X'));
-    assert!(app.xf_unfolded());
-    // the chain's order: the header, the points, then the sections
+    // the chain's order: the header, the EQ, the Space panel
     press(&mut app, KeyCode::Tab);
     assert_eq!(app.tone.row, ToneRow::Mode);
-    assert!(!app.xf_unfolded());
     press(&mut app, KeyCode::Tab);
     assert!(matches!(app.tone.row, ToneRow::Point(_)));
     press(&mut app, KeyCode::Tab);
-    assert!(
-        app.xf_unfolded(),
-        "Tab from the points goes into the section"
-    );
+    assert_eq!(app.tone.row, ToneRow::Crossfeed(Xf::Space));
+    press(&mut app, KeyCode::BackTab);
+    assert!(matches!(app.tone.row, ToneRow::Point(_)));
+    press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Esc);
-    assert_eq!(app.screen, Screen::Tone, "Esc folds before it leaves");
-    assert_eq!(app.tone.row, ToneRow::Mode);
+    assert_eq!(app.screen, Screen::Tone, "Esc goes to the strip first");
+    assert_eq!(app.tone.row, ToneRow::Strip(crate::tui::app::Stage::Space));
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.screen, Screen::Device, "a second Esc leaves");
 }
 
 #[test]
-fn up_and_down_reach_the_points_and_then_the_rows_of_the_section() {
+fn up_and_down_move_through_the_rows_of_the_panel_and_up_from_the_first_goes_to_the_strip() {
     let mut app = app_on(Screen::Tone, false, "bauer", None);
-    app.tone.row = ToneRow::Mode;
-    let mut seen = Vec::new();
+    press(&mut app, KeyCode::Char('X'));
+    let mut seen = vec![app.tone.row];
     for _ in 0..6 {
         press(&mut app, KeyCode::Down);
         seen.push(app.tone.row);
@@ -87,36 +87,53 @@ fn up_and_down_reach_the_points_and_then_the_rows_of_the_section() {
     assert_eq!(
         seen,
         [
-            ToneRow::Point(0),
-            ToneRow::Point(1),
+            ToneRow::Crossfeed(Xf::Space),
+            ToneRow::Crossfeed(Xf::Model),
             ToneRow::Crossfeed(Xf::Preset),
             ToneRow::Crossfeed(Xf::Level),
             ToneRow::Crossfeed(Xf::Crossover),
             ToneRow::Crossfeed(Xf::Delay),
-        ]
+            ToneRow::Crossfeed(Xf::Delay),
+        ],
+        "the last row stops"
     );
+    for _ in 0..5 {
+        press(&mut app, KeyCode::Up);
+    }
+    assert_eq!(app.tone.row, ToneRow::Crossfeed(Xf::Space));
+    press(&mut app, KeyCode::Up);
+    assert_eq!(app.tone.row, ToneRow::Strip(crate::tui::app::Stage::Space));
 }
 
 #[test]
-fn the_device_pane_has_one_row_under_the_points() {
+fn the_device_pane_has_the_plays_row_and_the_model_and_preset_rows_while_it_plays() {
     let mut app = app_on(Screen::Device, false, "bauer", None);
     app.pane = crate::tui::app::Pane::Tone;
     app.tone.row = ToneRow::Point(1);
     press(&mut app, KeyCode::Down);
+    assert_eq!(app.tone.row, ToneRow::Crossfeed(Xf::Space));
+    press(&mut app, KeyCode::Down);
+    assert_eq!(
+        app.tone.row,
+        ToneRow::Crossfeed(Xf::Space),
+        "off: the last row"
+    );
+    let mut app = app_on(Screen::Device, true, "bauer", None);
+    app.pane = crate::tui::app::Pane::Tone;
+    app.focus_crossfeed(Xf::Space);
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.tone.row, ToneRow::Crossfeed(Xf::Model));
+    press(&mut app, KeyCode::Down);
     assert_eq!(app.tone.row, ToneRow::Crossfeed(Xf::Preset));
     press(&mut app, KeyCode::Down);
     assert_eq!(app.tone.row, ToneRow::Crossfeed(Xf::Preset), "the last row");
-    assert!(
-        !app.xf_unfolded(),
-        "folded: the device screen has no section"
-    );
 }
 
 #[test]
-fn on_the_device_pane_the_arrows_and_space_switch_it_and_the_dot_keys_pick_the_preset() {
+fn on_the_device_pane_the_arrows_and_space_switch_it_and_the_model_and_preset_rows_step() {
     let mut app = app_on(Screen::Device, false, "bauer", None);
     app.pane = crate::tui::app::Pane::Tone;
-    app.focus_crossfeed(Xf::Preset);
+    app.focus_crossfeed(Xf::Space);
     assert_eq!(
         op(&press(&mut app, KeyCode::Right)),
         only(Some(true), None, None, None, None, None)
@@ -126,18 +143,26 @@ fn on_the_device_pane_the_arrows_and_space_switch_it_and_the_dot_keys_pick_the_p
         op(&press(&mut app, KeyCode::Char(' '))),
         only(Some(true), None, None, None, None, None)
     );
+    let mut app = app_on(Screen::Device, true, "bauer", None);
+    app.pane = crate::tui::app::Pane::Tone;
+    app.focus_crossfeed(Xf::Preset);
     assert_eq!(
         op(&press(&mut app, KeyCode::Char(','))),
         only(None, None, Some("Chu Moy"), None, None, None)
     );
-    // Enter opens the tone screen with the section unfolded
+    app.focus_crossfeed(Xf::Model);
+    assert_eq!(
+        op(&press(&mut app, KeyCode::Right)),
+        only(None, Some("linkwitz"), None, None, None, None)
+    );
+    // Enter opens the tone screen with the panel on the row
     assert!(press(&mut app, KeyCode::Enter).is_empty());
     assert_eq!(app.screen, Screen::Tone);
-    assert!(app.xf_unfolded());
+    assert_eq!(app.tone.row, ToneRow::Crossfeed(Xf::Model));
 }
 
 #[test]
-fn on_the_tone_screen_the_arrows_pick_the_preset_and_the_dot_keys_the_model() {
+fn the_model_and_the_preset_are_two_rows_that_step_round_the_ends() {
     let mut app = app_on(Screen::Tone, true, "bauer", Some("Chu Moy"));
     app.focus_crossfeed(Xf::Preset);
     assert_eq!(
@@ -148,28 +173,46 @@ fn on_the_tone_screen_the_arrows_pick_the_preset_and_the_dot_keys_the_model() {
         op(&press(&mut app, KeyCode::Left)),
         only(None, None, Some("Jan Meier"), None, None, None)
     );
+    app.focus_crossfeed(Xf::Model);
     assert_eq!(
-        op(&press(&mut app, KeyCode::Char('.'))),
+        op(&press(&mut app, KeyCode::Right)),
         only(None, Some("linkwitz"), None, None, None, None)
     );
-    assert!(
-        press(&mut app, KeyCode::Char(',')).is_empty(),
-        "Bauer is the first model"
-    );
     assert_eq!(
-        op(&press(&mut app, KeyCode::Char(' '))),
-        only(Some(false), None, None, None, None, None)
+        op(&press(&mut app, KeyCode::Left)),
+        only(None, Some("mid-side"), None, None, None, None),
+        "the first model wraps to the last"
+    );
+    // the crossover model is chosen, not only its variants: Mid/Side bass is reachable
+    let mut app = app_on(Screen::Tone, true, "meier", None);
+    app.focus_crossfeed(Xf::Model);
+    assert_eq!(
+        op(&press(&mut app, KeyCode::Right)),
+        only(None, Some("mid-side"), None, None, None, None)
     );
 }
 
 #[test]
-fn the_ends_of_the_presets_send_nothing() {
-    let mut app = app_on(Screen::Tone, true, "bauer", None);
+fn the_dot_keys_no_longer_change_the_model() {
+    let mut app = app_on(Screen::Tone, true, "bauer", Some("Chu Moy"));
     app.focus_crossfeed(Xf::Preset);
+    let sent = press(&mut app, KeyCode::Char('.'));
     assert!(
-        press(&mut app, KeyCode::Right).is_empty(),
-        "Bauer's default is the strongest, the last"
+        !sent.iter().any(|i| matches!(
+            i,
+            Intent::HostEq(op) if matches!(**op, HostEqOp::Crossfeed { model: Some(_), .. })
+        )),
+        "{sent:?}"
     );
+}
+
+#[test]
+fn a_model_with_one_preset_sends_nothing_on_its_preset_row() {
+    let mut app = app_on(Screen::Tone, true, "mid-side", None);
+    assert_eq!(app.xf_model().unwrap().presets.len(), 1);
+    app.focus_crossfeed(Xf::Preset);
+    assert!(press(&mut app, KeyCode::Right).is_empty());
+    assert!(press(&mut app, KeyCode::Left).is_empty());
 }
 
 #[test]
@@ -290,7 +333,7 @@ fn an_unavailable_crossfeed_refuses_a_change_in_words() {
         .as_mut()
         .unwrap()
         .unavailable = Some("this chain cannot hold it".into());
-    app.focus_crossfeed(Xf::Preset);
+    app.focus_crossfeed(Xf::Space);
     assert!(press(&mut app, KeyCode::Char(' ')).is_empty());
     assert!(app.notices.toast.is_some());
 }
@@ -320,7 +363,7 @@ fn escape_closes_the_edit_line_with_nothing_sent_and_keeps_the_section() {
     press(&mut app, KeyCode::Enter);
     assert!(press(&mut app, KeyCode::Esc).is_empty());
     assert!(app.tone.xf_line.is_none());
-    assert!(app.xf_unfolded());
+    assert!(app.xf_row().is_some());
 }
 
 #[test]
@@ -394,16 +437,6 @@ fn a_reset_note_is_said_once_in_a_toast() {
 }
 
 #[test]
-fn x_again_folds_the_section() {
-    let mut app = app_on(Screen::Tone, false, "bauer", None);
-    press(&mut app, KeyCode::Char('X'));
-    assert!(app.xf_unfolded());
-    press(&mut app, KeyCode::Char('X'));
-    assert!(!app.xf_unfolded());
-    assert_eq!(app.tone.row, ToneRow::Mode);
-}
-
-#[test]
 fn crossfeed_focus_does_not_follow_the_user_to_other_screens() {
     for (key, screen) in [
         ('d', Screen::Devices),
@@ -412,7 +445,7 @@ fn crossfeed_focus_does_not_follow_the_user_to_other_screens() {
     ] {
         let mut app = app_on(Screen::Tone, false, "bauer", None);
         press(&mut app, KeyCode::Char('X'));
-        assert!(app.xf_unfolded());
+        assert!(app.xf_row().is_some());
         press(&mut app, KeyCode::Char(key));
         assert_eq!(app.screen, screen);
         assert!(
@@ -456,8 +489,8 @@ fn a_click_on_a_point_closes_an_open_edit_line_and_no_key_is_swallowed() {
     press(&mut app, KeyCode::Tab);
     assert_eq!(
         app.tone.row,
-        ToneRow::Crossfeed(Xf::Preset),
-        "Tab works: from the points it goes to the section"
+        ToneRow::Crossfeed(Xf::Space),
+        "Tab works: from the points it goes to the Space panel"
     );
     // also when something other than focus_point moved the keys
     app.focus_crossfeed(Xf::Level);

@@ -50,6 +50,8 @@ struct Counting {
     sink: Arc<Mutex<String>>,
     /// How long a read takes on the (paused) clock.
     delay: Arc<Mutex<Duration>>,
+    /// Whether a lone stream plays with no MPRIS player (read as `NoMpris` when none is followed).
+    lone_stream: Arc<AtomicUsize>,
 }
 
 impl Counting {
@@ -59,6 +61,10 @@ impl Counting {
 
     fn takes(&self, delay: Duration) {
         *self.delay.lock().unwrap() = delay;
+    }
+
+    fn lone_stream(&self, plays: bool) {
+        self.lone_stream.store(usize::from(plays), Ordering::SeqCst);
     }
 
     fn sink_is(&self, name: &str) {
@@ -77,8 +83,15 @@ impl Routes for Counting {
                 name: self.sink.lock().unwrap().clone(),
                 ..SinkFacts::default()
             }),
-            player: player.map(|_| StreamFacts::default()),
-            player_match: PlayerMatch::Pid,
+            player: match (&player, self.lone_stream.load(Ordering::SeqCst)) {
+                (None, 0) => None,
+                _ => Some(StreamFacts::default()),
+            },
+            player_match: match (&player, self.lone_stream.load(Ordering::SeqCst)) {
+                (Some(_), _) => PlayerMatch::Pid,
+                (None, 0) => PlayerMatch::NoPlayer,
+                (None, _) => PlayerMatch::NoMpris,
+            },
             ..RouteFacts::default()
         })
     }
@@ -672,6 +685,38 @@ fn the_fake_knobs_read_milliseconds() {
             FakeKnobs::from_knobs(|name| (name == "SVOLDER_FAKE_ROUTE").then(|| value.to_string()));
         assert_eq!(knobs.route_changed, changed, "{value:?}");
     }
+    let knobs =
+        FakeKnobs::from_knobs(|name| (name == "SVOLDER_FAKE_ROUTE").then(|| "no-mpris".into()));
+    assert!(knobs.route_no_mpris && !knobs.route_changed);
+}
+
+/// `SVOLDER_FAKE_ROUTE=no-mpris` keeps the stream playing once the player is gone, as a sound
+/// with no MPRIS player; with the player present the match is the pid's, and without the knob a
+/// gone player leaves no stream.
+#[tokio::test]
+async fn the_no_mpris_fake_route_keeps_the_stream_after_the_player_goes() {
+    let route = |changed, no_mpris| FakeRoute {
+        display: "Gungnir 2".to_string(),
+        changed,
+        no_mpris,
+        setup_fail: false,
+        computer: None,
+    };
+    let gone = route(false, true).read(None).await.expect("a route");
+    assert_eq!(gone.player_match, PlayerMatch::NoMpris);
+    assert!(gone.player.is_some());
+    assert_eq!(gone.others_mixing, 0);
+    let there = route(false, true).read(Some(track("x", None))).await;
+    assert_eq!(there.expect("a route").player_match, PlayerMatch::Pid);
+    let none = route(false, false).read(None).await.expect("a route");
+    assert_eq!(
+        (none.player_match, none.player),
+        (PlayerMatch::NoPlayer, None)
+    );
+    // The changed route with the player gone is the several-streams card.
+    let several = route(true, false).read(None).await.expect("a route");
+    assert_eq!(several.player_match, PlayerMatch::NoPlayer);
+    assert_eq!(several.others_mixing, 2);
 }
 
 /// `SVOLDER_FAKE_TITLE` names the fake track; empty or unset leaves the fixed title.
@@ -707,6 +752,7 @@ async fn the_changed_fake_route_changes_everything() {
     let route = FakeRoute {
         display: "Gungnir 2".to_string(),
         changed: true,
+        no_mpris: false,
         setup_fail: false,
         computer: None,
     };
@@ -898,15 +944,49 @@ async fn a_lost_player_leaves_no_stream_in_the_route() {
     assert!(route.player.is_some());
     assert_eq!(route.player_match, PlayerMatch::Pid);
 
+    routes.takes(Duration::from_secs(1));
     players.set(None);
     settle().await;
-    assert_eq!(routes.reads(), 1, "no read was waited for");
+    assert_eq!(routes.reads(), 2, "the hand-over is read at once");
     let view = service.view();
     assert_eq!(view.playing, None);
     let route = view.route.expect("the route stays");
     assert_eq!(route.sink.expect("the sink stays").name, "dac");
     assert_eq!(route.player, None);
     assert_eq!(route.player_match, PlayerMatch::NoPlayer);
+}
+
+/// A player coming or going is read at once, inside the two seconds, so the route does not name
+/// the wrong stream for a period; a stream with no MPRIS player is kept while none is followed.
+#[tokio::test(start_paused = true)]
+async fn a_player_coming_or_going_rereads_the_route_at_once() {
+    let players = FakePlayers::new(None);
+    let routes = Counting::default();
+    routes.sink_is("dac");
+    routes.lone_stream(true);
+    let service = service(&players, Some(&routes), covers());
+    let _watcher = service.watching();
+    settle().await;
+    assert_eq!(routes.reads(), 1);
+    assert_eq!(
+        service.view().route.expect("a route").player_match,
+        PlayerMatch::NoMpris
+    );
+
+    players.set(Some(track("So What", None)));
+    settle().await;
+    assert_eq!(routes.reads(), 2, "the player's arrival is read at once");
+    assert_eq!(
+        service.view().route.expect("a route").player_match,
+        PlayerMatch::Pid
+    );
+
+    players.set(None);
+    settle().await;
+    assert_eq!(routes.reads(), 3, "the player's departure is read at once");
+    let route = service.view().route.expect("a route");
+    assert_eq!(route.player_match, PlayerMatch::NoMpris);
+    assert!(route.player.is_some());
 }
 
 /// A route reader that never answers and says when it is dropped.
@@ -1606,6 +1686,7 @@ async fn the_fake_routes_setup_lines() {
     let route = |changed, setup_fail| FakeRoute {
         display: "Gungnir 2".to_string(),
         changed,
+        no_mpris: false,
         setup_fail,
         computer: None,
     };
@@ -1852,4 +1933,195 @@ async fn the_route_and_volume_reads_of_a_one_shot_request_run_together() {
     );
     assert_eq!(view.route, None);
     assert_eq!(view.volume.map(|volume| volume.pct), Some(42));
+}
+
+/// A route reader whose dump tells only that the computer's filter is in the path, as `pw-dump`
+/// does: the stages are the daemon's to tell from the EQ view.
+struct FilterInPath;
+
+#[async_trait]
+impl Routes for FilterInPath {
+    async fn read(&self, _player: Option<NowPlaying>) -> Option<RouteFacts> {
+        Some(RouteFacts {
+            sink: Some(SinkFacts::default()),
+            host_eq: true,
+            ..RouteFacts::default()
+        })
+    }
+}
+
+/// The stages a route tells are never older than the EQ view the answer carries: a route read
+/// while the crossfeed played and kept by a watcher does not say `crossfeed on` once the view says
+/// it is off (a daemon resumed from a stop, a change inside the route's own period), in the view
+/// everyone reads and in a one-shot request's.
+#[tokio::test(start_paused = true)]
+async fn a_kept_routes_stages_follow_the_eq_view_it_answers_with() {
+    let mut parts = Parts::fake(FakeKnobs::default());
+    // A chain a stream plays through, so the EQ view can prove it untouched once the stage is off.
+    let params = FakeParams::new();
+    params.set_output(Some(svolder_host::eq::live::OutputSink {
+        name: "fake-sink".to_string(),
+        description: None,
+        rate_hz: Some(48_000),
+    }));
+    params.with_loudness_ports();
+    params.set_playing(true);
+    let control = EqControl::new(Arc::new(FakeChain::new()), Box::new(params), Keep::Memory);
+    let computer = Arc::new(Computer::new(Err("no sink here".to_string()), Ok(control)));
+    parts.computer = Some(Arc::clone(&computer));
+    parts.routes = Some(Arc::new(FilterInPath));
+    let service = HostService::idle();
+    service.run_with(parts);
+    let watcher = service.watching();
+    settle().await;
+    let crossfeed = |on| {
+        computer.eq_op(
+            HostEqOp::Crossfeed {
+                on: Some(on),
+                model: None,
+                preset: None,
+                amount_pct: None,
+                crossover_hz: None,
+                delay_ms: None,
+                done: true,
+            },
+            &[],
+            |_| Vec::new(),
+            |_| async { Ok(()) },
+        )
+    };
+    let says_crossfeed = |view: HostView| {
+        view.route
+            .expect("a route")
+            .stages
+            .is_some_and(|stages| stages.crossfeed)
+    };
+    crossfeed(true).await.expect("crossfeed on");
+    pass(Duration::from_millis(500)).await;
+    assert!(says_crossfeed(service.view()), "the kept route tells it");
+    crossfeed(false).await.expect("crossfeed off");
+    assert!(
+        !says_crossfeed(service.view_now().await),
+        "a one-shot request answers with the stages of its own EQ view"
+    );
+    // The climb ends and a look passes (inside a route period, the watcher held) before it is read.
+    for _ in 0..60 {
+        pass(Duration::from_millis(50)).await;
+    }
+    let view = service.view();
+    let untouched = view
+        .eq
+        .as_ref()
+        .is_some_and(|eq| eq.levels.as_ref().is_some_and(|levels| levels.untouched));
+    assert!(
+        untouched,
+        "the EQ view says the chain is untouched once the climb is over"
+    );
+    assert!(
+        view.route
+            .as_ref()
+            .and_then(|route| route.stages)
+            .is_some_and(|stages| stages.untouched),
+        "the route's stages carry the EQ view's `untouched`"
+    );
+    assert!(
+        !says_crossfeed(service.view()),
+        "the view everyone reads follows its EQ view, inside the route's period"
+    );
+    drop(watcher);
+}
+
+/// A route reader whose dump tells no filter in the path on its first read and the filter on
+/// every read after (the chain came up in between); with `never`, no read ever tells it.
+struct FilterAfterFirst {
+    reads: std::sync::atomic::AtomicUsize,
+    never: bool,
+}
+
+#[async_trait]
+impl Routes for FilterAfterFirst {
+    async fn read(&self, _player: Option<NowPlaying>) -> Option<RouteFacts> {
+        let before = self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Some(RouteFacts {
+            sink: Some(SinkFacts::default()),
+            host_eq: before > 0 && !self.never,
+            ..RouteFacts::default()
+        })
+    }
+}
+
+/// A service following a chain a stream plays through, with `routes` for the route; the
+/// crossfeed turned on once it is held by a watcher.
+async fn crossfeed_on_over(routes: Arc<FilterAfterFirst>) -> (HostService, Watcher) {
+    let mut parts = Parts::fake(FakeKnobs::default());
+    let params = FakeParams::new();
+    params.set_output(Some(svolder_host::eq::live::OutputSink {
+        name: "fake-sink".to_string(),
+        description: None,
+        rate_hz: Some(48_000),
+    }));
+    params.with_loudness_ports();
+    params.set_playing(true);
+    let control = EqControl::new(Arc::new(FakeChain::new()), Box::new(params), Keep::Memory);
+    let computer = Arc::new(Computer::new(Err("no sink here".to_string()), Ok(control)));
+    parts.computer = Some(Arc::clone(&computer));
+    parts.routes = Some(routes);
+    let service = HostService::idle();
+    service.run_with(parts);
+    let watcher = service.watching();
+    settle().await;
+    computer
+        .eq_op(
+            HostEqOp::Crossfeed {
+                on: Some(true),
+                model: None,
+                preset: None,
+                amount_pct: None,
+                crossover_hz: None,
+                delay_ms: None,
+                done: true,
+            },
+            &[],
+            |_| Vec::new(),
+            |_| async { Ok(()) },
+        )
+        .await
+        .expect("crossfeed on");
+    (service, watcher)
+}
+
+/// The EQ view cannot know the route: a reader that never finds the filter in the path (the
+/// default sink moved, the stream plays straight to the sink) keeps the route without it however
+/// the EQ view reads, in the view everyone reads and in a one-shot request's.
+#[tokio::test(start_paused = true)]
+async fn an_eq_view_does_not_put_a_filter_in_a_route_that_has_none() {
+    let reader = Arc::new(FilterAfterFirst {
+        reads: std::sync::atomic::AtomicUsize::new(0),
+        never: true,
+    });
+    let (service, watcher) = crossfeed_on_over(reader).await;
+    pass(Duration::from_millis(500)).await;
+    let filtered = |view: HostView| view.route.expect("a route").host_eq;
+    assert!(!filtered(service.view()), "the view everyone reads");
+    assert!(!filtered(service.view_now().await), "a one-shot request's");
+    drop(watcher);
+}
+
+/// A route read before the filter came up is read again as soon as the EQ view vouches for
+/// stages, not at the next period: the crossfeed shows in the route inside `ROUTE_EVERY`.
+#[tokio::test(start_paused = true)]
+async fn the_route_is_read_again_at_once_when_the_eq_view_starts_to_vouch_for_stages() {
+    let reader = Arc::new(FilterAfterFirst {
+        reads: std::sync::atomic::AtomicUsize::new(0),
+        never: false,
+    });
+    let (service, watcher) = crossfeed_on_over(reader).await;
+    pass(Duration::from_millis(500)).await;
+    assert!(ROUTE_EVERY > Duration::from_millis(500));
+    let route = service.view().route.expect("a route");
+    assert!(
+        route.host_eq && route.stages.is_some_and(|stages| stages.crossfeed),
+        "{route:?}"
+    );
+    drop(watcher);
 }

@@ -113,9 +113,8 @@ library: nodes, ports, links, clients, devices and the `default` metadata.
   node's master `volume` times its lowest channel's linear `channelVolumes` (0.013822 linear is the
   0.24 `wpctl status` shows). Behind the computer EQ it is the sink's times the filter node's,
   because the default-route EQ makes the filter node the one the system volume moves. A stream
-  has its own, read the same way, with its mute: `StreamFacts` is the rate and format the stream
-  negotiated, before the sink converts it, and the volume and mute the player set on its own
-  stream, which a path that claims to be untouched has to account for.
+  has its own volume and mute, read the same way; `StreamFacts` also holds the rate and format it
+  negotiated before the sink converts it. An untouched path has to account for all of them.
 - **The player's stream** is looked for among all the `Stream/Output/Audio` nodes, running or
   idle, first by process id (the stream's client's `application.process.id` against the pid of the
   player's D-Bus connection, `PlayerMatch::Pid`), else by name (the stream's or its client's
@@ -127,7 +126,8 @@ library: nodes, ports, links, clients, devices and the `default` metadata.
   and give no verdict (a stream into the EQ's filter names the sink behind it; a linked stream
   beats an unlinked one). If they are linked to no sink it is `NotFound`. Only when the player has
   no stream of its own anywhere, and exactly one stream is running into the sink, that one is taken
-  (`Assumed`); otherwise `NotFound`. No followed player (no pid, no identity) is `NoPlayer`.
+  (`Assumed`); otherwise `NotFound`. With no followed player (no pid, no identity) one running
+  stream into the sink is taken (`NoMpris`: `player (no MPRIS)`, dim `?`), else `NoPlayer`.
 - **Others mixing** counts the running streams (a corked or idle one is not) that reach the sink
   and are not the player's chosen stream, so a second running stream of the player's own counts;
   with no chosen stream (`NotFound`, `NoPlayer`, `Elsewhere`) it counts all of them.
@@ -260,7 +260,7 @@ read-only). The TUI's direct mode still captures for itself.
 Who speaks for the player depends on the session. `Host.daemon` (`bins/svolder/src/tui/host.rs`) is
 set while a joined daemon's `HostView` says `available`: its player replaces the one the loop's own
 watcher follows, its route feeds the Path row (`App::host_path`: a DAC only, present while the
-daemon speaks so the Host group keeps its height: `nothing playing` with no player, `route not read`
+daemon speaks so the Host group keeps its height: `nothing playing` with no stream, `route not read`
 before the first read, else `path_line` judged against the device's name, input and sample-rate
 readings: a DAC on an input the computer does not feed reads `the DAC listens to Optical` with no
 verdict, and one whose input is not read is never `untouched`; one that reads each USB port is on it

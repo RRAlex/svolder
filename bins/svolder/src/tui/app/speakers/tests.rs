@@ -54,8 +54,12 @@ fn the_choice_is_shown_only_where_the_view_carries_speakers() {
         computer_eq_with_crossfeed(false, "bauer", None),
     );
     assert!(old.crossfeed_shown() && !old.space_shown());
-    assert_eq!(old.xf_first(), Xf::Preset);
-    assert_eq!(old.xf_stops(), Xf::ALL.to_vec());
+    assert_eq!(
+        old.xf_first(),
+        Xf::Space,
+        "Plays is crossfeed's own on/off row here"
+    );
+    assert_eq!(old.xf_stops(), [&[Xf::Space][..], &Xf::ALL].concat());
     let new = speakers_on_tone(false, None);
     assert!(new.space_shown());
     assert_eq!(new.xf_first(), Xf::Space);
@@ -78,7 +82,14 @@ fn the_stops_follow_the_choice() {
     let off = speakers_on_tone(false, Some("sadie-d2"));
     assert_eq!(
         off.xf_stops(),
-        [Xf::Space, Xf::Preset, Xf::Level, Xf::Crossover, Xf::Delay]
+        [
+            Xf::Space,
+            Xf::Model,
+            Xf::Preset,
+            Xf::Level,
+            Xf::Crossover,
+            Xf::Delay
+        ]
     );
     let playing = speakers_on_tone(true, Some("sadie-d2"));
     assert_eq!(playing.xf_stops(), [Xf::Space, Xf::Set]);
@@ -86,11 +97,44 @@ fn the_stops_follow_the_choice() {
     assert_eq!(pane.xf_stops(), [Xf::Space]);
 }
 
+/// A `←` or `→` on the Plays row only moves the highlight and sends nothing; `Enter` then applies
+/// the highlighted choice. Answers what `Enter` sent.
+fn highlight_then_apply(app: &mut App, arrow: KeyCode) -> Vec<Intent> {
+    assert!(press(app, arrow).is_empty(), "the arrows only highlight");
+    press(app, KeyCode::Enter)
+}
+
+#[test]
+fn the_arrows_only_highlight_on_plays_and_enter_applies() {
+    let mut app = speakers_on_tone(false, Some("sadie-d2"));
+    app.focus_crossfeed(Xf::Space);
+    assert!(press(&mut app, KeyCode::Right).is_empty());
+    assert_eq!(app.plays_highlight(), Space::Crossfeed);
+    assert!(press(&mut app, KeyCode::Right).is_empty());
+    assert_eq!(app.plays_highlight(), Space::Speakers);
+    assert!(press(&mut app, KeyCode::Right).is_empty(), "the end");
+    assert_eq!(app.plays_highlight(), Space::Speakers);
+    assert_eq!(
+        op(&press(&mut app, KeyCode::Enter)),
+        speakers_op(Some(true), None)
+    );
+    assert_eq!(
+        app.plays_highlight(),
+        Space::Off,
+        "applied: back on what plays"
+    );
+    // a move to another row drops the highlight
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Up);
+    assert_eq!(app.plays_highlight(), app.space_now());
+}
+
 #[test]
 fn the_arrows_step_the_choice_and_send_only_the_one_asked_for() {
     let mut app = speakers_on_tone(false, Some("sadie-d2"));
     app.focus_crossfeed(Xf::Space);
-    let to_crossfeed = press(&mut app, KeyCode::Right);
+    let to_crossfeed = highlight_then_apply(&mut app, KeyCode::Right);
     assert_eq!(
         op(&to_crossfeed),
         HostEqOp::Crossfeed {
@@ -109,13 +153,13 @@ fn the_arrows_step_the_choice_and_send_only_the_one_asked_for() {
     let mut app = app_with(Screen::Tone, eq);
     app.focus_crossfeed(Xf::Space);
     assert_eq!(
-        op(&press(&mut app, KeyCode::Right)),
+        op(&highlight_then_apply(&mut app, KeyCode::Right)),
         speakers_op(Some(true), None)
     );
     // and at the end of the list nothing goes
     let mut app = speakers_on_tone(true, Some("sadie-d2"));
     app.focus_crossfeed(Xf::Space);
-    assert!(press(&mut app, KeyCode::Right).is_empty());
+    assert!(highlight_then_apply(&mut app, KeyCode::Right).is_empty());
 }
 
 #[test]
@@ -124,7 +168,7 @@ fn stepping_back_from_the_speakers_turns_them_off_and_from_the_crossfeed_it_does
     app.focus_crossfeed(Xf::Space);
     // Speakers -> Crossfeed: the crossfeed op, which the controller answers by turning the
     // speakers off in the same update
-    let back = press(&mut app, KeyCode::Left);
+    let back = highlight_then_apply(&mut app, KeyCode::Left);
     assert!(
         matches!(op(&back), HostEqOp::Crossfeed { on: Some(true), .. }),
         "{back:?}"
@@ -133,7 +177,7 @@ fn stepping_back_from_the_speakers_turns_them_off_and_from_the_crossfeed_it_does
     eq.crossfeed.as_mut().expect("crossfeed").on = true;
     let mut app = app_with(Screen::Tone, eq);
     app.focus_crossfeed(Xf::Space);
-    let off = press(&mut app, KeyCode::Left);
+    let off = highlight_then_apply(&mut app, KeyCode::Left);
     assert!(
         matches!(
             op(&off),

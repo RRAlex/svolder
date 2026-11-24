@@ -14,7 +14,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use svolder_host::{Asound, PwDump, RouteFacts, fill_alsa, route};
+use svolder_host::{Asound, PlayerMatch, PwDump, RouteFacts, fill_alsa, route};
 use svolder_ipc::host::{
     DacFacts, DacStage, PathLine, SETUP_LIMIT, SetupCheck, computer_line, path_line, setup_check,
     sink_is_dac,
@@ -153,6 +153,11 @@ async fn own_route(
     let text = dump?.read().await?;
     let (pid, identity) = player.map(player_of).unwrap_or_default();
     let mut facts = route(&text, pid, &identity)?;
+    // With no `--player` MPRIS was never looked at: a lone stream is the assumed player's, not
+    // one known to have no MPRIS player.
+    if player.is_none() && facts.player_match == PlayerMatch::NoMpris {
+        facts.player_match = PlayerMatch::Assumed;
+    }
     fill_alsa(&mut facts, asound);
     Some(facts)
 }
@@ -225,6 +230,8 @@ fn text(path: &PathLine, check: &SetupCheck) -> Vec<String> {
         out.push(format!("  config judged on: {}", check.sink));
     }
     out.push(check.summary_words());
+    out.push(format!("  {:<23}{}", "From player", check.io.from_player));
+    out.push(format!("  {:<23}{}", "To DAC", check.io.to_dac));
     out.extend(check.lines.iter().map(|line| {
         format!(
             "  {:<23}{:<9}{}",
@@ -257,9 +264,9 @@ fn wrapped(text: &str, width: usize) -> impl Iterator<Item = String> {
 }
 
 /// `{ sink, path: { verdict, end_to_end, words, sentence, dac }, config: { sink, outcome,
-/// summary, limit, lines } }`; the keys are svolder-ipc's, as on every JSON surface, and `words`
-/// is the list the judge made. `dac` is the matched DAC's display name, else null; the top-level
-/// `sink` is the config's, kept for scripts.
+/// summary, from_player, to_dac, limit, lines } }`; the keys are svolder-ipc's, as on every JSON
+/// surface, and `words` is the list the judge made. `dac` is the matched DAC's display name, else
+/// null; the top-level `sink` is the config's, kept for scripts.
 fn as_json(path: &PathLine, check: &SetupCheck, dac: Option<&DacFacts>) -> serde_json::Value {
     serde_json::json!({
         "sink": check.sink,
@@ -274,6 +281,8 @@ fn as_json(path: &PathLine, check: &SetupCheck, dac: Option<&DacFacts>) -> serde
             "sink": check.sink,
             "outcome": check.summary.key(),
             "summary": check.summary_words(),
+            "from_player": check.io.from_player,
+            "to_dac": check.io.to_dac,
             "limit": SETUP_LIMIT,
             "lines": check.lines,
         },

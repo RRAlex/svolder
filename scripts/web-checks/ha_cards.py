@@ -7,6 +7,8 @@ served from the worktree by a loopback server on a free port. Numbers, not pixel
   touch_targets                   keys, chips, rows and band boxes are at least 30 px high
   faceplate_bands                 the input and preset chips are one column at 400 and two at 800; a dial
   chain_columns                   the four modules are two across at 400, four at 800, all numbered
+  chain_bypass                    the chain card's line over the modules says the daemon's words ("plays −14.8 dB in all"); the Bypass key
+                                  is one switch.turn_on and one turn_off per press; commands off it is disabled and writes nothing
   tone_mode_chips                 the EQ card's mode chips (flat, eq, loudness) sit above the plot, "eq" marked
   balance_row                     the faceplate's balance slider is under the readouts, wider than 60 px
   eq_one_line                     a short plot and the five band boxes on ONE line
@@ -88,6 +90,11 @@ FACE = """(() => { const root = document.getElementById('svolder-faceplate-card'
 CHAIN = """(() => { const root = document.getElementById('svolder-chain-card').shadowRoot;
   return [...root.querySelectorAll('.mod')].map((m) => { const b = m.getBoundingClientRect();
     return { l: b.left, t: b.top, no: m.querySelector('.no').textContent }; }); })()"""
+HEAD = """(() => { const root = document.getElementById('svolder-chain-card').shadowRoot;
+  const k = root.querySelector('.head [data-bypass]'); if (!k) return null; const b = k.getBoundingClientRect();
+  return { total: root.querySelector('.head .total').textContent, key: k.textContent, pressed: k.getAttribute('aria-pressed'),
+    disabled: k.disabled, h: b.height, r: b.right, bottom: root.querySelector('.head').getBoundingClientRect().bottom,
+    modTop: root.querySelector('.mods').getBoundingClientRect().top, cardR: root.querySelector('.card').getBoundingClientRect().right }; })()"""
 EQ = """(() => { const root = document.getElementById('svolder-eq-card').shadowRoot;
   const r = (e) => { const b = e.getBoundingClientRect(); return { l: b.left, t: b.top, b: b.bottom, w: b.width, h: b.height }; };
   return { plot: r(root.querySelector('.plot')), bands: [...root.querySelectorAll('.band')].map(r),
@@ -177,6 +184,10 @@ for width in (400, 800):
             across = len([x for x in c if abs(x['t'] - c[0]['t']) <= 2])
             check(f'chain_columns: {tag}: {2 if width == 400 else 4} modules across, numbered 1 to 4',
                   across == (2 if width == 400 else 4) and [x['no'] for x in c] == ['1', '2', '3', '4'], c)
+            hd = b.page(HEAD)
+            check(f'chain_bypass: {tag}: the total line and the Bypass key sit over the modules, inside the card',
+                  hd is not None and hd['total'] == 'plays \u221214.8 dB in all' and hd['key'] == 'Bypass off'
+                  and hd['pressed'] == 'false' and hd['h'] >= 30 and hd['bottom'] <= hd['modTop'] and hd['r'] <= hd['cardR'] + 0.5, hd)
             q = b.page(EQ)
             bt = {round(x['t']) for x in q['bands']}
             check(f'eq_one_line: {tag}: five band boxes on one line under a short plot',
@@ -256,15 +267,31 @@ for width in (400, 800):
         check('  Escape writes nothing and puts the gain back', b.page('window.__calls.length') == 0 and b.page(GAIN) == before,
               [before, b.page(GAIN), b.page('window.__calls')])
         b.page('window.__calls.length = 0')
+        BYP = "document.getElementById('svolder-chain-card').shadowRoot.querySelector('.head [data-bypass]')?.click()"
+        b.page(BYP)
+        b.page(BYP)
+        calls = b.page('window.__calls')
+        check(f'chain_bypass: {width} px: each press of the Bypass key is one switch call (the entity, turn_on twice: the state is the daemon\'s)',
+              [(c[0], c[1], c[2]['entity_id']) for c in calls] == [('switch', 'turn_on', 'switch.pc_bypass')] * 2, calls)
+        b.page('window.__calls.length = 0')
         b.click(cx, cy)
         check('  a click on the dial writes nothing', b.page('window.__calls.length') == 0, b.page('window.__calls'))
         errs = b.errors if browser == 'chromium' else b.collect_errors()
         check(f'  no page error at {width} px', [e for e in errs if 'favicon' not in e] == [], errs[:3])
 
+        # no chain: the daemon's words are empty and the card says nothing of the level
+        load(b, 'dark', '&nochain=1')
+        none = b.page("(() => { const root = document.getElementById('svolder-chain-card').shadowRoot;"
+                      " return [!!root.querySelector('.head .total'), !!root.querySelector('.head [data-bypass]'), root.textContent.includes('Plays')]; })()")
+        check(f'chain_bypass: {width} px: with no chain the card says nothing of the level and keeps the Bypass key', none == [False, True, False], none)
+
         # commands off: the same cards over sensors
         load(b, 'dark', '&commands=off')
         m = b.page(MEASURE)
         check(f'commands_off: {width} px: the four cards draw', len(m['cards']) == 4 and m['sw'] <= m['vw'], m)
+        if shots:
+            with open(f'{shots}/ha-cards-{browser}-commands-off-{width}.png', 'wb') as out:
+                out.write(b.shot())
         dial = b.page("(() => { const r = document.getElementById('svolder-faceplate-card').shadowRoot.querySelector('.dial')"
                       ".getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2, r.width / 2]; })()")
         b.drag(dial[0] - dial[2] * 0.7, dial[1] + dial[2] * 0.7, dial[0], dial[1] - dial[2] * 0.8)
@@ -274,6 +301,9 @@ for width in (400, 800):
                     "document.getElementById('svolder-scenes-card').shadowRoot.querySelectorAll('.row')"):
             n = b.page(f'[...{sel}].map((e) => e.click()).length')
         check('  dragging and clicking every control makes no service call', b.page('window.__calls.length') == 0, b.page('window.__calls'))
+        hd = b.page(HEAD)
+        check('chain_bypass: commands off the Bypass key is disabled and still says the state, and its click calls nothing',
+              hd is not None and hd['disabled'] and hd['key'] == 'Bypass off' and b.page('window.__calls.length') == 0, hd)
         check('  the EQ card has no number field to type in', b.page(
             "document.getElementById('svolder-eq-card').shadowRoot.querySelectorAll('.read input').length") == 0)
         check('  no text field and no switch to press', b.page(

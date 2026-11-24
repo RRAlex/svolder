@@ -83,6 +83,36 @@ publishes its `EqView` on a watch channel that readers take without waiting for 
   `EqControl::recall` sets all of one as a single change: one apply, or one live line, never an
   intermediate apply ([scenes.md](scenes.md#recall)). `ComputerPart::matches` compares what is heard
   against the view (`EqView.stated_preamp_db` carries the stated preamp it needs).
+- **Bypass.** `EqControl::bypass(on)` (`eq/control/bypass.rs`) is the all-off. On records which of
+  the EQ, loudness, crossfeed and virtual speakers play (`HeldStages`) and turns them all off as ONE
+  change through the scene path: `computer_part()` with every switch off, `recall`, so one apply or
+  one live line, and a stream that plays keeps the chain as a pass-through that is not applied
+  again. Off recalls the current part with the held switches on, their settings as they are now. On
+  with nothing playing and nothing held is refused (`nothing plays on the computer to bypass`); a
+  restore that is refused (a set no longer fetched) leaves the bypass on, with the words. Any stage
+  turned on by another path (a switch, a preset load, an edit that turns the EQ on, loudness,
+  crossfeed, the speakers, a scene recall) ends the bypass and forgets the held set: each public
+  entry point ends with one helper that does it. The held set is saved as `[bypass]` (`eq`,
+  `loudness`, `crossfeed`, `speakers`) in `host-eq.toml`, present only while the bypass holds, and
+  is adopted at start while no stage is on, so a restart can still bring the stages back.
+- **Levels.** `EqView.levels` (`eq/levels.rs`, `ChainLevels`) is the chain's level in dB, made once
+  in svolder-host: `eq_db` is the EQ's share of the preamp sent, `space_db` is crossfeed's share
+  (its stage cost) or the chosen set's level against Off while the virtual speakers play, `total_db`
+  is the preamp sent plus the speakers' level (loudness is left out: it follows the volume), and
+  `passthrough` says the chain plays flat with no stage. `words` is the one sentence every front end
+  shows: nothing with no chain, `plays −14.8 dB in all`, `pass-through −7.6 dB until the music
+  pauses`; while a climb runs (see [host-control-preamp.md](host-control-preamp.md#the-climb))
+  `climb_to_db` holds where it ends and `words` says `climbing to 0.0 dB`; `untouched` is true only
+  for a pass-through that reached exactly 0 dB on a chain started from an identity config with every
+  port read at its identity value, and then `words` is `pass-through, untouched`. `EqView.bypass`
+  (`BypassView { on, held }`) carries the bypass; a peer without either sends none and then no front
+  end offers a bypass.
+- **Idle.** A chain kept as a pass-through for a stream (the last stage or the EQ went off while it
+  played) is removed once nothing has played through it for `IDLE_KEEP` ticks, 60 (3 s): the watcher
+  looks every second, and three looks in a row that find no `running` stream remove it, so a seek, a
+  track change or a pause of two seconds keeps it. The held level's lift (a chain whose config holds
+  the curve, applied again with the curve's own preamp) waits for the same time.
+  `SVOLDER_EQ_IDLE_TICKS` sets it.
 - **Failure.** Thirty failed sends in 5 s make the controls unavailable (`computer controls
   unavailable: <why>`, as a missing `pw-cli` or `pipewire` does). A `pw-cli` restart is ridden out.
 - **Never on its own.** Nothing applies at start; `set_on(true)` is the user's action. Only in a
@@ -111,10 +141,11 @@ slot renumbering ends the drag with no write. For 2 s after a hold ends a client
 daemon sent before the release and a re-sort reaches it with the next read.
 
 **What the path says.** With a live chain in the path the path changes the sound, and it names the
-stages the daemon's EQ view says play: `host EQ on`, `loudness on`, `crossfeed on`,
-`virtual speakers on`, or `EQ pass-through` for the flat chain kept while a stream plays.
-`RouteFacts.stages` carries them; when the view cannot vouch for them (controls unavailable, an
-older svolder's chain) there is none and the path says `host EQ on`.
+stages the daemon's EQ view says play: `host EQ on`, `loudness on`, `crossfeed on`, `virtual
+speakers on`, or `EQ pass-through` for the flat chain kept while a stream plays; a pass-through the
+daemon proved untouched (`ChainStages.untouched`) is told no stage word and the computer hop is
+green. `RouteFacts.stages` carries them; when the view cannot vouch for them (controls unavailable,
+an older svolder's chain) there is none and the path says `host EQ on`.
 
 **The fake.** `SVOLDER_FAKE_HOST_EQ` and `SVOLDER_FAKE_COMPUTER_VOLUME` give the simulated daemon a
 computer side whose route follows the fake volume and mute; `make demo-computer` runs it.
@@ -129,6 +160,7 @@ Every route is a `POST` through the web's writer: a guest is refused 401 and a p
 | `api/v1/host/volume` | `{"pct"}` | the sink's volume, 0 to 100 |
 | `api/v1/host/mute` | `{"muted"}` | mute or unmute |
 | `api/v1/host/eq` | `{"on"}` | the EQ on or off; off keeps the points |
+| `api/v1/host/bypass` | `{"on"}` | the bypass on or off (every stage off as one change, brought back as it was) |
 | `api/v1/host/eq/preset` | `{"name", "device"?, "confirm"?}` | a preset on the computer; `device` is the shown device's name (the URL segment, decoded), whose built-ins are used |
 | `api/v1/host/eq/points` | `{"type", "f", "g", "q"}` | add a point |
 | `api/v1/host/eq/points/{n}` | `{"type"?, "f"?, "g"?, "q"?, "done"?, "slot"?}` | change point `n`, or the point in `slot` |
@@ -138,10 +170,11 @@ Every route is a `POST` through the web's writer: a guest is refused 401 and a p
 Points count from 1 and a type is `PK`, `LSC` or `HSC`. `done` is false while a drag goes on and,
 when absent, true: the daemon coalesces what a drag sends, so the page sends at most 20 a second per
 point and always the last value. The answer is `{"ok": true}`; 409 with the daemon's words when it
-refused (a `slot` no point holds included); 422 for a value out of its range (a volume outside 0 to
-100, a point type that is not one of the three, point 0, a slot outside 1 to 16, an added point
-outside the hand ranges); 503 with `computer controls unavailable: <why>` while the controls are
-unusable.
+refused (a `slot` no point holds included; the bypass with nothing playing; a restore it cannot
+make); 422 for a value out of its range (a volume outside 0 to 100, a bypass body that is not
+`{"on": bool}`, a point type that is not one of the three, point 0, a slot outside 1 to 16, an
+added point outside the hand ranges); 503 with `computer controls unavailable: <why>` while the
+controls are unusable.
 
 ### The question
 
@@ -178,6 +211,13 @@ computer, for any shown device, and `null` with the host off.
   response}`. `response` is the points' curve in dB at the tone control's 181 log-spaced frequencies
   (20 Hz to 20 kHz), the preamp left out. `running_unknown`: `on` is the state file's. `loads`
   counts loads and reloads (a held value ends when it moves). `live` is false with no chain.
+  `levels` is the host's `ChainLevels` (`eq_db`, `space_db`, `total_db`, `climb_to_db`,
+  `passthrough`, `untouched`, `words`) and `bypass` its `BypassView` (`on`, `held` with `eq`,
+  `loudness`, `crossfeed`, `speakers`); both are `null` from a host that has none. The page's core
+  reads them with `core.computer.levelsOf` (the EQ, Loudness and Space stages with their levels,
+  the total and the daemon's words; numbers are only formatted there) and `bypassOf` (`on`, `can`,
+  `held`), and writes with `actions.computer.setBypass(on)`; the contract lists a `bypass` target
+  while the model has one.
 - `presets`: `[{name, built_in, on, playable, why}]`, the built-ins of the shown device's tone
   control and the user's presets. One of more than 16 filters is listed with `playable: false` and
   its reason. On a page whose device has no tone control (an amp) there is no band layout to

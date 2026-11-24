@@ -227,8 +227,12 @@ fn the_tone_screen_at_80_by_24_keeps_its_blocks_whole() {
     assert!(app.drawn.tone_switch.get());
     app.key(KeyEvent::from(KeyCode::Char('C')));
     let rows = rows_of(&app, 80, 24);
-    assert!(holds(&rows, "┌ Points · computer"), "{rows:#?}");
-    assert!(holds(&rows, "│   #  Type"), "{rows:#?}");
+    assert!(holds(&rows, "┏ EQ · 3 of 16 points"), "{rows:#?}");
+    assert!(holds(&rows, "┃   #  Type"), "{rows:#?}");
+    assert!(
+        rows.last().is_some_and(|r| r.trim().is_empty()),
+        "the window's last row stays blank: {rows:#?}"
+    );
     assert!(
         rows.iter()
             .filter(|r| r.contains(" PK ") || r.contains(" LSC ") || r.contains(" HSC "))

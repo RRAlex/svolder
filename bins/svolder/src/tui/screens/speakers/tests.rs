@@ -289,7 +289,9 @@ fn a_click_on_the_pane_rows_arrow_steps_the_choice() {
     };
     assert_eq!((row, step), (Xf::Space, 1));
     let mut app = app;
-    let sent = app.click_crossfeed(row, step);
+    // a click on the arrow only highlights; Enter plays the highlighted choice
+    assert!(app.click_crossfeed(row, step).is_empty());
+    let sent = app.plays_apply();
     assert!(matches!(
         sent.as_slice(),
         [crate::tui::app::Intent::HostEq(op)]
@@ -339,7 +341,7 @@ fn speakers_stills() {
         let mut tone = app_on(Screen::Tone, true);
         tone.focus_crossfeed(Xf::Space);
         put(&format!("tone-unfolded-{tag}"), &tone, size);
-        tone.leave_crossfeed();
+        tone.focus_strip(crate::tui::app::Stage::Space);
         put(&format!("tone-folded-{tag}"), &tone, size);
         let (mut list, _) = open(size.0, size.1);
         list.speakers_box.fetch = Some(Fetch {

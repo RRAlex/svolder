@@ -48,6 +48,16 @@ the screen is the DAC page's layout, an amp's too, and flipping back restores it
   frequency (`toneOf`, shared by every theme), so a shelf's dot is on the line.
 - Every computer control carries `data-comp` and no `data-json`, so the DAC side's handlers leave it
   alone; for a guest each is `aria-disabled`, and the switch alone works.
+- **The stages line and Bypass** sit under the mode track in `.stages`: `p.chain` holds each stage
+  with its level (`EQ −7.8 dB · Loudness 60 % · Space speakers −7.0 dB`, a stage that is off says
+  `off`) and the daemon's total (`levels.words`), each item carrying its trailing dot so a phone's
+  line breaks at a ` · `. `Bypass` is a `.seg`-style toggle (`data-comp="bypass"`, `aria-pressed`,
+  written by `actions.computer.setBypass`), `aria-disabled` for a guest; while nothing plays it is
+  dim (class `idle`) and a writer's tap on it is still sent, and the daemon's refusal words are
+  shown the usual way. A stage word (`data-comp="stage"`) opens the Sound popup at its tab: EQ the
+  library, Loudness, Space the virtual speakers while they play and the crossfeed otherwise. A
+  guest sees plain words. The levels come from `core.computer.levelsOf` and `bypassOf`, laid over
+  the computer's view by `withStages`. The driver's `findComputer` has `{computer: 'bypass'}`.
 
 ## Paper
 
@@ -76,6 +86,16 @@ On an amp's page the switch is drawn too, and the computer's side is the DAC pag
 and presets sections (the amp's power and meters stay); the device's notes are left out. Paper's `×`
 and `−` are in its faces, and the table's down hint is a drawn stroke, not an arrow glyph.
 
+The chain line sits under the tone's heading, in pencil words: `CHAIN · EQ −7.8 · loudness 60 % ·
+space speakers −7.0 · plays −14.8 dB in all · bypass` (a stage that is off says `EQ off`, `loudness
+off`; the total is the daemon's `levels.words`). Each part carries its dot in one unbreakable span,
+so a wrapped line never starts with a dot. Each stage word opens the Sound popup at its tab (Space:
+the virtual speakers while they play, else the crossfeed); a guest sees plain words. `bypass` is
+the toggle (`aria-pressed`, underlined while the bypass is on, written by
+`actions.computer.setBypass`), quiet for a guest; dim (class `idle`) while nothing plays, where a
+writer's tap on it is still sent and the daemon's refusal words are shown the usual way. The
+driver's `findComputer` has `{computer: 'bypass'}`.
+
 ## Signal
 
 The flip is the line's own hop: the computer's hop is named `This computer`, says `PipeWire ·
@@ -94,6 +114,15 @@ streams and the verdict on the sound's way (the daemon's words name PipeWire the
 computer). Nothing below the line says `computer`, but for the path's own words (its `computer: …`
 hop line, `computer volume N %`, `computer muted`). A preset the DAC plays too is asked in Signal's
 own card, through its `asker`.
+
+The stage strip sits under the mode chips: each stage with its level (`EQ −7.8`, `Loudness 60 %`,
+`Space speakers −7.0`; a stage that is off reads `off`) and the daemon's own total words (`plays
+−14.8 dB in all`, `pass-through …`); with no words, no dot and no total. A stage word opens the
+Sound popup at its tab (the Space word at Virtual speakers while they play, else Crossfeed); a
+viewer who may not write sees plain text. A `Bypass` chip sits with Off and EQ: pressed while the
+bypass is on, dim while nothing plays, and a writer's tap on it still asks the daemon, whose refusal
+shows in the usual place. The strip's pieces never break inside a stage; on a phone the line wraps
+at the dots. The driver's `findComputer` has `{computer: 'bypass'}`.
 
 ## Night drive
 
@@ -116,6 +145,13 @@ volume keys, figure, mode, points and presets of a DAC page and its own power ke
   and mute the computer (`actions.computer`), a held key repeats as the device's does.
 - **EQ line.** `OFF`, or `EQ` with the preset's name, and no gains list; a state only the EQ's file
   says is marked `unconfirmed`.
+- **Stages and Bypass.** The EQ line reads `EQ Bass · SPACE −7.0 · −14.8 dB` (the Space stage while
+  it plays, then the total; in a pass-through, a climb or untouched, the daemon's words in place of
+  the total). A `BYPASS` key stands in the dash right after the EQ key (pressed while on, dim while
+  nothing plays, disabled for a guest; on an upright phone on the dash's second row). The EQ and
+  SPACE words open the Sound popup at their tab for a mouse press or the keyboard; under a finger
+  the line stays click-through (the Sound popup stays one menu row away). The driver's
+  `findComputer` has `{computer: 'bypass'}`.
 - **Mountains.** The bubbles are the points, each on the curve the points sum to (a shelf's too);
   the lit point has the bell's diamonds, a drag of one sets its Q. A press grabs a bubble and moves
   its frequency and gain, the wheel and two fingers set the Q, and a tap on an empty spot adds a PK

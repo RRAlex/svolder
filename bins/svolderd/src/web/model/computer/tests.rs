@@ -236,3 +236,30 @@ fn the_model_carries_the_virtual_speakers_as_the_hosts_own_view() {
     assert_eq!(model["speakers"]["set"], "sadie-d2", "{model}");
     assert_eq!(model["speakers"]["label"], "SADIE II, D2");
 }
+
+/// The levels and the bypass ride along as the host's own view, words included; a host that
+/// serves none sends null.
+#[test]
+fn the_model_carries_the_levels_and_the_bypass_as_the_hosts_own_view() {
+    let mut view = svolder_host::eq::EqView::default();
+    let model = serde_json::to_value(super::eq_model(&view)).unwrap();
+    assert_eq!(model["levels"], Value::Null);
+    assert_eq!(model["bypass"], Value::Null);
+    view.levels = Some(svolder_host::eq::ChainLevels::of(
+        true, -7.8, -7.0, -14.8, false,
+    ));
+    view.bypass = Some(svolder_host::eq::BypassView {
+        on: true,
+        held: svolder_host::eq::HeldStages {
+            eq: true,
+            ..Default::default()
+        },
+    });
+    let model = serde_json::to_value(super::eq_model(&view)).unwrap();
+    assert_eq!(model["levels"]["total_db"], -14.8, "{model}");
+    assert_eq!(model["levels"]["words"], "plays \u{2212}14.8 dB in all");
+    assert_eq!(model["levels"]["untouched"], false);
+    assert_eq!(model["bypass"]["on"], true);
+    assert_eq!(model["bypass"]["held"]["eq"], true);
+    assert_eq!(model["bypass"]["held"]["speakers"], false);
+}

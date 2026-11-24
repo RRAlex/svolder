@@ -332,6 +332,7 @@ fn request(name: &str) -> ApplyRequest {
         flat: false,
         crossfeed: None,
         speakers: None,
+        identity: None,
     }
 }
 
@@ -392,6 +393,7 @@ fn status_words_name_a_pass_through_and_a_chain_for_crossfeed_alone() {
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     };
     let words = |crossfeed_on| {
         Status {

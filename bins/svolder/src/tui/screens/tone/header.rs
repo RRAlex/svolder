@@ -122,7 +122,11 @@ pub(super) fn header_line(
         let fit = target
             .filter(|_| bands.len() == eq.bands.len())
             .map(|view| view.header(&bands));
-        let words = [fit, device::host_eq_words(app, area)];
+        // The computer side's own line already names its preset: it is not said twice.
+        let words = [
+            fit,
+            device::host_eq_words(app, area).filter(|_| !app.on_computer()),
+        ];
         for words in words.into_iter().flatten() {
             let words = format!("{PRESET_OPEN}{words}");
             let left = usize::from(width)

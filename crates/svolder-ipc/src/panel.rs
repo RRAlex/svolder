@@ -4,11 +4,11 @@
 //! The panel model: everything the GNOME top-bar indicator draws, in one serialisable value.
 //!
 //! [`PanelView`] is what `svolder panel --json` prints, one object per line. The indicator draws
-//! it and never re-judges anything: the Path strip's tones and its off-only words come from the
-//! Path row's judge, the signal's bars from [`Signal::bars`](crate::Signal::bars), and every
-//! choice list carries the CLI arguments that select a choice. Every number a person reads is
-//! also given as text with the proper minus sign (U+2212); the JSON numbers beside them stay
-//! numbers.
+//! it and never re-judges anything: the Path strip's tones and its words (each segment's status
+//! and the line at rest) come from the Path row's judge, the signal's bars from
+//! [`Signal::bars`](crate::Signal::bars), and every choice list carries the CLI arguments that
+//! select a choice. Every number a person reads is also given as text with the proper minus sign
+//! (U+2212); the JSON numbers beside them stay numbers.
 //!
 //! The wire shape is versioned by [`PANEL_VERSION`]: a reader that meets another `v` stops
 //! drawing instead of guessing.
@@ -131,6 +131,28 @@ pub struct PanelComputerEq {
     pub preset: Option<String>,
     /// The presets that can be put on the computer.
     pub choices: Vec<PanelChoice>,
+    /// What the chain plays at, in the daemon's words (`plays −14.8 dB in all`); `None` with no
+    /// chain, or from a daemon that has no levels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<String>,
+    /// The row's switch, "the computer changes the sound"; `None` from a daemon that has no
+    /// bypass, and then the indicator drives `host eq on|off` with `on`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub switch: Option<PanelSwitch>,
+}
+
+/// The Computer EQ row's switch: whether the computer changes the sound now (any stage plays and
+/// the bypass is off) and the CLI arguments that toggle it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PanelSwitch {
+    /// Whether any stage (EQ, loudness, crossfeed, speakers) plays.
+    pub on: bool,
+    /// The arguments that flip it: `host bypass on` while a stage plays, `host bypass off` while
+    /// the bypass holds a set, else `host eq on`.
+    pub args: Vec<String>,
+    /// The switch's accessible name: what it means, for a screen reader.
+    pub name: String,
 }
 
 /// The Path from the player to the DAC, judged once.
@@ -155,6 +177,19 @@ pub struct PanelPath {
     /// A failing config check adds `config N`. For a sound that goes to another sink or input
     /// there are no hops: the row's short words (`→ Monitor HDMI`) stand here.
     pub off: String,
+    /// The line the strip shows at rest: `untouched end to end` in `good` when the label is good,
+    /// otherwise the `off` words in `warn`; empty (and `plain`) when there is nothing to say.
+    pub rest: PanelRest,
+}
+
+/// The line beside the Path strip while no segment is hovered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PanelRest {
+    /// The words, minus signs written as U+2212; empty when there is nothing to say.
+    pub text: String,
+    /// `good` for an untouched path, `warn` for words about what is off, `plain` for no words.
+    pub tone: PanelLabelTone,
 }
 
 /// How the Path row's label is drawn.
@@ -177,6 +212,11 @@ pub struct PanelSegment {
     pub hop: PanelHop,
     /// How the segment is drawn.
     pub tone: PanelTone,
+    /// The segment's status line for a hover or a screen reader, `<Name>: <status>`: the hop's
+    /// changes joined by ` · ` (`Computer: resampled · sink filter`), `untouched` for a
+    /// green hop, `not read` for a grey one. A path with no hops gives every segment the `off`
+    /// words.
+    pub words: String,
 }
 
 /// The hop of a [`PanelSegment`].

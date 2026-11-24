@@ -21,6 +21,7 @@ fn word(text: &str, tone: Tone) -> RowWord {
 /// A hop of the row model.
 fn hop(label: &str, words: &[RowWord]) -> RowHop {
     RowHop {
+        key: "computer",
         label: label.to_string(),
         words: words.to_vec(),
     }
@@ -40,6 +41,7 @@ fn case(label: Tone, computer: &[RowWord], values: Vec<RowWord>) -> PathRow {
         ],
         values,
         words: None,
+        changes: Vec::new(),
     }
 }
 
@@ -306,6 +308,7 @@ fn the_computer_screen_has_two_hops() {
         ],
         values: vec![word("48 kHz", Tone::Dim)],
         words: None,
+        changes: Vec::new(),
     };
     let lines = marked(&row, 120, true);
     assert_eq!(
@@ -328,6 +331,7 @@ fn a_row_with_no_hops_is_one_plain_line() {
         hops: Vec::new(),
         values: Vec::new(),
         words: Some("→ DELL S2721QS".to_string()),
+        changes: Vec::new(),
     };
     assert_eq!(
         marked(&row, 120, true),

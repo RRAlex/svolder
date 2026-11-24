@@ -299,6 +299,7 @@ fn route() -> RouteFacts {
             rate_hz: rate,
             format: Some("S16LE".into()),
             volume_milli: Some(1000),
+            channels: None,
             muted: false,
         }),
         player_match: PlayerMatch::Pid,

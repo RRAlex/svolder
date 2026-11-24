@@ -172,8 +172,10 @@ unit into every entry and topic function. `svolder_mqtt::computer` builds one sw
 sensor (and, while the controller serves loudness, a loudness switch and a strength number,
 `computer::loudness`, whose range and step come from the view; while it serves crossfeed, a
 crossfeed switch and a crossfeed preset select, `computer::crossfeed`, whose options are the view's
-model table and whose `Custom` is a state, not a command) under the Home Assistant device
-`{identifiers: [svolder_computer_H], name: <host name as read>, manufacturer: svolder, model:
+model table and whose `Custom` is a state, not a command; while the view carries `bypass`, a
+`Bypass` switch, and while it carries `levels`, the `Chain level`, `EQ level` and `Space level` dB
+sensors, `computer::bypass`, the daemon's own numbers to one decimal) under the Home Assistant
+device `{identifiers: [svolder_computer_H], name: <host name as read>, manufacturer: svolder, model:
 Computer}`. Every DAC or amp device the daemon announces carries `via_device: svolder_computer_H`;
 Home Assistant resolves that link when a device registers, so the computer is announced first
 (`announce_parent`, the computer's rank, which a reconnect replays before any device's discovery).
@@ -181,8 +183,13 @@ Home Assistant resolves that link when a device registers, so the computer is an
 view carries an EQ, and publishes `ON`/`OFF` and the preset name. The preset topic is cleared, not
 retained empty, while the EQ is off. A command goes through the host's own `Mode` request, never
 through a device's writer. ON with a flat, never edited curve (`computer::nothing_kept`) is not
-sent. A retained command is never acted on, as for devices. No volume, mute or point entity exists
-on purpose.
+sent. The Bypass command goes through the host's `Bypass` op (`EqSwitch::bypass`), never a device
+writer; a refusal is logged with the daemon's words and the switch keeps saying what the view
+says. An entity whose field the view lacks is not announced, and its discovery is swept at bridge
+start; a field that goes away mid-run takes its state topics with it. The level texts go out at
+most every second with a trailing publish, so a climb that moves the level every tick does not
+flood the broker and the last value always lands. A retained command is never acted on, as for
+devices. No volume, mute or point entity exists on purpose.
 
 The first publish of each bridge start clears what an older daemon announced: the `This computer`
 discovery topics (unit `computer`, both component kinds, as `computer::legacy_topics_of` lists them)

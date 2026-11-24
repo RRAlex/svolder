@@ -162,7 +162,7 @@
                             ▒▒▒▒▒▒▒░    ▒▒▒░    ▒▒▒▒▒▒▒░  ▒▒░  ▒▒▒▒▒▒▒░  ▒▒▒▒▒▒▒   ▒▒░
                                          Copyright (C) 2026 the svolder authors
                          Free software under the GNU GPL, version 3 or later, with NO WARRANTY.
-                                 Gungnir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
+                                 Gungnir 2 · fw 3 · 0102030405060708  ● connected                        mouse:on 14:02
 ─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────────────────────────────────────────────── ? help ─ esc menu ─
 ┌ Controls ─────────── mute ─ 0 centre ─ refresh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │                                                          │ │                                                         │
@@ -368,7 +368,7 @@
 │                                                            │    4   1736 Hz   +4.76 dB   0.9                         │
 │    Transport    ◀◀  ▶  ▮▮  ▶▶  2:39 / 9:2   ━  ─ ─  ───  │ │                                                         │
 │    Spectrum     ▇▆▅▅▅▅▃▂▂▂▂▃▃▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▄▄  ▃▃ own  │ │                                                         │
-                                 Gu gnir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
+                                 Gu gnir 2 · fw 3 · 0102030405060708  ● connected                        mouse:on 14:02
 ─┤                     e  me       De  c s ───────────────────────────────────────────────────────── ? help ─ esc menu ─
 ┌                   ─       ─          ─ r  r s  ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │    Inp                                                   │ │    Mode      ‹ EQ ›                                     │
@@ -381,7 +381,7 @@
 │    Transport    ◀◀  ▶  ▮▮  ▶▶  2:39 / 9:22   ━━─── ────  │                                                           │
 │    Spectrum     ▇▆▅▅▅▅▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▄▄▄▄▃▃ own  │ │                                                         │
 │  VU R ───────────────────────────┼┄┄┄┄┄┄┄┄┄┄┄┃   +3.0  ○                                                             │
-                                   ngnir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
+                                   ngnir 2 · fw 3 · 0102030405060708  ● connected                        mouse:on 14:02
 ─                                  D v  e   ──────────────────────────────────────────────────────── ? help ─ esc menu ─
 ┌                                  t      e    h   k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │  ▶ In u                                                  │ │    Mode      ‹ EQ ›                                     │
@@ -392,7 +392,7 @@
 │    Balance      L ──────────────┃─ ─   ───  ─── R  0     │ │    3   1232 Hz   -2.24 dB   0.5                         │
 │    Spectrum     ▇▆▅▅▅▅▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▄▄▃▃ own  │ │                                                         │
 │  VU R ───────────────────────────┼┄┄┄┄┄┄┄┄┄┃┄┄   +2.6  ○                                                             │
-                                    gnir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
+                                    gnir 2 · fw 3 · 0102030405060708  ● connected                        mouse:on 14:02
 ─                                   e i    ─ ─── ─────────────────────────────────────────────────── ? help ─ esc menu ─
 ┌    tr                                   e          c eck ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │  ▶ Input                                                 │ │    Mode      ‹ EQ ›                                     │
@@ -403,7 +403,7 @@
 │    Balance      L ──────────────┃──────────────    0     │ │    3   1232 Hz   -2.24 dB   0.5                         │
 │    Spectrum     ▇▆▅▅▅▅▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▄▄▄▃ own  │ │                                                         │
 │  VU R ───────────────────────────┼┄┄┄┄┄┄┄┃┄┄┄┄   +2.1  ○                                                             │
-                                     n   2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
+                                     n   2 · fw 3 · 0102030405060708  ● connected                        mouse:on 14:02
 ─┤                               ─ D  i     ─  ── ────────────────────────────────────────────────── ? help ─ esc menu ─
 ┌ Contr                                ─ r    s  ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │  ▶ Input        ‹      p                                 │ │    Mode      ‹ EQ ›                                     │
@@ -411,7 +411,7 @@
 │    NOS filter   [ ]   f                                  │ │    Preset    Sennheiser HD 800 S                        │
 │    Volume       ███████████55/127  ░░░░┃░░░░   -30.1 dB  │ │  ▶ 1   31.2 Hz    +6.0 dB   0.5                         │
 │  VU R ───────────────────────────┼┄┄┄┄┃┄┄┄┄┄┄┄   +1.5  ○                                                             │
-                                      ir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
+                                      ir 2 · fw 3 · 0102030405060708  ● connected                        mouse:on 14:02
 ─┤ Co                                v        ── ─────────────────────────────────────────────────── ? help ─ esc menu ─
 ┌ Controls ──                              f e     k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │  ▶ Input        ‹     O                                  │ │    Mode      ‹ EQ ›                                     │
@@ -420,50 +420,50 @@
 │    Spectrum     ▇▆▆▅▅▅▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▄▄▄▃ own  │ │                                                         │
 │  VU R ───────────────────────────┼┄┃┄┄┄┄┄┄┄┄┄┄   +0.7  ○                                                             │
  █
-  ▄▄                                       · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
+  ▄▄                                       · fw 3 · 0102030405060708  ● connected                        mouse:on 14:02
 ─┤ Co t                             e       ─ ────────────────────────────────────────────────────── ? help ─ esc menu ─
 ┌ Controls ──   ─                         e r sh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │  ▶ Input        ‹ 3 · O ti                               │ │    Mode      ‹ EQ ›                                     │
 │    Spectrum     ▇▆▆▅▅▄▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▄▄▄▄ own  │ │                                                         │
 │  VU R ───────────────────────────┃┄┄┄┄┄┄┄┄┄┄┄┄   -0.1  ○                                                             │
  █▀▀▀
- ▄▄▄                                     2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
+ ▄▄▄                                     2 · fw 3 · 0102030405060708  ● connected                        mouse:on 14:02
 ─┤ Controls                            c   ───────────────────────────────────────────────────────── ? help ─ esc menu ─
 ┌ Controls ──── ─                  t   ─ refresh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │  ▶ Input        ‹ 3 · O tic   ›                          │ │    Mode      ‹ EQ ›                                     │
 │    Spectrum     ▆▆▅▅▅▄▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▄▃▄▄ own  │ │                                                         │
 │  VU R ────────────────────────┃──┼┄┄┄┄┄┄┄┄┄┄┄┄   -0.8  ○                                                             │
  █▀▀▀ █    █
- ▄▄▄█  ██                                2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
+ ▄▄▄█  ██                                2 · fw 3 · 0102030405060708  ● connected                        mouse:on 14:02
 ─┤ Controls                      ─  e  ces ───────────────────────────────────────────────────────── ? help ─ esc menu ─
 ┌ Controls ───────────  ut      ce  re ─ refresh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │    Spectrum     ▆▆▅▅▄▄▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▄▃▄▄ own  │ │                                                         │
 │  VU R ──────────────────────┃────┼┄┄┄┄┄┄┄┄┄┄┄┄   -1.6  ○                                                             │
  █▀▀▀ █  █ █ ▀█
- ▄▄▄█  ██  █                         nir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
+ ▄▄▄█  ██  █                         nir 2 · fw 3 · 0102030405060708  ● connected                        mouse:on 14:02
 ─┤ Controls ├─  E                  Devices ───────────────────────────────────────────────────────── ? help ─ esc menu ─
 ┌ Controls ───────────  ute ─ 0 c  tre ─ refresh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │    Spectrum     ▆▆▅▅▄▄▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▃▃▃▄ own  │ │                                                         │
 │  VU R ────────────────────┃──────┼┄┄┄┄┄┄┄┄┄┄┄┄   -2.2  ○                                                             │
  █▀▀▀ █  █ █▀▀█   ▄
- ▄▄▄█  ██  █▄▄█ █ █              G ngnir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
+ ▄▄▄█  ██  █▄▄█ █ █              G ngnir 2 · fw 3 · 0102030405060708  ● connected                        mouse:on 14:02
 ─┤ Controls ├── EQ ──  e e         Devices ───────────────────────────────────────────────────────── ? help ─ esc menu ─
 ┌ Controls ─────────── mut  ─ 0 ce tre ─ refresh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │    Spectrum     ▅▅▅▅▄▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▃▃▃▄ own  │ │                                                         │
 │  VU L ───────────────────────────┼┄┄┄┄┄┄┄┃┄┄┄┄   +2.1  ○                                                             │
 │  VU R ───────────────────┃───────┼┄┄┄┄┄┄┄┄┄┄┄┄   -2.7  ○                                                             │
  █▀▀▀ █  █ █▀▀█ █ ▄    █
- ▄▄▄█  ██  █▄▄█ █ █▄             Gungnir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
+ ▄▄▄█  ██  █▄▄█ █ █▄             Gungnir 2 · fw 3 · 0102030405060708  ● connected                        mouse:on 14:02
 ─┤ Controls ├── EQ ──  el  etry    Devices ───────────────────────────────────────────────────────── ? help ─ esc menu ─
 │    Spectrum     ▅▅▅▄▄▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▃▄▃▃▃▄ own  │ │                                                         │
 │  VU L ───────────────────────────┼┄┄┄┄┃┄┄┄┄┄┄┄   +1.4  ○                                                             │
 │  VU R ──────────────────┃────────┼┄┄┄┄┄┄┄┄┄┄┄┄   -3.1  ○                                                             │
  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ █    █
- ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄      Gungnir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
+ ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄      Gungnir 2 · fw 3 · 0102030405060708  ● connected                        mouse:on 14:02
 │    Spectrum     ▅▅▅▄▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▃▃▃▃▃▃ own  │ │                                                         │
 │  VU R ─────────────────┃─────────┼┄┄┄┄┄┄┄┄┄┄┄┄   -3.3  ○                                                             │
  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀
- ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    Gungnir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
+ ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    Gungnir 2 · fw 3 · 0102030405060708  ● connected                        mouse:on 14:02
 │    Spectrum     ▅▅▄▄▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▃▃▃▃▃▃▃ own  │ │                                                         │
 │  VU L ──────────────────────────┃┼┄┄┄┄┄┄┄┄┄┄┄┄   -0.1  ○                                                             │
  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀

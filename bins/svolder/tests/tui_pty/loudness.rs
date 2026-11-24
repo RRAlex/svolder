@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The computer's loudness in the real TUI, over the demo daemon's simulated host: the Tone
-//! pane's row over the crossfeed row, the tone screen's section under the Points table, and a
+//! pane's row over the crossfeed row, the tone screen's Loudness panel, and a
 //! change from the keys and from the mouse that goes through the daemon and comes back in the
 //! view.
 
@@ -29,13 +29,16 @@ fn has(tui: &Tui, needle: &str) -> bool {
     tui.screen_text().contains(needle)
 }
 
-/// Press `e` and wait for the tone screen to be drawn whole.
+/// Press `e` and wait for the tone screen to be drawn whole: the screen is read in chunks, so the
+/// EQ panel's top border can show while the device screen's rows and its hint box still stand
+/// under it. The keys open in the EQ panel.
 fn open_tone_screen(tui: &Tui) {
     tui.send_keys("e");
     tui.wait_for("the tone screen, drawn whole", WAIT, |s| {
         let text = s.contents();
-        text.contains("Loudness")
-            && text.contains("Points · computer")
+        text.contains("┏ EQ")
+            && text.contains("Esc strip")
+            && !text.contains("Level from")
             && !text.contains("tui --join")
     });
 }
@@ -63,25 +66,37 @@ fn the_tone_panes_loudness_row_sits_under_the_points_and_over_the_crossfeed_row(
 
 #[test]
 #[ignore = "runs the real binary in a pty: make tui-harness"]
-fn tab_unfolds_the_tone_screens_loudness_section_in_the_chains_order() {
+fn tab_opens_the_tone_screens_loudness_panel_in_the_chains_order() {
     for (cols, rows) in SIZES {
         let tui = on_computer(cols, rows);
         open_tone_screen(&tui);
-        assert!(!has(&tui, "Reference"), "{cols}x{rows}: folded");
-        // the keys open on the points: Tab goes to the Loudness section, which unfolds
+        assert!(!has(&tui, "Reference"), "{cols}x{rows}: the EQ panel");
+        // the keys open on the points: Tab goes to the Loudness panel
         tui.send_keys("\t");
         tui.wait_for_text("Reference");
         let screen = tui.screen_text();
         assert!(
-            row_of(&tui, "Points") < row_of(&tui, "Loudness  ‹")
-                && row_of(&tui, "Loudness  ‹") < row_of(&tui, "Reference")
-                && row_of(&tui, "Reference") < row_of(&tui, "Space "),
+            row_of(&tui, "Response") < row_of(&tui, "Bypass")
+                && row_of(&tui, "Bypass") < row_of(&tui, "Loudness   ‹")
+                && row_of(&tui, "Loudness   ‹") < row_of(&tui, "Strength")
+                && row_of(&tui, "Strength") < row_of(&tui, "Reference"),
             "{cols}x{rows}: the chain's order:\n{screen}"
         );
-        // Esc folds before it leaves the screen
+        // the strip names the stages in the chain's order, along one row
+        let stops: Vec<(u16, u16)> = ["EQ ○", "Loudness ○", "Space ○", "Bypass ○"]
+            .iter()
+            .map(|stop| tui.find(stop))
+            .collect();
+        assert!(
+            stops
+                .windows(2)
+                .all(|pair| pair[0].0 < pair[1].0 && pair[0].1 == pair[1].1),
+            "{cols}x{rows}: the strip's order: {stops:?}\n{screen}"
+        );
+        // Esc goes to the strip first and the panel stays (a further Esc would leave the screen)
         tui.send_keys("\x1b");
-        tui.wait_for("Esc folds", WAIT, |s| !s.contents().contains("Reference"));
-        assert!(has(&tui, "Loudness"), "still on the tone screen");
+        tui.wait_for("the strip", WAIT, |s| s.contents().contains("┌ Loudness"));
+        assert!(has(&tui, "Reference"), "the panel stays");
         tui.quit();
     }
 }
@@ -92,14 +107,14 @@ fn a_loudness_change_from_the_keys_goes_through_the_daemon_and_comes_back_in_the
     for (cols, rows) in SIZES {
         let tui = on_computer(cols, rows);
         open_tone_screen(&tui);
-        tui.send_keys("\t");
+        tui.send_keys("L");
         tui.wait_for_text("Reference");
         assert!(has(&tui, "‹ off ›"), "{}", tui.screen_text());
         // Space turns it on; the view says so
         tui.send_keys(" ");
         tui.wait_for("on in the view", WAIT, |s| s.contents().contains("‹ on ›"));
-        // one step of the strength (5 %) and back
-        tui.send_keys("\x1b[C");
+        // one step of the strength (5 %) and back: the strength row is under the on/off row
+        tui.send_keys("\x1b[B\x1b[C");
         tui.wait_for("one step up", WAIT, |s| s.contents().contains("55 %"));
         tui.send_keys("\x1b[D");
         tui.wait_for("one step back", WAIT, |s| s.contents().contains("50 %"));
@@ -121,8 +136,11 @@ fn a_loudness_change_from_the_keys_goes_through_the_daemon_and_comes_back_in_the
 fn a_click_on_the_switch_and_on_the_bar_changes_loudness_through_the_daemon() {
     let tui = on_computer(120, 36);
     open_tone_screen(&tui);
+    tui.send_keys("L");
+    tui.wait_for_text("Reference");
+    // a click on the `›` of the on/off row turns it on
     let (col, row) = tui.find("‹ off ›");
-    tui.send_mouse(Mouse::Click, col + 2, row);
+    tui.send_mouse(Mouse::Click, col + 6, row);
     tui.wait_for("on in the view", WAIT, |s| s.contents().contains("‹ on ›"));
     // the bar's first cell stands for the lowest step above 0: 5 %
     let (bar, bar_row) = tui.find("█████░");

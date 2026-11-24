@@ -377,6 +377,11 @@ ok('the_transport_is_drawn_for_a_writer_only', () => {
   const none = sectionOf('no-player', 'playing');
   assert.ok(/<i>nothing playing<\/i>/.test(none.html) && tags(none.html, 'button').length === 0, none.html);
   assert.equal(sectionOf('dac', 'playing').html, '');
+  // A sound with no MPRIS player behind it has a path and no track: it says so, not "nothing playing".
+  const played = pageOf('playing');
+  played.device.playing = { ...played.device.playing, track: null };
+  const noMpris = SECTIONS.playing(played, played.device, view);
+  assert.ok(/<i>no MPRIS player<\/i>/.test(noMpris) && !noMpris.includes('nothing playing'), noMpris);
 });
 
 ok('no_markup_carries_a_style_attribute', () => {
@@ -608,6 +613,79 @@ ok('an_overlay_without_a_span_fills_nothing_and_none_or_another_mode_draws_none'
   for (const mode of ['flat', 'loudness']) {
     assert.doesNotMatch(((p) => SECTIONS.tone(p, p.device, view))(withOverlay("dac", overlayOn([[600, 1500]]), mode)), /p-gap|p-target|p-fit/);
   }
+});
+
+// ---- the chain line and the bypass word -------------------------------------------------------
+
+const CHAIN = {
+  eq_db: -7.8, space_db: -7, total_db: -14.8, climb_to_db: null, passthrough: false, untouched: false,
+  words: 'plays −14.8 dB in all',
+};
+const chainModel = (eqOver = {}) => {
+  const base = modelOf();
+  return {
+    ...base,
+    eq: {
+      ...base.eq,
+      loudness: { on: true, strength_pct: 60 },
+      crossfeed: { on: false },
+      speakers: { on: true },
+      levels: CHAIN,
+      bypass: { on: false, held: { eq: false, loudness: false, crossfeed: false, speakers: false } },
+      ...eqOver,
+    },
+  };
+};
+const chainOf = (html) => /<p id="p-chain"[^>]*>(.*?)<\/p>/.exec(html)?.[1] ?? null;
+
+ok('the_chain_line_writes_the_stages_the_daemons_total_and_a_bypass_word', () => {
+  const { html } = sheet(pageWith('dac', chainModel()), 'computer');
+  const line = chainOf(html.tone);
+  assert.ok(line, html.tone);
+  assert.equal(wordsOf(line).trim(), 'Chain · EQ −7.8 · loudness 60 % · space speakers −7.0 · plays −14.8 dB in all · bypass');
+  assert.deepEqual(tags(html.tone, 'button').filter((t) => t['data-stage']).map((t) => t['data-stage']),
+    ['eq', 'loudness', 'space']);
+  const bypass = tags(html.tone, 'button').find((t) => t['data-act'] === 'c-bypass');
+  assert.equal(bypass['aria-pressed'], 'false');
+  assert.doesNotMatch(bypass.class, /\bon\b/);
+  assert.equal(bypass['aria-disabled'], undefined);
+  // each part carries its own dot in one unbreakable span: no wrapped line starts with a separator
+  const items = [...line.matchAll(/<span class="p-it">(.*?)<\/span>(?= <span class="p-it">|$)/g)];
+  assert.ok(items.length >= 6, line);
+  assert.ok(items.every((m) => !/^\s*·|^\s*&middot;/.test(m[1])), line);
+  // the line sits under the tone's heading, above the graph
+  assert.ok(html.tone.indexOf('id="p-chain"') < html.tone.indexOf('id="p-graph"'));
+});
+
+ok('bypassed_the_stages_read_off_the_bypass_word_is_the_chosen_one', () => {
+  const held = { eq: true, loudness: true, crossfeed: false, speakers: true };
+  const { html } = sheet(pageWith('dac', chainModel({
+    on: false,
+    loudness: { on: false },
+    speakers: { on: false },
+    levels: { ...CHAIN, eq_db: 0, space_db: 0, total_db: -7.6, passthrough: true,
+      words: 'pass-through −7.6 dB until the music pauses' },
+    bypass: { on: true, held },
+  })), 'computer');
+  assert.equal(wordsOf(chainOf(html.tone)).trim(),
+    'Chain · EQ off · loudness off · space off · pass-through −7.6 dB until the music pauses · bypass');
+  const bypass = tags(html.tone, 'button').find((t) => t['data-act'] === 'c-bypass');
+  assert.equal(bypass['aria-pressed'], 'true');
+  assert.match(bypass.class, /\bon\b/);
+});
+
+ok('no_levels_no_chain_line_and_a_guest_or_an_idle_chain_has_the_words_quiet', () => {
+  assert.equal(chainOf(sheet(pageWith('dac', modelOf()), 'computer').html.tone), null);
+  const guest = sheet(pageWith('dac-guest', chainModel()), 'computer').html.tone;
+  assert.equal(tags(guest, 'button').filter((t) => t['data-stage']).length, 0, 'a guest\'s stage words are plain text');
+  assert.match(chainOf(guest), /EQ −7\.8/);
+  assert.equal(tags(guest, 'button').find((t) => t['data-act'] === 'c-bypass')['aria-disabled'], 'true');
+  const idle = sheet(pageWith('dac', chainModel({
+    on: false, loudness: { on: false }, speakers: { on: false }, levels: { ...CHAIN, words: '' },
+  })), 'computer').html.tone;
+  // a writer's tap on it is sent, and the daemon says why not
+  assert.equal(tags(idle, 'button').find((t) => t['data-act'] === 'c-bypass')['aria-disabled'], undefined);
+  assert.match(tags(idle, 'button').find((t) => t['data-act'] === 'c-bypass').class, /\bidle\b/);
 });
 
 console.log(`paper-draw: ${n} passed`);

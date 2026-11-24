@@ -93,6 +93,7 @@ function findComputer(target) {
     case 'volume': return one('#sg-cvtrack');
     case 'mute': return one('[data-act="cmute"]');
     case 'mode': return one('[data-act="cmode"][data-mode="eq"]');
+    case 'bypass': return one('[data-act="cbypass"]');
     case 'add': return one('#sg-cadd');
     case 'remove': return one(`#sg-crm-${q(row)}`);
     case 'preset': return one(`[data-act="cpreset"][data-name="${q(target.name)}"]`);
@@ -240,7 +241,7 @@ async function operateComputer(target, change) {
     } else {
       press(change.step < 0 ? -1 : 1);
     }
-  } else if (computer === 'mute') {
+  } else if (computer === 'mute' || computer === 'bypass') {
     if (!('on' in change) || !stands(element, change.on)) tap(element);
   } else if (computer === 'mode') {
     const want = 'on' in change ? (change.on ? 'eq' : 'off') : 'eq';
@@ -265,6 +266,7 @@ function shownComputer(target, element) {
     case 'flip': return one('#sg-line [aria-selected="true"] b')?.textContent.trim() ?? null;
     case 'volume': return element.getAttribute('aria-valuetext');
     case 'mode': return one('[data-act="cmode"][aria-pressed="true"]')?.textContent.trim() ?? null;
+    case 'bypass': return element.getAttribute('aria-pressed') === 'true' ? 'on' : 'off';
     case 'preset': return element.dataset.name;
     case 'point': return element.value;
     default: return element.textContent.trim();

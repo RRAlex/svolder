@@ -14,6 +14,7 @@
 // does not take the typing away.
 
 import { askForm, askQuestion, closeAsk } from './ask.js';
+import { CROSSFEED, LOUDNESS, SOUND, SPEAKERS } from '../../core/popups/listed.js';
 import { heldCurve, valueWords } from './draw/computer.js';
 import { dragAlong, sliderKeys } from '../../core/gestures.js';
 import { closeList, closeOf, openList } from './lists.js';
@@ -133,6 +134,15 @@ export function wireComputer({
   const box = root.querySelector('#p-tone');
   if (box) wireTone(box);
 
+  /** The Sound popup's page for a stage word: the EQ library is its first tab (no page); Space is
+   * the virtual speakers' tab while they play, else the crossfeed's. */
+  function soundPage(stage) {
+    if (stage === 'loudness') return LOUDNESS;
+    if (stage !== 'space') return null;
+    const space = comp.levelsOf(page())?.stages.find((s) => s.key === 'space');
+    return space?.kind === 'speakers' ? SPEAKERS : CROSSFEED;
+  }
+
   function wireTone(section) {
     live.onSwitch(() => {
       closeList();
@@ -185,6 +195,17 @@ export function wireComputer({
       if (!el || !on()) return;
       const n = Number(el.dataset.n);
       switch (el.dataset.act) {
+        case 'c-bypass':
+          if (quiet()) {
+            core.actions.refuse();
+            return;
+          }
+          actions.setBypass(el.getAttribute('aria-pressed') !== 'true').catch(nothing);
+          live.draw('tone');
+          break;
+        case 'c-stage':
+          core.router.open(SOUND, soundPage(el.dataset.stage));
+          break;
         case 'c-mode':
           actions.setMode(el.dataset.mode).catch(nothing);
           live.draw('tone');

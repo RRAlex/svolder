@@ -616,7 +616,7 @@ fn host_group(
                     pane.extras.push((
                         top + 1,
                         CURSOR_OFFSET + u16::try_from(columns.field()).unwrap_or(0),
-                        u16::try_from(columns.bar()).unwrap_or(0),
+                        u16::try_from(computer_bar(app, columns).0).unwrap_or(0),
                         Hit::Level(app.rows().len()),
                     ));
                     (bar, false)
@@ -842,18 +842,22 @@ fn computer_volume_line(
     };
     let percent = volume.pct;
     let drawn = i64::from(percent.min(u16::from(host::VOLUME_MAX)));
+    let (bar, chain) = computer_bar(app, columns);
     spans.extend(widgets::rows::level_bar(
         theme,
         (drawn, drawn),
         (0, i64::from(host::VOLUME_MAX)),
-        columns.bar(),
+        bar,
         &format!("{percent}%"),
         (focused, false),
         (None, None),
     ));
-    let mut left = columns
-        .room()
-        .saturating_sub(columns.field() + columns.bar());
+    let mut left = columns.room().saturating_sub(columns.field() + bar);
+    // What the chain adds to the volume stands after the bar: `42 % · chain −14.8 dB`.
+    if let Some(chain) = chain {
+        left = left.saturating_sub(widgets::text::cells(&chain));
+        spans.push(Span::styled(chain, theme.style(Role::Dim)));
+    }
     if volume.muted && left >= VALUE_GAP + MUTED.len() {
         spans.push(Span::raw(" ".repeat(VALUE_GAP)));
         spans.push(Span::styled(MUTED, theme.style(Role::Warn)));
@@ -868,6 +872,28 @@ fn computer_volume_line(
     }
     Line::from(spans)
 }
+
+/// The cells the computer's Volume bar is drawn across and the words after it that say what the
+/// chain adds to the volume (` · chain −14.8 dB`, nothing with no chain): the bar gives up their
+/// cells where it keeps at least [`COMPUTER_BAR_MIN`] of its own.
+pub(super) fn computer_bar(app: &App, columns: Columns) -> (usize, Option<String>) {
+    let chain = app
+        .computer_eq()
+        .and_then(|eq| eq.levels.as_ref())
+        .filter(|levels| !levels.words.is_empty())
+        .map(|levels| {
+            format!(
+                " \u{b7} chain {} dB",
+                svolder_host::eq::levels::db_word(levels.total_db)
+            )
+        })
+        .filter(|chain| columns.bar() >= COMPUTER_BAR_MIN + widgets::text::cells(chain));
+    let taken = chain.as_deref().map_or(0, widgets::text::cells);
+    (columns.bar() - taken, chain)
+}
+
+/// The fewest cells the computer's Volume bar keeps when the chain's level takes some.
+const COMPUTER_BAR_MIN: usize = 10;
 
 /// The switch line over the Volume row's bar: `Target ‹ NAME | Computer ›`, the side shown
 /// standing out, with where its two names lie from the row's start (a column, a width and the

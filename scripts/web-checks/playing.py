@@ -15,6 +15,7 @@ behind it so the lap wraps with no jump, 2 s of rest at the start of each lap) f
 line is folded and the page shows, whatever the system's motion setting, under a fade. Numbers
 from the page, no pictures. Usage: python3 playing.py chromium|firefox"""
 import json
+import os
 import sys
 import time
 
@@ -736,6 +737,82 @@ try:
 finally:
     b.close()
     quit_.stop()
+
+# ------------------------------------------------------------------ no MPRIS player, every theme
+# The player quits while a stream plays on (`SVOLDER_FAKE_ROUTE=no-mpris`): the card has no track and
+# the path from the stream on, `player (no MPRIS)` with a dim `?`; with the changed route (two other
+# sounds) the several streams are not judged and the card says `no MPRIS player` once. Every theme,
+# wide and phone. With WEB_CHECK_SHOTS=<dir> each state is also saved as a still.
+SHOTS = os.environ.get('WEB_CHECK_SHOTS')
+SAYS = """(() => {
+  const q = (s) => document.querySelector(s);
+  const vis = (el) => { if (!el) return false; const b = el.getBoundingClientRect();
+    return getComputedStyle(el).display !== 'none' && b.width > 0 && b.height > 0; };
+  const path = q('#part-playing .np-path');
+  const card = q('#part-playing');
+  return { text: document.body.innerText, pathShown: vis(path), pathText: path?.innerText ?? null,
+    hopShown: [...document.querySelectorAll('#part-playing .np-hop:not(.np-cut)')]
+      .some((e) => /player \\(no mpris\\)/i.test(e.textContent) && vis(e)),
+    dimQ: [...document.querySelectorAll('#part-playing .np-path .v.d')]
+      .some((e) => e.textContent.trim() === '?' && vis(e)),
+    head: !!q('#part-playing .np-head'),
+    card: card ? (() => { const c = card.cloneNode(true);
+      c.querySelectorAll('.np-sr').forEach((n) => n.remove()); return c.textContent; })() : null,
+    title: q('.np-title')?.textContent.trim() ?? null,
+    sgTitle: q('.sg-title')?.textContent.trim() ?? null }; })()"""
+THEMES = ('ember', 'paper', 'signal', 'nightdrive')
+for which, env in (('no-mpris', {'SVOLDER_FAKE_ROUTE': 'no-mpris'}),
+                   ('several', {'SVOLDER_FAKE_ROUTE': 'changed'})):
+    d = common.Daemon(host='fake', env=env)
+    try:
+        for theme in THEMES:
+            b = (common.Chromium if browser == 'chromium' else common.Firefox)(size=(1280, 900))
+            try:
+                b.goto(f'{d.url}?theme={theme}&effects=off', settle=1.2)
+                b.sleep(1.0)
+                d.drop_player()
+                gone = None
+                for _ in range(60):
+                    gone = b.ev(SAYS)
+                    if 'mpris' in gone['text'].lower():
+                        break
+                    b.sleep(0.25)
+                for size in ((1280, 900), (390, 800)):
+                    b.resize(*size)
+                    b.sleep(0.6)
+                    says = b.ev(SAYS)
+                    where = f'{theme} {which} {size[0]}x{size[1]}'
+                    if SHOTS:
+                        os.makedirs(SHOTS, exist_ok=True)
+                        with open(f'{SHOTS}/{theme}-{which}-{"wide" if size[0] > 600 else "phone"}'
+                                  f'-{browser}.png', 'wb') as f:
+                            f.write(b.shot())
+                    if which == 'no-mpris':
+                        if theme == 'signal':
+                            check(f'{where}: the line draws the hop player (no MPRIS)',
+                                  'player (no mpris)' in says['text'].lower(), says)
+                        else:
+                            check(f'{where}: the page says no MPRIS player',
+                                  'no mpris player' in says['text'].lower()
+                                  or 'player (no mpris)' in says['text'].lower(), says)
+                        if theme == 'ember':
+                            check(f'{where}: the Path row is visible with the dim ?',
+                                  says['pathShown'] and says['dimQ']
+                                  and says['hopShown']
+                                  and 'player (no mpris)' in (says['pathText'] or '').lower()
+                                  and not says['head'], says)
+                    else:
+                        check(f'{where}: the several streams say no MPRIS player and are not judged',
+                              'no mpris player' in says['text'].lower()
+                              and '2 other sounds' not in says['text'].lower(), says)
+                        if theme == 'ember':
+                            check(f'{where}: the words stand once and no hop is drawn',
+                                  (says['card'] or '').lower().count('no mpris player') == 1
+                                  and says['pathShown'], says)
+            finally:
+                b.close()
+    finally:
+        d.stop()
 
 # ------------------------------------------------------------------ a changed path, in the band
 # The band is 240 px tall beside the visualizer; with it off Now playing has the whole band, 184 px

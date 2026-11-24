@@ -188,3 +188,5 @@ mod fit;
 mod computer;
 
 mod docs;
+
+mod stages;

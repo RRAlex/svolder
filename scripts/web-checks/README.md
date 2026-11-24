@@ -516,11 +516,12 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   back, every refusal as a reason, a passphrase that is in the body and nowhere else.
 - `node/core-setup.mjs`: the PipeWire config popup (`core/popups/setup/`) and each theme's config
   entry (Ember's label button and chip, Signal's and Paper's chips): the draw lists the sink, the
-  summary, all seven lines (failing ones tagged) and the limit in the daemon's words, escaped, and
-  says `config not read` for an older daemon; Ember's, Signal's and Paper's chips and the listed row;
-  and, on the real core over jsdom, the wire (it follows the `playing` part and the model in either
-  order). `setup_popup.py` is the same in a browser, wide and phone, with the fake host's passing
-  and failing config (`python3 setup_popup.py chromium|firefox`).
+  summary, all seven lines (failing ones tagged), the `What changes the sound` section and the limit
+  in the daemon's words, escaped, and says `config not read` for an older daemon; Ember's, Signal's
+  and Paper's chips and the listed row; and, on the real core over jsdom, the wire (it follows the
+  `playing` part and the model in either order). `setup_popup.py` is the same in a browser, wide and
+  phone, with the fake host's passing and failing config (`python3 setup_popup.py
+  chromium|firefox`).
 - `node/core-help.mjs`: the Help popup (`core/popups/help/`): its draws as strings (a key's row,
   Here's groups, the line for a focus that is nowhere, Everywhere, About and its links), that Help
   shows the listed entries of the zones it names and no other on the four themes' real tables
@@ -752,7 +753,7 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   words, the point in hand after a remove, a burst whose point is removed or listed elsewhere.
 - `computer_core.py`: the computer side in a real page (both browsers, `SVOLDER_HOST=fake`, no PipeWire):
   the host event, every action's route and read-back (a refusal in the same page), the side kept across a
-  reload with no write, a stale table (and a 409 for a point that moved), an unavailable computer
+  reload with no write, the bypass round trip (`setBypass`, `bypassOf`, `levelsOf`), a stale table (and a 409 for a point that moved), an unavailable computer
   (`SVOLDER_FAKE_HOST_EQ=off`), the question card's keys and buttons, and the same preset on both sides with
   its yes. Each theme's check also proves that Enter on an untouched cell writes nothing.
 - `computer_ember.py`: Ember's computer side in a real page (both browsers, `SVOLDER_HOST=fake`, no PipeWire):

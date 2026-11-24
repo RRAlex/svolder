@@ -6,7 +6,7 @@
 // attaches no key listener; the popup closes with a change of the shown device (it is about that
 // card).
 
-import { WORDS, pageHtml, setupOf } from './draw.js';
+import { WORDS, pageHtml, changesOf, setupOf } from './draw.js';
 
 /** The popup's part for the router: `{ show(page), hide(), onKey(event) }`, over `core`, drawn
  * into `frame` (popups/frame.js). */
@@ -15,7 +15,7 @@ export function wire({ core, frame }) {
   let offs = [];
 
   const draw = () => frame.draw({
-    title: WORDS.title, body: pageHtml({ setup: setupOf(store.page()) }),
+    title: WORDS.title, body: pageHtml({ setup: setupOf(store.page()), changes: changesOf(store.page()) }),
   });
 
   return {

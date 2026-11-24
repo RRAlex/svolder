@@ -19,6 +19,38 @@ const MINUS = '−';
 /** The part's root asks htmx to swap it out of band. */
 const swap = (oob) => attr('hx-swap-oob', oob ? 'true' : null);
 
+/**
+ * The computer's view with the stages laid over it: `levels` (the chain's stages and the total,
+ * `core.computer.levelsOf`) and `bypass` (`core.computer.bypassOf`), read from the page when the
+ * drawing asks, so the core's view stays what the core says it is. `view` itself when it is `null`.
+ */
+export function withStages(core, view) {
+  if (!view) return view;
+  const page = () => core.model.page();
+  return Object.create(view, {
+    levels: { get: () => core.computer.levelsOf(page()), enumerable: true },
+    bypass: { get: () => core.computer.bypassOf(page()), enumerable: true },
+  });
+}
+
+/**
+ * What the computer's parts say, to tell whether they are to be drawn again: the switch, the tone,
+ * the point in hand and the writes, and the words of the strip and the Bypass toggle as drawn. A
+ * climb's tick that moves the chain's numbers and none of those words is the same thing.
+ */
+export function drawnOf(view) {
+  if (!view) return null;
+  const inert = !view.writes;
+  return {
+    sw: view.sw,
+    tone: view.tone,
+    picked: view.picked,
+    writes: view.writes,
+    strip: stripLine(view.levels, inert),
+    toggle: bypassToggle(view.bypass, inert),
+  };
+}
+
 /** The device as the screen lays it out: a computer side has the DAC page's parts, whatever the
  * device. */
 export function effective(device, view) {
@@ -69,6 +101,41 @@ export function volumeModel(volume) {
     marks: [0, 25, 50, 75, 100].map((at) => ({ at, text: String(at) })),
     computer: true,
   };
+}
+
+/** The words a stage of the strip says: its name and, while it plays, its level. */
+function stageWords(stage) {
+  if (!stage.on) return `${stage.name} off`;
+  const kind = stage.key === 'space' && stage.kind !== 'off' ? ` ${stage.kind}` : '';
+  return `${stage.name}${kind} ${stage.text}${stage.key === 'loudness' ? '' : ' dB'}`;
+}
+
+/**
+ * The line under the mode track: each stage with its level (a button that opens the Sound popup at
+ * its tab, a plain word for a viewer who may not open it) and the daemon's words for the total.
+ * `levels` is the core's `levelsOf`; nothing is drawn without it.
+ */
+export function stripLine(levels, inert) {
+  if (!levels) return '';
+  const parts = levels.stages.map((stage) => {
+    const text = esc(stageWords(stage));
+    if (inert) return `<span class="stage${stage.on ? ' on' : ''}"${attr('data-stage', stage.key)}>${text}</span>`;
+    return `<button type="button" class="stage${stage.on ? ' on' : ''}"${attr('id', `ember-cstage-${stage.key}`)}${attr('data-comp', 'stage')}${attr('data-stage', stage.key)}>${text}</button>`;
+  });
+  if (levels.words) parts.push(`<span class="total">${esc(levels.words)}</span>`);
+  // each item carries the dot after it, so a line breaks at a ` · ` and never starts with one
+  const items = parts.map((part, i) => `<span class="it">${part}${i < parts.length - 1 ? '<span class="dot" aria-hidden="true"> ·</span>' : ''}</span>`);
+  return `<p class="chain" aria-label="The chain's levels">${items.join(' ')}</p>`;
+}
+
+/** The Bypass toggle, drawn like a one-button `.seg`; nothing from a host that has no bypass. It is
+ * `aria-disabled` for a viewer who may not write; where nothing plays it is drawn dim (`idle`) and a
+ * tap still goes to the daemon, which says why not. */
+export function bypassToggle(bypass, inert) {
+  if (!bypass) return '';
+  const off = inert ? attr('aria-disabled', 'true') : '';
+  const idle = !inert && !bypass.can && !bypass.on ? ' idle' : '';
+  return `<div class="seg bypassw"><button type="button" class="opt${idle}"${attr('id', 'ember-cbypass')}${attr('data-comp', 'bypass')}${attr('aria-pressed', bypass.on ? 'true' : 'false')}${off}>Bypass</button></div>`;
 }
 
 /** One row of the points' table. */
@@ -132,12 +199,15 @@ export function toneSection(view, { oob = false } = {}) {
   if (!tone) return '<section id="part-tone" hidden></section>';
   const inert = !view.writes;
   const off = inert ? attr('aria-disabled', 'true') : '';
-  const track = tone.modes.map((m) => ` <span class="optw"><button type="button" class="opt"${attr('aria-pressed', m.on ? 'true' : 'false')}${attr('data-comp', 'mode')}${attr('data-mode', m.name)}${off}>${esc(m.label)}</button></span>`).join('');
+  const track = tone.modes.map((m) => ` <span class="optw"><button type="button" class="opt"${attr('id', `ember-cm-${m.name}`)}${attr('aria-pressed', m.on ? 'true' : 'false')}${attr('data-comp', 'mode')}${attr('data-mode', m.name)}${off}>${esc(m.label)}</button></span>`).join('');
   const rows = tone.points.map((p) => row(p, { picked: view.picked, inert })).join('');
   const head = '<div class="ph" aria-hidden="true"><span>#</span><span>Type</span><span>Frequency</span><span>Gain</span><span>Q</span><span></span></div>';
   const add = `<button type="button" class="btn sm"${attr('data-comp', 'add')}${tone.canAdd && !inert ? '' : attr('aria-disabled', 'true')}>+ Add point</button>`;
+  const strip = stripLine(view.levels, inert);
+  const toggle = bypassToggle(view.bypass, inert);
+  const stages = strip || toggle ? ` <div class="stages">${strip}${toggle}</div>` : '';
   const unverified = tone.verified ? '' : ' <span class="pnote">not confirmed yet</span>';
-  return `<section id="part-tone" class="tone comp"${inert ? attr('data-inert', true) : ''}${swap(oob)}> <h2>Tone control</h2> <div class="seg" role="group" aria-label="Tone control mode">${track} </div> ${graph(tone)} <div class="pts-table"> ${head} <div class="pscroll${tone.points.length > ROWS_SHOWN ? ' long' : ''}"${attr('data-rows', ROWS_SHOWN)}>${rows}</div> <p class="more">${esc(moreWords(tone.points.length - ROWS_SHOWN))}</p> ${editor(tone.points[view.picked - 1], inert)} <div class="pfoot">${add}<p class="pline">${esc(tone.line)}${unverified}</p></div> </div> </section>`;
+  return `<section id="part-tone" class="tone comp"${inert ? attr('data-inert', true) : ''}${swap(oob)}> <h2>Tone control</h2> <div class="seg" role="group" aria-label="Tone control mode">${track} </div>${stages} ${graph(tone)} <div class="pts-table"> ${head} <div class="pscroll${tone.points.length > ROWS_SHOWN ? ' long' : ''}"${attr('data-rows', ROWS_SHOWN)}>${rows}</div> <p class="more">${esc(moreWords(tone.points.length - ROWS_SHOWN))}</p> ${editor(tone.points[view.picked - 1], inert)} <div class="pfoot">${add}<p class="pline">${esc(tone.line)}${unverified}</p></div> </div> </section>`;
 }
 
 /** A rename or delete icon button. */

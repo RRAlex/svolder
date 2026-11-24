@@ -3,7 +3,7 @@
 
 import {equal, fixture, ok, run, test} from './harness.js';
 import {
-    Backoff, BACKOFF_SECONDS, clickFailure, clickArgv, cliArgv, ControlQueue, dbArg, eqSwitchArgs, muteArgs,
+    Backoff, BACKOFF_SECONDS, clickFailure, clickArgv, cliArgv, ControlQueue, dbArg, eqSwitchArgs, eqSwitchSettled, muteArgs,
     PANEL_ARGS, ScrollAccumulator, scrollArgs, stepArgs, streamFailure, volumeSetArgs,
 } from '../svolder-indicator@rralex.github.io/process.js';
 
@@ -39,6 +39,25 @@ test('mute and the computer EQ switch toggle from the state shown', () => {
     equal(muteArgs(actions, true), ['set', 'mute', 'off']);
     equal(eqSwitchArgs(actions, true), ['host', 'eq', 'off']);
     equal(eqSwitchArgs(actions, false), ['host', 'eq', 'on']);
+});
+
+test('the computer EQ switch runs the arguments the line gives, else the EQ on or off', () => {
+    const line = args => ({switch: {on: true, args}});
+    equal(eqSwitchArgs(actions, true, line(['host', 'bypass', 'on'])), ['host', 'bypass', 'on']);
+    equal(eqSwitchArgs(actions, false, line(['host', 'bypass', 'off'])), ['host', 'bypass', 'off']);
+    equal(eqSwitchArgs(actions, false, line(['host', 'eq', 'on'])), ['host', 'eq', 'on']);
+    // An older svolder's row has no switch.
+    equal(eqSwitchArgs(actions, true, {on: true, preset: 'x'}), ['host', 'eq', 'off']);
+    equal(eqSwitchArgs(actions, false, {on: false}), ['host', 'eq', 'on']);
+    equal(eqSwitchArgs(actions, false, null), ['host', 'eq', 'on']);
+});
+
+test('a toggle back to the state the line shows runs nothing; an older line always runs', () => {
+    const shown = {switch: {on: true, args: ['host', 'bypass', 'on']}};
+    equal(eqSwitchSettled(shown, true), true);
+    equal(eqSwitchSettled(shown, false), false);
+    equal(eqSwitchSettled({on: true}, true), false);
+    equal(eqSwitchSettled(null, false), false);
 });
 
 test('backoff: 1, 2, 4, 8, 16, 30 and stays at 30', () => {

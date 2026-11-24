@@ -34,7 +34,7 @@ use crate::tui::widgets::actions::Action;
 mod art;
 mod controls;
 mod header;
-mod path_line;
+pub(super) mod path_line;
 pub(crate) mod split;
 mod status;
 mod tone_pane;
@@ -427,6 +427,24 @@ fn draw_tone(
                 arrow(xf.arrows.1).intersection(row),
                 Hit::CrossfeedStep(which, 1),
             );
+            for (at, (pick, arrows)) in xf.picks.iter().enumerate() {
+                let row = pane_row(inner, xf.line + 1 + u16::try_from(at).unwrap_or(0));
+                hits.push(row, Hit::Crossfeed(*pick));
+                let arrow = |at: usize| Rect {
+                    x: inner.x + u16::try_from(at).unwrap_or(0),
+                    y: row.y,
+                    width: 1,
+                    height: 1,
+                };
+                hits.push(
+                    arrow(arrows.0).intersection(row),
+                    Hit::CrossfeedStep(*pick, -1),
+                );
+                hits.push(
+                    arrow(arrows.1).intersection(row),
+                    Hit::CrossfeedStep(*pick, 1),
+                );
+            }
         }
         return rows;
     }

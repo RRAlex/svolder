@@ -116,6 +116,23 @@ views:
                     state:
                       - "on"
                       - "off"
+              # The computer's bypass, from the same device: on means every stage is off and the
+              # sound goes through as it is. It shows only while that switch exists.
+              - type: entity
+                entity: switch.reframe_bypass
+                name: Bypass
+                icon: mdi:debug-step-over
+                state_content:
+                  - name
+                  - state
+                tap_action:
+                  action: toggle
+                visibility:
+                  - condition: state
+                    entity: switch.reframe_bypass
+                    state:
+                      - "on"
+                      - "off"
           - type: tile
             entity: select.gungnir_tone_control_mode
             name: Mode
@@ -165,7 +182,7 @@ views:
             heading: Scenes
             icon: mdi:palette
           # The computer's scenes, from the same second device: write your host name in lower case,
-          # every other sign as `_` (`my-desk` is `my_desk`), for `reframe` in the two ids below.
+          # every other sign as `_` (`my-desk` is `my_desk`), for `reframe` in the ids below.
           # The select recalls a scene (`custom` means none is on); typing a name in the text saves
           # the current settings under it. Rename and delete are in the TUI, the web page and
           # `svolder scene`, not here. Without scenes (an older daemon) the entities do not exist

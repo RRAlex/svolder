@@ -39,7 +39,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
-use super::{BridgeTask, ComputerLink, PublishedDevice, WriteOutcome};
+use super::{BridgeTask, ComputerLink, METERS_EVERY, PublishedDevice, WriteOutcome};
 use crate::host::{EqSwitch, SlowHolds, Watcher};
 use crate::log;
 
@@ -66,6 +66,15 @@ pub(super) struct Published {
     pub(super) crossfeed_state: Option<(&'static str, String)>,
     /// The loudness switch's state and strength's last published.
     pub(super) loudness_state: Option<(&'static str, String)>,
+    /// The bypass switch's state last published.
+    pub(super) bypass_state: Option<&'static str>,
+    /// The chain, EQ and space level texts last published.
+    pub(super) levels_state: Option<[String; 3]>,
+    /// The Chain level sensor's attributes last published (the daemon's words for the levels).
+    pub(super) levels_attributes: Option<String>,
+    /// When the level texts were last published: they go out at most every [`METERS_EVERY`], a
+    /// change sooner than that waits and the last value always lands.
+    pub(super) levels_at: Option<Instant>,
     /// The speakers' switch, chosen set and attributes last published.
     pub(super) speakers_state: Option<computer::speakers::State>,
     /// The path sensor's state and attributes last published.
@@ -129,6 +138,10 @@ impl BridgeTask {
             state: None,
             crossfeed_state: None,
             loudness_state: None,
+            bypass_state: None,
+            levels_state: None,
+            levels_attributes: None,
+            levels_at: None,
             speakers_state: None,
             path_state: None,
             config_state: None,
@@ -163,6 +176,10 @@ impl BridgeTask {
         let xf_preset_topic = topics::diagnostic(&base, unit, computer::crossfeed::PRESET_KEY);
         let ld_topic = topics::diagnostic(&base, unit, computer::loudness::SWITCH_KEY);
         let ld_strength_topic = topics::diagnostic(&base, unit, computer::loudness::STRENGTH_KEY);
+        let bypass_topic = topics::diagnostic(&base, unit, computer::bypass::BYPASS_KEY);
+        let level_topics =
+            computer::bypass::LEVELS.map(|(key, _)| topics::diagnostic(&base, unit, key));
+        let level_attrs_topic = computer::bypass::attributes_topic(&me, &base);
         let sp_topic = topics::diagnostic(&base, unit, computer::speakers::SWITCH_KEY);
         let sp_set_topic = topics::diagnostic(&base, unit, computer::speakers::SET_KEY);
         let sp_attrs_topic = computer::speakers::attributes_topic(&me, &base);
@@ -219,6 +236,8 @@ impl BridgeTask {
                 client.clear(xf_preset_topic.clone());
                 client.clear(ld_topic.clone());
                 client.clear(ld_strength_topic.clone());
+                client.clear(bypass_topic.clone());
+                level_topics.iter().for_each(|t| client.clear(t.clone()));
                 client.clear(sp_topic.clone());
                 client.clear(sp_set_topic.clone());
                 client.clear(sp_attrs_topic.clone());
@@ -242,6 +261,9 @@ impl BridgeTask {
                 client.clear(xf_preset_topic);
                 client.clear(ld_topic);
                 client.clear(ld_strength_topic);
+                client.clear(bypass_topic);
+                level_topics.iter().for_each(|t| client.clear(t.clone()));
+                client.clear(level_attrs_topic);
                 client.clear(sp_topic);
                 client.clear(sp_set_topic);
                 client.clear(sp_attrs_topic);
@@ -255,6 +277,10 @@ impl BridgeTask {
             published.state = None;
             published.crossfeed_state = None;
             published.loudness_state = None;
+            published.bypass_state = None;
+            published.levels_state = None;
+            published.levels_attributes = None;
+            published.levels_at = None;
             published.speakers_state = None;
             published.path_state = None;
             published.config_state = None;
@@ -338,6 +364,59 @@ impl BridgeTask {
             }
             None => {}
         }
+        match eq.bypass.as_ref() {
+            Some(bypass) => {
+                let on = computer::bypass::state(bypass);
+                if published.bypass_state != Some(on) {
+                    client.retain(bypass_topic, on);
+                }
+                published.bypass_state = Some(on);
+            }
+            None if published.bypass_state.is_some() => {
+                client.clear(bypass_topic);
+                published.bypass_state = None;
+            }
+            None => {}
+        }
+        match eq.levels.as_ref() {
+            Some(levels) => {
+                let now = computer::bypass::levels_state(levels);
+                let now_attributes = computer::bypass::levels_attributes(levels);
+                let was = published.levels_state.clone();
+                let moved = was.as_ref() != Some(&now)
+                    || published.levels_attributes.as_ref() != Some(&now_attributes);
+                let due = published.levels_at.map(|at| at + METERS_EVERY);
+                match due {
+                    // Too soon after the last publish: the change waits for the flush owed then.
+                    Some(due) if moved && Instant::now() < due => {
+                        published.dirty = true;
+                        self.flush_at = Some(self.flush_at.map_or(due, |at| at.min(due)));
+                    }
+                    _ if moved => {
+                        for (index, topic) in level_topics.into_iter().enumerate() {
+                            if was.as_ref().is_none_or(|was| was[index] != now[index]) {
+                                client.retain(topic, now[index].clone());
+                            }
+                        }
+                        if published.levels_attributes.as_ref() != Some(&now_attributes) {
+                            client.retain(level_attrs_topic.clone(), now_attributes.clone());
+                        }
+                        published.levels_state = Some(now);
+                        published.levels_attributes = Some(now_attributes);
+                        published.levels_at = Some(Instant::now());
+                    }
+                    _ => {}
+                }
+            }
+            None if published.levels_state.is_some() => {
+                level_topics.iter().for_each(|t| client.clear(t.clone()));
+                client.clear(level_attrs_topic.clone());
+                published.levels_state = None;
+                published.levels_attributes = None;
+                published.levels_at = None;
+            }
+            None => {}
+        }
         match eq.speakers.as_ref() {
             Some(speakers) => {
                 let now = computer::speakers::state(speakers);
@@ -382,9 +461,9 @@ impl BridgeTask {
     }
 
     /// A command on one of the computer's topics: the EQ, crossfeed, speakers and loudness
-    /// switches take `ON` or `OFF`, the crossfeed preset select takes one of its options, the
-    /// loudness strength takes a number in percent. EQ ON with nothing kept to apply leaves the
-    /// EQ off. `Custom` is no command.
+    /// switches and the bypass take `ON` or `OFF`, the crossfeed preset select takes one of its
+    /// options, the loudness strength takes a number in percent. EQ ON with nothing kept to apply
+    /// leaves the EQ off. `Custom` is no command.
     pub(super) fn computer_command(&mut self, key: &str, body: &[u8]) {
         let drop = |why: &str| {
             log::warn(&format!(
@@ -402,10 +481,19 @@ impl BridgeTask {
         let set_key = key.eq_ignore_ascii_case(computer::speakers::SET_KEY);
         let ld_key = key.eq_ignore_ascii_case(computer::loudness::SWITCH_KEY);
         let strength_key = key.eq_ignore_ascii_case(computer::loudness::STRENGTH_KEY);
-        if !(eq_key || xf_key || preset_key || sp_key || set_key || ld_key || strength_key) {
+        let bypass_key = key.eq_ignore_ascii_case(computer::bypass::BYPASS_KEY);
+        if !(eq_key
+            || xf_key
+            || preset_key
+            || sp_key
+            || set_key
+            || ld_key
+            || strength_key
+            || bypass_key)
+        {
             return drop(
-                "nothing of the computer but its EQ, crossfeed, virtual speakers and loudness \
-                 takes commands",
+                "nothing of the computer but its EQ, crossfeed, virtual speakers, loudness and \
+                 bypass takes commands",
             );
         }
         let Ok(text) = std::str::from_utf8(body) else {
@@ -439,6 +527,16 @@ impl BridgeTask {
             let what = format!("turning the EQ {}", if on { "on" } else { "off" });
             self.writes
                 .spawn(async move { WriteOutcome::Computer(what, switch.set_on(on).await) });
+            return;
+        }
+        if bypass_key {
+            if eq.bypass.is_none() {
+                return drop("this computer serves no bypass");
+            }
+            let on = on.unwrap_or_default();
+            let what = format!("turning the bypass {}", if on { "on" } else { "off" });
+            self.writes
+                .spawn(async move { WriteOutcome::Computer(what, switch.bypass(on).await) });
             return;
         }
         if ld_key || strength_key {

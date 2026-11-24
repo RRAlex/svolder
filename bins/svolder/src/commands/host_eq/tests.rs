@@ -47,6 +47,7 @@ async fn a_one_shot_command_under_the_child_manager_is_refused_and_writes_nothin
         flat: false,
         crossfeed: None,
         speakers: None,
+        identity: None,
     };
     let failure = apply_once(host(), request).await.unwrap_err();
     assert_eq!(failure.code, 1);

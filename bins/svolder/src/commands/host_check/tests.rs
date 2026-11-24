@@ -4,7 +4,7 @@
 //! `svolder host check` against a stub daemon and a fake `pw-dump` printing a fixture: the words
 //! come from the judges in `svolder-ipc`, and the command prints what they say.
 
-use svolder_host::{Asound, PwDump, RouteFacts, fill_alsa, route};
+use svolder_host::{Asound, PlayerMatch, PwDump, RouteFacts, fill_alsa, route};
 use svolder_ipc::host::setup_check;
 use svolder_ipc::host::{HostView, SetupSummary, Verdict};
 
@@ -21,9 +21,14 @@ fn fixture(name: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
-/// The route the fixture `name` reads as, with no ALSA card to read.
+/// The route the fixture `name` reads as, with no ALSA card to read, as the command reads it with
+/// no `--player` (a lone stream is the assumed player's).
 fn route_of(name: &str) -> RouteFacts {
-    route(&fixture(name), None, "").expect("the fixture is a dump")
+    let mut facts = route(&fixture(name), None, "").expect("the fixture is a dump");
+    if facts.player_match == PlayerMatch::NoMpris {
+        facts.player_match = PlayerMatch::Assumed;
+    }
+    facts
 }
 
 fn globals<'a>(transport: &'a str, socket: Option<&'a str>) -> Globals<'a> {
@@ -100,6 +105,21 @@ async fn the_sample_in_the_cli_doc_is_what_the_command_prints() {
     assert_eq!(said.out.join("\n") + "\n", block);
 }
 
+/// With no daemon and no `--player` MPRIS is never looked at: a lone stream is the assumed
+/// player's (`player assumed`), never one said to have no MPRIS player.
+#[tokio::test]
+async fn a_lone_stream_with_no_daemon_and_no_player_flag_is_assumed_not_no_mpris() {
+    let home = temp_dir("host-check-lone");
+    let dump = fake_dump(&home, Some("one-stream.json"), 0);
+    let facts = own_route(Some(dump), &Asound::new(home.join("no-asound")), None)
+        .await
+        .expect("a route");
+    assert_eq!(facts.player_match, PlayerMatch::Assumed);
+    let said = lines(&facts, &[], false).join("\n");
+    assert!(said.contains("assumed"), "{said}");
+    assert!(!said.contains("no MPRIS"), "{said}");
+}
+
 async fn through_daemon(route: Option<RouteFacts>, json: bool) -> Result<Answer, Failure> {
     let daemon = stub_daemon().await;
     daemon.hosts(HostView {
@@ -149,7 +169,7 @@ async fn through_the_daemon_it_prints_the_path_and_the_seven_lines() {
 }
 
 /// `--json` is `{ sink, path: {verdict, end_to_end, words, sentence, dac}, config: {sink,
-/// outcome, summary, limit, lines} }`.
+/// outcome, summary, from_player, to_dac, limit, lines} }`.
 #[tokio::test]
 async fn json_has_the_sink_the_path_and_the_config() {
     let said = through_daemon(Some(route_of("schiit-sink.json")), true)
@@ -171,6 +191,11 @@ async fn json_has_the_sink_the_path_and_the_config() {
     assert!(value["path"]["words"].is_array());
     assert!(value["path"].as_object().unwrap().contains_key("sentence"));
     assert!(value["config"]["summary"].is_string());
+    // The two lines under the sink are the judge's words for the same route.
+    let io = svolder_ipc::setup_check(&route_of("schiit-sink.json")).io;
+    assert_eq!(value["config"]["from_player"], io.from_player);
+    assert_eq!(value["config"]["to_dac"], io.to_dac);
+    assert!(value["config"]["from_player"].is_string() && value["config"]["to_dac"].is_string());
     assert!(Verdict::KEYS.contains(&value["path"]["verdict"].as_str().unwrap()));
     assert!(SetupSummary::KEYS.contains(&value["config"]["outcome"].as_str().unwrap()));
     assert_eq!(value["config"]["limit"], svolder_ipc::host::SETUP_LIMIT);
@@ -311,8 +336,18 @@ async fn an_older_daemon_s_route_reads_as_older() {
         "{:?}",
         said.out
     );
+    // The route's lone stream is the player's (no MPRIS player is named), so `From player` reads
+    // it; `To DAC` has no card facts from an older daemon.
+    assert!(
+        said.out
+            .iter()
+            .any(|l| l.trim_start().starts_with("From player")
+                && l.ends_with("44.1 kHz · S16LE · stereo")),
+        "{:?}",
+        said.out
+    );
     let unread = said.out.iter().filter(|l| l.ends_with("not read")).count();
-    assert_eq!(unread, 7, "{:?}", said.out);
+    assert_eq!(unread, 8, "the seven lines and `To DAC`: {:?}", said.out);
 }
 
 /// With no daemon, one `pw-dump` of its own gives the same words.

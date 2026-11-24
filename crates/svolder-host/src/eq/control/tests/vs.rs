@@ -511,7 +511,17 @@ async fn the_speakers_take_no_part_of_the_preamp() {
     rig.control.speakers(spk_set("set-a")).await.unwrap();
     rig.control.speakers(spk_on()).await.unwrap();
     assert!((rig.control.view().preamp_db - before).abs() < 1e-9);
+    rig.control.speakers(spk_on()).await.unwrap_or(());
+    rig.params.set_playing(true);
+    let heard = rig.control.view().levels.unwrap().total_db;
     rig.control.speakers(spk_off()).await.unwrap();
+    // A stream plays: the sound stays where it was (the preamp falls by the set's level) and
+    // climbs back to the curve's own preamp.
+    let view = rig.control.view();
+    assert!((view.levels.unwrap().total_db - heard).abs() < 1e-9);
+    for _ in 0..80 {
+        rig.control.tick().await;
+    }
     assert!((rig.control.view().preamp_db - before).abs() < 1e-9);
 }
 
@@ -623,6 +633,7 @@ fn crashed_with_speakers_on(dir: &Dir, flat: bool) {
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     }
     .save(&dir.state())
     .unwrap();
@@ -719,7 +730,10 @@ async fn the_output_changing_turns_the_speakers_off_on_either_chain() {
     assert!(!view.on);
     assert_eq!(view.off_reason.as_deref(), Some("output-changed"));
     assert!(view.note.unwrap().contains("b (description)"));
-    assert_eq!(gain2(rig.params.sent().last().unwrap()), Some(0.0));
+    assert_eq!(
+        rig.params.sent().iter().rev().find_map(|send| gain2(send)),
+        Some(0.0)
+    );
     assert_eq!(removes(&rig.chain), 0);
     assert!(rig.control.view().on, "the EQ plays on");
     assert_eq!(keeps(&rig.chain).last().unwrap().speakers, None);
@@ -833,7 +847,9 @@ async fn above_384_khz_the_speakers_turn_off_and_are_refused() {
         "{:?}",
         view.note
     );
-    assert_eq!(gain2(rig.params.sent().last().expect("sent")), Some(0.0));
+    // The line that turned them off carried the dry mixers (climb steps after it carry none).
+    let sent = rig.params.sent();
+    assert_eq!(sent.iter().rev().find_map(|send| gain2(send)), Some(0.0));
     let refused = rig.control.speakers(spk_on()).await.unwrap_err();
     assert!(refused.what.contains("384 kHz"), "{refused:?}");
 }

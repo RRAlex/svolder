@@ -22,6 +22,9 @@
 //!   steps and holds them to the view's ranges, says what it refuses in words, a 409, and
 //!   `reference_now` takes the computer's volume as the reference). `done` as for the crossfeed; a
 //!   body that names nothing is a 409.
+//! - `api/v1/host/bypass` `{"on"}`: turn the computer's bypass on or off (`HostEqOp::Bypass`: every
+//!   stage off as one change and brought back as it was; on with nothing playing, or a restore
+//!   the daemon cannot make, is a 409 with its words; a body without `on` is a 422).
 //! - `api/v1/host/eq/preset` `{"name", "device"?, "confirm"?}`: a preset recalled on the
 //!   computer.
 //! - `api/v1/host/eq/points` `{"type", "f", "g", "q"}`: add a point; a value outside the hand
@@ -64,6 +67,7 @@ pub(super) fn routes() -> Router<Web> {
         .route("/api/v1/host/crossfeed", post(crossfeed))
         .route("/api/v1/host/speakers", post(speakers))
         .route("/api/v1/host/loudness", post(loudness))
+        .route("/api/v1/host/bypass", post(bypass))
         .route("/api/v1/host/eq/preset", post(preset))
         .route("/api/v1/host/eq/points", post(add))
         .route("/api/v1/host/eq/points/{n}", post(set))
@@ -344,6 +348,27 @@ async fn loudness(State(web): State<Web>, headers: HeaderMap, body: axum::body::
             .await
         }
         Err(refused) => *refused,
+    }
+}
+
+/// What `bypass` takes: the field of `HostEqOp::Bypass`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Bypass {
+    on: bool,
+}
+
+/// Turn the computer's bypass on or off.
+async fn bypass(State(web): State<Web>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
+    if let Err(refused) = writer(&web, &headers) {
+        return refused;
+    }
+    match serde_json::from_slice::<Bypass>(&body) {
+        Ok(asked) => eq(&web, HostEqOp::Bypass { on: asked.on }).await,
+        Err(why) => error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("the body is not what this takes: {why}"),
+        ),
     }
 }
 

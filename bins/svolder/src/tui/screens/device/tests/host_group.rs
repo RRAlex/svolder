@@ -13,7 +13,7 @@ fn the_device_screen_draws_the_host_group_and_now_playing() {
     assert_rows(
         &screen(&host_mockup_app()),
         &[
-            " svolder  Gungnir 2 · fw 3 · 0102…08  ● connected                 mouse:on 14:02",
+            " svolder  Gungnir 2 · fw 3 · 0102…08  ● connected                mouse:on 14:02 ",
             "─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─",
             "┌ Controls ─────────── mute ─ 0 centre ┐┌ Tone control ──────── flat ─ presets ┐",
             "│ ▶ Input        ‹ 3 · Optical ›       ││   Mode      ‹ EQ ›                   │",
@@ -424,6 +424,32 @@ fn the_computer_volume_row_says_muted_and_a_boost() {
     assert_eq!(
         boosted[y].chars().take(40).collect::<String>(),
         "│   Volume       ███120%████  USB DAC  │"
+    );
+}
+
+/// What the chain adds to the volume stands after the bar, `· chain −14.8 dB`, from the chain's
+/// levels, and is left out where the view has no chain.
+#[test]
+fn the_computer_volume_row_says_what_the_chain_adds() {
+    let mut app = on_the_computer(0.54, false, "USB DAC");
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq_stages(
+        crate::tui::app::Space::Speakers,
+    ));
+    let rows = text(&frame(&app, 130, 30));
+    let row = &rows[volume_row(&rows)];
+    assert!(
+        row.contains("54%") && row.contains("· chain −14.8 dB"),
+        "{row}"
+    );
+    // no chain, no words
+    app.host.computer.eq.as_mut().expect("a view").levels = Some(
+        svolder_host::eq::ChainLevels::of(false, 0.0, 0.0, 0.0, false),
+    );
+    let rows = text(&frame(&app, 130, 30));
+    assert!(
+        !rows[volume_row(&rows)].contains("chain"),
+        "{:?}",
+        rows[volume_row(&rows)]
     );
 }
 
@@ -1029,6 +1055,7 @@ pub(super) fn gungnir_route(
             rate_hz: Some(48_000),
             format: Some("S16LE".into()),
             volume_milli: Some(1000),
+            channels: Some(2),
             muted: false,
         }),
         player_match: svolder_host::PlayerMatch::Pid,

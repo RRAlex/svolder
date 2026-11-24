@@ -92,17 +92,23 @@ impl EqControl {
     /// Put a scene's computer part on the computer as one change (see the module's text). A
     /// refusal leaves everything as it was.
     pub async fn recall(&mut self, part: ComputerPart) -> Result<Recalled, EqFailure> {
+        self.rise_ok_until = self.ticks + RISE_OK_TICKS;
+        self.recall_after_flag(part).await
+    }
+
+    async fn recall_after_flag(&mut self, part: ComputerPart) -> Result<Recalled, EqFailure> {
         let result = self.recall_inner(part).await;
         if result.is_ok() {
             self.loads += 1;
         }
         // The view names the set the speakers play once the sets are read again.
         self.refresh_sets();
+        self.end_bypass_if_on();
         self.publish();
         result
     }
 
-    async fn recall_inner(&mut self, part: ComputerPart) -> Result<Recalled, EqFailure> {
+    pub(super) async fn recall_inner(&mut self, part: ComputerPart) -> Result<Recalled, EqFailure> {
         self.finish_reset().await;
         let plan = self.recall_checked(&part).await?;
         let before = self.recall_set(&part, &plan);

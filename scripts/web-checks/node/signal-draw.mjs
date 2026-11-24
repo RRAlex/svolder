@@ -295,6 +295,29 @@ ok('the_bar_says_nothing_playing_and_draws_nothing_without_a_player', () => {
   assert.equal(drawPlaying(bare), '');
 });
 
+ok('the_bar_and_the_player_screen_say_no_mpris_player_while_the_path_is_drawn', () => {
+  const page = pageOf('playing');
+  page.device.playing = { ...page.device.playing, track: null };
+  assert.match(drawPlaying(page), /No MPRIS player/);
+  assert.doesNotMatch(drawPlaying(page), /Nothing playing/);
+  const screen = playerScreen(page);
+  assert.match(screen, /No MPRIS player/);
+  assert.match(screen, /sg-pathlist/);
+  assert.match(screen, /read from its stream/);
+  // Several streams and no player: the path has no hops, nothing is read from a stream.
+  const several = pageOf('playing');
+  several.device.playing = {
+    ...several.device.playing,
+    track: null,
+    path: { ...several.device.playing.path, hops: [], words: ['no MPRIS player'] },
+  };
+  const said = playerScreen(several);
+  assert.match(said, /several sounds play, none is judged/);
+  assert.doesNotMatch(said, /read from its stream/);
+  const none = pageOf('no-player');
+  assert.doesNotMatch(playerScreen(none), /No MPRIS player/);
+});
+
 ok('the_device_opener_draws_a_dacs_first_screen_for_the_shown_device_only', () => {
   const page = pageOf('dac');
   const hop = { id: `device:${page.shown}`, kind: 'device', url: page.shown };
@@ -836,7 +859,7 @@ ok('the_player_opens_the_track_and_the_verdict', () => {
   assert.ok(words.includes('resampled 48 → 96 kHz') && words.includes('sg-verdict sg-warn'), words);
   const none = pageOf('playing');
   none.host = { ...hosted().host, track: null };
-  none.device.playing = { ...none.device.playing, track: null };
+  none.device.playing = { ...none.device.playing, track: null, path: null };
   assert.ok(playerScreen(none).includes('Nothing is playing.'));
   const paused = hosted();
   paused.host.track.status = 'paused';
@@ -1155,8 +1178,9 @@ function side({ computer = computerModel(), guest = false, route = ROUTE, chosen
   const v = { ...view, computer: core, phone: () => false };
   const hop = { id: 'computer', kind: 'computer' };
   const parts = { volume: core.volumeOf(page), tone: core.toneOf(page) };
+  const chain = { levels: core.levelsOf(page), bypass: core.bypassOf(page) };
   return {
-    page, core, view: v, parts, open: openers.computer(page, hop, v), shelf: shelves.computer(page, hop, v),
+    chain, page, core, view: v, parts, open: openers.computer(page, hop, v), shelf: shelves.computer(page, hop, v),
     inert: guest,
   };
 }
@@ -1203,6 +1227,104 @@ ok('mode_chips_are_off_and_eq', () => {
   const phone = { ...on.view, phone: () => true };
   const hop = { id: 'computer', kind: 'computer' };
   assert.ok(openers.computer(on.page, hop, phone).includes('id="sg-cmode"') && !shelves.computer(on.page, hop, phone).includes('id="sg-cmode"'));
+});
+
+const LEVELS = {
+  eq_db: -7.8, space_db: -7, total_db: -14.8, climb_to_db: null, passthrough: false, untouched: false,
+  words: 'plays −14.8 dB in all',
+};
+const HELD = { eq: false, loudness: false, crossfeed: false, speakers: false };
+/** A computer that sends the stages' levels and the bypass: EQ, loudness 60 % and speakers play. */
+const chained = (over = {}, bypass = { on: false, held: HELD }) => {
+  const base = computerModel();
+  return computerModel(SEVEN, {
+    eq: {
+      ...base.eq, loudness: { on: true, strength_pct: 60 }, crossfeed: { on: false }, speakers: { on: true },
+      levels: LEVELS, bypass, ...over,
+    },
+  });
+};
+
+ok('the_strip_names_the_stages_their_levels_and_the_daemons_total', () => {
+  const on = side({ computer: chained() });
+  // beside the mode: on a desktop the shelf's mode column, on a phone the first screen's
+  const phone = { ...on.view, phone: () => true };
+  const hop = { id: 'computer', kind: 'computer' };
+  for (const markup of [on.shelf, openers.computer(on.page, hop, phone)]) {
+    assert.ok(markup.includes('id="sg-cstrip"'), markup.slice(0, 200));
+    const strip = markup.slice(markup.indexOf('id="sg-cstrip"'));
+    const stages = tags(strip, 'button').filter((b) => b['data-act'] === 'cstage');
+    assert.deepEqual(stages.map((b) => [b['data-stage'], b.text]),
+      [['eq', 'EQ −7.8'], ['loudness', 'Loudness 60 %'], ['space', 'Space speakers −7.0']]);
+    // a stable id each (the focus survives a redraw) and a name that keeps the levels heard
+    assert.deepEqual(stages.map((b) => b.id), ['sg-cstage-eq', 'sg-cstage-loudness', 'sg-cstage-space']);
+    assert.deepEqual(stages.map((b) => b['aria-label']),
+      ['EQ −7.8: open its settings', 'Loudness 60 %: open its settings', 'Space speakers −7.0: open its settings']);
+    assert.ok(words(strip.slice(0, strip.indexOf('</div>'))).endsWith('plays −14.8 dB in all'), 'the daemon\'s total');
+  }
+  // nothing below the line says computer, the group's name included
+  const stripMarkup = on.shelf.slice(on.shelf.indexOf('id="sg-cstrip"'), on.shelf.indexOf('</p>', on.shelf.indexOf('id="sg-cstrip"')));
+  assert.ok(!/computer/i.test(stripMarkup), stripMarkup);
+  assert.ok(on.shelf.includes('aria-label="Stages of the sound"'));
+  // the strip is not drawn on a desktop's first screen (the mode is not there either)
+  assert.ok(!on.open.includes('id="sg-cstrip"'));
+});
+
+ok('the_bypass_chip_sits_beside_the_mode_chips_and_is_a_toggle', () => {
+  const off = side({ computer: chained() });
+  const chip = tags(computerMode(off.parts.tone, false, off.chain), 'button').find((b) => b['data-comp'] === 'bypass');
+  assert.equal(chip.text, 'Bypass');
+  assert.equal(chip['data-act'], 'cbypass');
+  assert.equal(chip['aria-pressed'], 'false');
+  assert.ok(classes(chip).includes('sg-chip') && !classes(chip).includes('on'));
+  // the same set holds the mode chips
+  const set = computerMode(off.parts.tone, false, off.chain);
+  assert.deepEqual(tags(set, 'button').filter((b) => b['data-act'] !== 'cstage').map((b) => b.text), ['Off', 'EQ', 'Bypass']);
+  // on: pressed and lit, and the stages read off
+  const held = { eq: true, loudness: true, crossfeed: false, speakers: true };
+  const by = side({ computer: chained({ on: false, loudness: { on: false, strength_pct: 60 }, speakers: { on: false },
+    levels: { ...LEVELS, eq_db: 0, space_db: 0, total_db: -7.6, passthrough: true, words: 'pass-through −7.6 dB until the music pauses' } },
+  { on: true, held }) });
+  const lit = tags(computerMode(by.parts.tone, false, by.chain), 'button').find((b) => b['data-comp'] === 'bypass');
+  assert.equal(lit['aria-pressed'], 'true');
+  assert.ok(classes(lit).includes('on'));
+  assert.ok(words(by.shelf).includes('EQ off · Loudness off · Space off'), words(by.shelf));
+  assert.ok(by.shelf.includes('pass-through −7.6 dB until the music pauses'));
+});
+
+ok('the_bypass_chip_is_dim_when_nothing_plays_and_disabled_for_a_guest', () => {
+  const idle = side({ computer: chained({ on: false, loudness: { on: false }, speakers: { on: false } }) });
+  const chip = tags(idle.shelf, 'button').find((b) => b['data-comp'] === 'bypass');
+  // dim, but a writer's tap goes to the daemon, which says why in its own words (no copy of them here)
+  assert.ok(classes(chip).includes('quiet'), 'dim');
+  assert.equal(chip['aria-disabled'], undefined, 'a writer may tap it');
+  assert.equal(chip.title, undefined, 'no theme copy of the refusal');
+  assert.ok(!idle.shelf.includes('nothing plays'));
+  const guest = side({ computer: chained(), guest: true });
+  const gc = tags(guest.shelf, 'button').find((b) => b['data-comp'] === 'bypass');
+  assert.equal(gc['aria-disabled'], 'true');
+  assert.ok(classes(gc).includes('quiet'));
+  // Sound is a writer's popup: a guest's stage words are plain text, not buttons
+  assert.ok(!tags(guest.shelf, 'button').some((b) => b['data-act'] === 'cstage'));
+  assert.ok(guest.shelf.includes('id="sg-cstage-eq"') && words(guest.shelf).includes('EQ −7.8'));
+});
+
+ok('the_strip_has_no_trailing_dot_when_the_daemon_has_no_words', () => {
+  const quiet = side({ computer: chained({ levels: { ...LEVELS, words: '' } }) });
+  const strip = quiet.shelf.slice(quiet.shelf.indexOf('id="sg-cstrip"'), quiet.shelf.indexOf('</p>', quiet.shelf.indexOf('id="sg-cstrip"')));
+  assert.ok(!strip.includes('sg-total'), strip);
+  assert.ok(!/<\/button><span class="sg-sep"[^>]*> · <\/span>$/.test(strip), 'no dot hangs at the end');
+  const said = side({ computer: chained() });
+  assert.ok(said.shelf.includes('<span class="sg-total">plays −14.8 dB in all</span>'));
+});
+
+ok('a_host_without_levels_or_bypass_draws_neither', () => {
+  const none = side();
+  assert.ok(!none.shelf.includes('sg-cstrip') && !none.shelf.includes('cbypass'));
+  const only = side({ computer: chained({ levels: undefined }) });
+  assert.ok(!only.shelf.includes('sg-cstrip') && only.shelf.includes('cbypass'));
+  const lone = side({ computer: chained({}, null) });
+  assert.ok(lone.shelf.includes('sg-cstrip') && !lone.shelf.includes('cbypass'));
 });
 
 ok('the_points_table_has_type_and_remove', () => {

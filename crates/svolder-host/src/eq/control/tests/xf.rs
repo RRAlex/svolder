@@ -218,9 +218,15 @@ async fn both_off_removes_the_chain_and_one_off_keeps_it() {
     assert_eq!(removes(&chain), 1);
 }
 
+async fn ticks(control: &mut EqControl, count: u64) {
+    for _ in 0..count {
+        control.tick().await;
+    }
+}
+
 #[tokio::test]
-async fn the_preamp_goes_down_before_the_stage_and_up_after_it() {
-    let (mut control, _, params) = setup(Keep::Memory);
+async fn the_preamp_goes_down_before_the_stage_and_after_it_turns_off_climbs_without_it() {
+    let (mut control, _, params) = setup_curve(Keep::Memory);
     params.set_output(Some(sink("a")));
     control.set_on(true).await.unwrap();
     // Mid/Side bass at 50 % is the worst case: +3 dB.
@@ -250,8 +256,23 @@ async fn the_preamp_goes_down_before_the_stage_and_up_after_it() {
     let names: Vec<&str> = send.iter().map(|(n, _)| n.as_str()).collect();
     let pre = names.iter().position(|n| *n == "lpre:Mult").unwrap();
     let mix = names.iter().position(|n| *n == "lmix:Gain 2").unwrap();
-    assert!(mix < pre, "the preamp rises after the stage turns off");
-    assert_eq!(pre_db(send).map(|db| db.round()), Some(0.0));
+    // The sound does not jump: the preamp stays where it was in the line that turns the stage
+    // off (falling or level, so before the stage's ports), then climbs a step a tick, each of
+    // those lines raising it with no port of the stage in it.
+    assert!(
+        pre < mix,
+        "a preamp that does not rise goes before the stage's ports"
+    );
+    assert!(
+        (pre_db(send).unwrap() + worst).abs() < 0.11,
+        "{:?} vs {worst}",
+        pre_db(send)
+    );
+    ticks(&mut control, 60).await;
+    assert_eq!(
+        pre_db(params.sent().last().unwrap()).map(|db| db.round()),
+        Some(0.0)
+    );
     assert_never_above_unity(&params.sent(), worst);
 }
 
@@ -568,6 +589,7 @@ async fn the_owner_start_turns_a_crossfeed_found_on_off() {
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     }
     .save(&dir.state())
     .unwrap();
@@ -613,6 +635,7 @@ async fn the_owner_start_removes_a_chain_that_ran_for_crossfeed_alone() {
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     }
     .save(&dir.state())
     .unwrap();
@@ -1070,6 +1093,7 @@ async fn a_container_restart_with_crossfeed_found_on_applies_the_eq_again_with_i
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     };
     state.save(&dir.state()).unwrap();
     // The container's chain died with the crash: the chain says it does not run.
@@ -1179,6 +1203,7 @@ async fn a_chain_replaced_from_outside_after_the_stage_was_sent_to_it_gets_the_s
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     });
     looks(&mut control, 1).await;
     assert!(!control.view().crossfeed.unwrap().on);
@@ -1265,6 +1290,7 @@ async fn a_stage_the_running_config_holds_with_crossfeed_off_is_paid_for_and_tak
         speakers_on: false,
         speakers_loaded: None,
         loudness: None,
+        bypass: None,
     }
     .save(&dir.state())
     .unwrap();
@@ -1327,6 +1353,7 @@ async fn an_adopted_config_stage_is_paid_for_at_any_rate_it_was_worked_out_at() 
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     }
     .save(&dir.state())
     .unwrap();
@@ -1487,6 +1514,7 @@ async fn a_state_adopted_over_a_stage_sent_to_the_node_says_the_stage_may_still_
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     });
     assert!(
         control.owed.as_ref().is_some_and(|owed| owed.plays),
@@ -1552,6 +1580,35 @@ async fn a_stage_send_is_repeated_once_a_second_later_and_no_more() {
     // And that repeat is not repeated.
     looks(&mut control, 5).await;
     assert_eq!(params.sent().len(), first + 1, "no endless repeats");
+}
+
+#[tokio::test]
+async fn a_line_without_the_stage_keeps_a_repeat_a_second_after_it() {
+    let (mut control, _, params) = both_on().await;
+    // Part of the way to the stage's repeat, a line without the stage goes out.
+    for _ in 0..WATCH_EVERY / 2 {
+        control.tick().await;
+    }
+    control.edit(gain(0, 3.0, true)).await.unwrap();
+    let line_at = control.ticks;
+    // The stage's repeat falls due on its own deadline, under a second after that line.
+    while control.ticks < line_at + WATCH_EVERY / 2 {
+        control.tick().await;
+    }
+    let after_stage_repeat = params.sent().len();
+    // One more goes a full second after the line, in case PipeWire dropped the line.
+    while control.ticks <= line_at + WATCH_EVERY {
+        control.tick().await;
+    }
+    assert!(
+        params.sent().len() > after_stage_repeat,
+        "no repeat a second after the line"
+    );
+    let settled = params.sent().len();
+    for _ in 0..3 * WATCH_EVERY {
+        control.tick().await;
+    }
+    assert_eq!(params.sent().len(), settled, "no endless repeats");
 }
 
 fn value_of(sent: &[(String, f64)], name: &str) -> Option<f64> {

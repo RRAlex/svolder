@@ -75,6 +75,7 @@ function findComputer(target) {
     case 'volume': return document.querySelector('sv-knob[data-computer] svg.dial');
     case 'mute': return document.querySelector('sv-knob[data-computer] .mute');
     case 'mode': return document.querySelector('#part-tone .opt[data-comp="mode"][data-mode="eq"]');
+    case 'bypass': return document.querySelector('#part-tone [data-comp="bypass"]');
     case 'add': return document.querySelector('#part-tone [data-comp="add"]');
     case 'remove': return document.querySelector(`${row()} [data-comp="remove"]`);
     case 'preset': return document.querySelector(`#part-presets .pre[data-name="${q(target.name)}"]`);
@@ -249,6 +250,8 @@ async function operateComputer(target, change) {
     }
   } else if (computer === 'mute') {
     if (!('on' in change) || element.getAttribute('aria-pressed') !== String(change.on)) press(element);
+  } else if (computer === 'bypass') {
+    if (!('on' in change) || element.getAttribute('aria-pressed') !== String(change.on)) press(element);
   } else if (computer === 'mode') {
     const want = 'on' in change ? (change.on ? 'eq' : 'off') : 'eq';
     press(document.querySelector(`#part-tone .opt[data-comp="mode"][data-mode="${want}"]`));
@@ -281,6 +284,7 @@ function shownComputer(target, element) {
     case 'mute': return element.textContent.trim();
     case 'mode': return element.parentElement.parentElement.querySelector('[aria-pressed="true"]')?.textContent ?? null;
     case 'add': case 'remove': return element.textContent.trim();
+    case 'bypass': return element.getAttribute('aria-pressed') === 'true' ? 'on' : 'off';
     case 'preset': return element.dataset.name;
     default: return element.matches('select') ? element.value : element.textContent.trim();
   }

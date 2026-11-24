@@ -11,13 +11,13 @@ use svolder_profiles::{
 
 use super::{
     MINUS, PANEL_VERSION, PanelActions, PanelChoice, PanelChoices, PanelComputerEq, PanelDevice,
-    PanelHop, PanelLabelTone, PanelPath, PanelScenes, PanelSegment, PanelSignal, PanelTone,
-    PanelView, PanelVolume, number_text,
+    PanelHop, PanelLabelTone, PanelPath, PanelRest, PanelScenes, PanelSegment, PanelSignal,
+    PanelSwitch, PanelTone, PanelView, PanelVolume, number_text,
 };
 use crate::host::SetupSummary;
 use crate::host::{
-    DacFacts, DacStage, HostView, PathLine, PathRow, Tone, khz, path_line, path_row, setup_check,
-    sink_is_dac,
+    DacFacts, DacStage, HostView, IoLines, PathLine, PathRow, RowHop, Tone, khz, path_line,
+    path_row, setup_check, sink_is_dac,
 };
 use crate::socket::protocol::{ScenesView, ValueObject};
 use crate::socket::signal::Signal;
@@ -275,6 +275,33 @@ fn computer_eq(input: &PanelInput<'_>) -> Option<PanelComputerEq> {
         choices: names
             .map(|name| choice(&name, &["host", "eq", "preset", "--", &name]))
             .collect(),
+        level: eq
+            .levels
+            .as_ref()
+            .map(|levels| levels.words.clone())
+            .filter(|words| !words.is_empty()),
+        switch: computer_switch(eq),
+    })
+}
+
+/// The Computer EQ row's switch: on while any stage plays, flipped by `host bypass on` (a stage
+/// plays), `host bypass off` (the bypass holds a set) or else `host eq on`. `None` from a daemon
+/// that has no bypass.
+fn computer_switch(eq: &svolder_host::eq::EqView) -> Option<PanelSwitch> {
+    let bypass = eq.bypass.as_ref()?;
+    let plays = eq.on
+        || eq.loudness.as_ref().is_some_and(|stage| stage.on)
+        || eq.crossfeed.as_ref().is_some_and(|stage| stage.on)
+        || eq.speakers.as_ref().is_some_and(|stage| stage.on);
+    let args: &[&str] = match (bypass.on, plays) {
+        (true, _) => &["host", "bypass", "off"],
+        (false, true) => &["host", "bypass", "on"],
+        (false, false) => &["host", "eq", "on"],
+    };
+    Some(PanelSwitch {
+        on: plays && !bypass.on,
+        args: args.iter().map(|arg| (*arg).to_string()).collect(),
+        name: "The computer changes the sound, on or off".to_string(),
     })
 }
 
@@ -299,23 +326,51 @@ fn path(input: &PanelInput<'_>, profile: &Profile, facts: &DacFacts) -> Option<P
         (Some(SetupSummary::Changes(fails)), false) => Some(fails),
         _ => None,
     };
+    let off = off_words(&row, fails);
+    let tone = match row.label.tone {
+        Tone::Good => PanelLabelTone::Good,
+        Tone::Warn => PanelLabelTone::Warn,
+        Tone::Plain | Tone::Dim => PanelLabelTone::Plain,
+    };
     Some(PanelPath {
         end_to_end: line.end_to_end().key().to_string(),
-        tone: match row.label.tone {
-            Tone::Good => PanelLabelTone::Good,
-            Tone::Warn => PanelLabelTone::Warn,
-            Tone::Plain | Tone::Dim => PanelLabelTone::Plain,
-        },
+        tone,
         label: row.label.words.clone(),
-        segments: segments(&line),
-        off: off_words(&row, fails),
+        segments: segments(&line, &row, &off, check.as_ref().map(|c| &c.io)),
+        rest: rest(tone, &off),
+        off,
     })
 }
 
-/// The three segments: each hop's tone, or grey for all three when the sound does not go
-/// through the path (another sink or input, no route).
-fn segments(line: &PathLine) -> Vec<PanelSegment> {
+/// The line at rest beside the strip: the good words for a path untouched end to end, else what
+/// is off, else nothing.
+fn rest(tone: PanelLabelTone, off: &str) -> PanelRest {
+    match (tone, off.is_empty()) {
+        (PanelLabelTone::Good, _) => PanelRest {
+            text: "untouched end to end".to_string(),
+            tone: PanelLabelTone::Good,
+        },
+        (_, false) => PanelRest {
+            text: off.to_string(),
+            tone: PanelLabelTone::Warn,
+        },
+        (_, true) => PanelRest {
+            text: String::new(),
+            tone: PanelLabelTone::Plain,
+        },
+    }
+}
+
+/// The player segment's name for a sound with no MPRIS player behind it.
+const NO_MPRIS_NAME: &str = "Player (no MPRIS)";
+
+/// The three segments: each hop's tone and status line (the DAC's ending with the words of what
+/// the card is open at, from `io`), or grey for all three (each with the `off` words) when the
+/// sound does not go through the path (another sink or input, no route).
+fn segments(line: &PathLine, row: &PathRow, off: &str, io: Option<&IoLines>) -> Vec<PanelSegment> {
     let hops = [PanelHop::Player, PanelHop::Computer, PanelHop::Dac];
+    let names = ["Player", "Computer", "DAC"];
+    let keys = ["player", "computer", "dac"];
     hops.iter()
         .enumerate()
         .map(|(at, hop)| {
@@ -326,14 +381,52 @@ fn segments(line: &PathLine) -> Vec<PanelSegment> {
                 Some(_) => PanelTone::Good,
                 None => PanelTone::Unknown,
             };
-            PanelSegment { hop: *hop, tone }
+            let words = if line.hops.len() != 3 {
+                off.to_string()
+            } else {
+                let changing = row.changes.iter().find(|c| c.key == keys[at]);
+                let status = match (changing, tone) {
+                    (Some(hop), _) => hop_words(hop),
+                    (None, PanelTone::Good) => "untouched".to_string(),
+                    (None, PanelTone::Unknown) => "not read".to_string(),
+                    (None, PanelTone::Warn) => "changes the sound".to_string(),
+                };
+                let name = match line.hops.get(at) {
+                    Some(h) if h.unnamed => NO_MPRIS_NAME,
+                    _ => names[at],
+                };
+                // The DAC's words end with what the card is open at, or `not open` when it is
+                // closed.
+                let open = match (hop, io) {
+                    (PanelHop::Dac, Some(io)) if !io.to_dac_short.is_empty() => {
+                        format!(" \u{b7} {}", io.to_dac_short)
+                    }
+                    _ => String::new(),
+                };
+                minus_signs(&format!("{name}: {status}{open}"))
+            };
+            PanelSegment {
+                hop: *hop,
+                tone,
+                words,
+            }
         })
         .collect()
 }
 
-/// The words for what is off: each hop's changes grouped under its name (`DAC: volume −24.1 dB
-/// · tone control`), groups joined by `; `, then `config N` for a failing config check. Empty
-/// for a path untouched end to end.
+/// A changing hop's Warn words joined ` · `.
+fn hop_words(hop: &RowHop) -> String {
+    hop.words
+        .iter()
+        .filter(|word| word.tone == Tone::Warn)
+        .map(|word| word.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" \u{b7} ")
+}
+
+/// The words for what is off: each changing hop's words grouped under its name (`DAC: volume
+/// −24.1 dB · tone control`), groups joined by `; `, then `config N` for a failing config check.
+/// Empty for a path untouched end to end.
 fn off_words(row: &PathRow, config_fails: Option<u32>) -> String {
     // A path with no hops (another sink, another input, no route) has no changes to name: the
     // row's own short words are what the user is told.
@@ -341,34 +434,15 @@ fn off_words(row: &PathRow, config_fails: Option<u32>) -> String {
         return minus_signs(row.words.as_deref().unwrap_or_default());
     }
     let names = ["Player", "Computer", "DAC"];
-    // The row puts `config N` last of its values when the check fails.
-    let values = match config_fails {
-        Some(_) => &row.values[..row.values.len().saturating_sub(1)],
-        None => &row.values[..],
-    };
+    let keys = ["player", "computer", "dac"];
     let mut groups: Vec<String> = Vec::new();
-    for (at, name) in names.iter().enumerate() {
-        let mut words: Vec<&str> = row
-            .hops
-            .get(at)
-            .map(|hop| {
-                hop.words
-                    .iter()
-                    .filter(|word| word.tone == Tone::Warn)
-                    .map(|word| word.text.as_str())
-                    .collect()
-            })
-            .unwrap_or_default();
-        if at == 2 {
-            words.extend(
-                values
-                    .iter()
-                    .filter(|word| word.tone == Tone::Warn)
-                    .map(|word| word.text.as_str()),
-            );
-        }
-        if !words.is_empty() {
-            groups.push(format!("{name}: {}", words.join(" \u{b7} ")));
+    for (name, key) in names.iter().zip(keys) {
+        if let Some(hop) = row.changes.iter().find(|c| c.key == key) {
+            let name = match hop.label.as_str() {
+                crate::host::NO_MPRIS_HOP => NO_MPRIS_NAME,
+                _ => name,
+            };
+            groups.push(format!("{name}: {}", hop_words(hop)));
         }
     }
     groups.extend(config_fails.map(|fails| format!("config {fails}")));

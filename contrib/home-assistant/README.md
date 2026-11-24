@@ -98,9 +98,15 @@ one that is on, or `custom`; the text saves the current settings under the name 
 a scene already has is refused (the select's `saved` attribute carries the words). The scenes are
 there with or without a host EQ, and are recall and save only: rename and delete stay in the TUI,
 the web page and `svolder scene`. A recall that would play one preset twice (on a DAC and on the
-computer) is a question a select cannot answer: nothing changes and the select's `outcome`
-attribute carries the daemon's question (any refused recall carries the daemon's words the same
-way), so use the TUI or `svolder scene load` for those. Nothing else of the computer is exposed.
+computer) is a question a select cannot answer: nothing changes and the select's `outcome` attribute
+carries the daemon's question (any refused recall carries the daemon's words the same way), so use
+the TUI or `svolder scene load` for those. The same device carries the bypass and the levels while
+the daemon serves them: `switch.reframe_bypass` (a `binary_sensor` while `commands` is off; on means
+every stage is off, and a turn off brings back the ones that played) and three `sensor`s in dB with
+one decimal, `sensor.reframe_chain_level` (the whole chain), `sensor.reframe_eq_level` and
+`sensor.reframe_space_level`. The bypass goes through the daemon like the other computer switches: a
+retained command is never acted on, and a refusal is in the daemon's log with its words. Nothing
+else of the computer is exposed.
 Every DAC the daemon serves is `via_device` of it, and two computers on one broker are two devices.
 
 ## 4. The theme
@@ -158,12 +164,12 @@ that card as "Entity not found": delete it too.
 `dashboard.yaml` is one DAC by hand. The strategy builds the whole dashboard itself: it reads Home
 Assistant's device and entity registries, finds every svolder computer and every svolder device, and
 makes one page (view) per computer, in name order, titled with the computer's host name. A page
-holds the computer's section (its EQ, loudness, crossfeed, virtual speakers, path and config
-sensors, and the scene select and save field when the daemon has scenes), then one section per DAC
-or amplifier that computer serves, drawn with svolder's own cards (below). Every entity of a
-device the cards do not show is listed in a plain entities card after them,
-and the diagnostic ones in a card of their own last, so nothing is hidden. It only reads: it calls
-no service; hidden entities are left out, as in Home Assistant's own generated dashboards. An older
+holds the computer's section (its EQ, loudness, crossfeed, virtual speakers, bypass, levels, path
+and config sensors, and the scene select and save field when the daemon has scenes), then one
+section per DAC or amplifier that computer serves, drawn with svolder's own cards (below). Every
+entity of a device the cards do not show is listed in a plain entities card after them, and the
+diagnostic ones in a card of their own last, so nothing is hidden. It only reads: it calls no
+service; hidden entities are left out, as in Home Assistant's own generated dashboards. An older
 daemon (one device, "This computer") gets one page without the scene card.
 
 Written against Home Assistant 2026.10 (the strategy API and the `customStrategies` fields are
@@ -210,7 +216,8 @@ by hand (the card picker lists them; each has a stub config):
   Preset...), the band boxes on one line (frequency over gain) and the selected band's Q in the
   readout line, the preamp and the loudness.
 - `custom:svolder-chain-card`: the computer's chain as four numbered modules (EQ, Loudness,
-  Crossfeed, Speakers), each with its switch, one setting and a word of why.
+  Crossfeed, Speakers), each with its switch, one setting and a word of why, under a line with
+  the daemon's words for the chain ("plays −14.8 dB in all", nothing while no chain runs) and the Bypass key (each only while its entity exists).
 - `custom:svolder-scenes-card`: one row per scene (a lamp on the scene that is on, the parts every
   scene holds as chips in one column, a part only some scenes hold under its row), a "Save
   current as..." field, and the answer to what the card sent ("Movie recalled. Hall skipped: not

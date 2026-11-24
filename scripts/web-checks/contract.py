@@ -55,7 +55,8 @@ CORE_DRAG = ['AXIS_HOLD_PX', 'BAND_PARAM', 'LABEL_GAP_PX', 'POINT_KEYS', 'POINT_
 CORE_CURVE = ['F_MAX', 'F_MIN', 'PEAK_SHOWN_DB', 'POINTS', 'RANGE_DB', 'VIEW_HEIGHT', 'VIEW_WIDTH',
               'clippingPeak', 'dbAt', 'hzAt', 'linePath', 'logFreqs', 'markerPoint', 'peakDb',
               'peakWords', 'responseDb', 'xOf', 'yOf']
-CORE_COMPUTER = ['addAt', 'drawable', 'eqOf', 'flip', 'kept', 'nextFree', 'on', 'pick', 'picked',
+CORE_COMPUTER = ['addAt', 'bypassOf', 'drawable', 'eqOf', 'flip', 'kept', 'levelsOf', 'nextFree',
+                 'on', 'pick', 'picked',
                  'repick', 'resync', 'side', 'switchOf', 'tone', 'toneOf', 'track', 'view',
                  'volumeOf']
 CORE_ACTIONS = ['applySetting', 'autoEqImport', 'autoEqPreview', 'autoEqSearch', 'autoEqUpload',
@@ -67,8 +68,8 @@ CORE_ACTIONS = ['applySetting', 'autoEqImport', 'autoEqPreview', 'autoEqSearch',
 CORE_ACTIONS_COMPUTER = ['addNext', 'addPoint', 'cell', 'crossfeedAsked', 'current', 'deletePreset',
                          'loudnessAsked', 'nudge', 'onCrossfeedRefusal', 'onLoudnessRefusal',
                          'onSpeakersRefusal', 'recallPreset', 'removePoint',
-                         'renamePreset', 'resyncSpeakers', 'savePreset', 'setComputerLoudness', 'setCrossfeed',
-                         'setMode', 'setMute',
+                         'renamePreset', 'resyncSpeakers', 'savePreset', 'setBypass',
+                         'setComputerLoudness', 'setCrossfeed', 'setMode', 'setMute',
                          'setPoint', 'setSpeakers', 'setVolume', 'speakersAsked', 'speakersCatalogue',
                          'speakersFetch', 'speakersForget', 'speakersImport', 'step', 'stepPoint',
                          'toggleMute']

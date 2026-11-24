@@ -101,7 +101,7 @@ fn the_points_pane_has_type_freq_gain_q() {
     let mut app = computer_app();
     app.key(KeyEvent::from(KeyCode::Char('C')));
     let rows = rows_of(&app, 120, 30);
-    for word in ["Points · computer", "3 of 16", "#  Type  Freq", "Gain", "Q"] {
+    for word in ["EQ · ", "3 of 16 points", "#  Type  Freq", "Gain", "Q"] {
         assert!(holds(&rows, word), "{word}: {rows:?}");
     }
     for kind in ["PK", "LSC", "HSC"] {
@@ -121,11 +121,11 @@ fn sixteen_points_scroll_with_the_selection_in_view() {
     app.host.computer.eq = Some(crate::tui::test_support::computer_eq(true, &sixteen));
     app.key(KeyEvent::from(KeyCode::Char('C')));
     let top = rows_of(&app, 120, 30);
-    assert!(holds(&top, "↓ more") && !holds(&top, "↑ more"), "{top:?}");
+    assert!(holds(&top, "more ↓") && !holds(&top, "more ↑"), "{top:?}");
     assert!(holds(&top, "16 of 16"));
     app.focus_point(15);
     let bottom = rows_of(&app, 120, 30);
-    assert!(holds(&bottom, "↑ more") && !holds(&bottom, "↓ more"));
+    assert!(holds(&bottom, "more ↑") && !holds(&bottom, "more ↓"));
     assert!(
         bottom
             .iter()
@@ -559,7 +559,7 @@ fn the_mode_arrows_keep_their_hits_when_the_chain_is_not_verified() {
 #[test]
 fn the_space_and_crossfeed_rows_are_styled_as_the_target_choice() {
     use crate::tui::app::Xf;
-    use crate::tui::test_support::{choice_styles, computer_eq_with_speakers, style_at, style_of};
+    use crate::tui::test_support::{computer_eq_with_speakers, style_at, style_of};
     for mono in [false, true] {
         let theme = Theme::new(mono);
         let mut app = computer_app();
@@ -578,35 +578,23 @@ fn the_space_and_crossfeed_rows_are_styled_as_the_target_choice() {
                 style_at(&buffer, "Target ‹ ", "Target", 6),
             ]
         };
-        // (folded, the Space row is one dim line, not a choice, until the keys are on it)
+        // Target's own styles, then the Plays row's with the keys on it: the label and the word
+        // in force take the selected role, as the Target switch's do
         app.tone.row = ToneRow::Target;
         let keys = target(&app);
         app.focus_crossfeed(Xf::Space);
         let buffer = shot(&app);
-        let space = choice_styles(&buffer, "Space", ("Space", "Off", "Crossfeed"));
-        assert_eq!(space[..4], keys[..], "mono={mono} Space keys on");
-        // the list's own chosen word (the second `Off`) is boxed alike, the rest of the row plain
-        let line = text(&buffer)
-            .into_iter()
-            .find(|row| row.contains("Space"))
-            .expect("the Space row");
-        let list = line.find("Off ·").expect("the list");
-        let x = u16::try_from(line[..list].chars().count()).expect("a column");
-        let y = text(&buffer)
-            .iter()
-            .position(|row| row == &line)
-            .and_then(|y| u16::try_from(y).ok())
-            .expect("a row");
-        let cell = buffer.cell((x, y)).expect("a cell");
+        let plays = style_of(&buffer, "Plays", "Plays");
+        assert_eq!(plays, keys[2], "mono={mono} Plays label");
         assert_eq!(
-            (cell.fg, cell.bg, cell.modifier),
-            keys[0],
-            "mono={mono} list"
+            style_at(&buffer, "Plays", "Plays", 5),
+            keys[3],
+            "mono={mono} the blanks after the label stay plain"
         );
-        let virtual_speakers = style_of(&buffer, "Space", "Virtual speakers");
-        assert_eq!(virtual_speakers, keys[1], "mono={mono} the unchosen words");
+        let unchosen = style_of(&buffer, "Plays", "Virtual speakers");
+        assert_eq!(unchosen, keys[1], "mono={mono} the unchosen words");
 
-        // the Crossfeed row, on, unfolded while the keys are on it
+        // the Preset row of crossfeed, on: the word `←→` move is boxed, the label as Target's
         let mut app = computer_app();
         app.host.computer.eq = Some(crate::tui::test_support::computer_eq_with_crossfeed(
             true, "bauer", None,
@@ -617,26 +605,18 @@ fn the_space_and_crossfeed_rows_are_styled_as_the_target_choice() {
         let keys = target(&app);
         app.focus_crossfeed(Xf::Preset);
         let buffer = shot(&app);
-        let row = "Crossfeed on";
-        // the box sits on what `←→` move: the label and the preset's name, not on/off or the model
+        let row = "Preset     \u{2039}";
         assert_eq!(
             style_of(&buffer, row, "bs2b default"),
             keys[0],
             "mono={mono} preset"
         );
-        let on = style_of(&buffer, row, "on");
-        assert!(!on.2.contains(Modifier::REVERSED), "{on:?}");
         assert_eq!(
-            style_of(&buffer, row, "Crossfeed"),
+            style_of(&buffer, row, "Preset"),
             keys[2],
             "mono={mono} label"
         );
-        assert_eq!(
-            style_at(&buffer, row, "Crossfeed", 9),
-            keys[3],
-            "mono={mono} pad"
-        );
-        let model = style_of(&buffer, row, "Bauer");
+        let model = style_of(&buffer, "Model      \u{2039}", "Bauer");
         assert!(!model.2.contains(Modifier::REVERSED), "{model:?}");
     }
 }

@@ -77,7 +77,10 @@ async fn crossfeed_off_with_a_stream_playing_keeps_the_chain_flat_and_removes_it
     let view = control.view();
     assert!(!view.on && !view.crossfeed.as_ref().unwrap().on);
     assert_eq!(view.note.as_deref(), Some(PASSTHROUGH_NOTE));
-    assert_eq!(view.preamp_db, 0.0);
+    // The preamp climbs from the stage's cost to 0 dB.
+    assert!(view.preamp_db <= 0.0);
+    ticks(&mut control, 20).await;
+    assert_eq!(control.view().preamp_db, 0.0);
 
     // Playing: the chain stays past the idle time.
     ticks(&mut control, 700).await;
@@ -86,9 +89,9 @@ async fn crossfeed_off_with_a_stream_playing_keeps_the_chain_flat_and_removes_it
 
     // Idle: it goes once, after the idle time and not before.
     params.set_playing(false);
-    ticks(&mut control, 500).await;
-    assert_eq!(removed(&chain), 0, "not before about 30 s");
-    ticks(&mut control, 200).await;
+    ticks(&mut control, 40).await;
+    assert_eq!(removed(&chain), 0, "not before about 3 s");
+    ticks(&mut control, 80).await;
     assert_eq!(removed(&chain), 1);
     assert_eq!(control.view().note, None);
     assert!(!chain.state().unwrap().on);
@@ -179,17 +182,17 @@ async fn a_second_off_in_the_grace_keeps_the_chain_and_the_timer() {
     control.crossfeed(xf(false)).await.unwrap();
     // The stream ends at once, so the idle time counts from the first off.
     params.set_playing(false);
-    ticks(&mut control, 300).await;
+    ticks(&mut control, 30).await;
     // An off sent again (a switch that repeats, a double toggle) changes nothing: the chain
     // stays, and the timer is not restarted.
     control.set_on(false).await.unwrap();
     control.crossfeed(xf(false)).await.unwrap();
     assert_eq!(removed(&chain), 0);
-    ticks(&mut control, 350).await;
+    ticks(&mut control, 60).await;
     assert_eq!(
         removed(&chain),
         1,
-        "gone 30 s after the first off, not after the second"
+        "gone 3 s after the first off, not after the second"
     );
 }
 
@@ -266,7 +269,7 @@ async fn an_owner_that_starts_with_the_pass_through_gone_applies_nothing() {
 
 #[tokio::test]
 async fn a_pass_through_over_a_boosted_preset_plays_under_the_preamp_that_preset_needs() {
-    let (mut control, chain, params) = setup(Keep::Memory);
+    let (mut control, chain, params) = setup_curve(Keep::Memory);
     control
         .load(
             "Boost".into(),
@@ -400,4 +403,27 @@ async fn crossfeed_alone_saves_kept_points_with_the_preamp_they_played_at() {
         "the saved preamp is a curve's, not the floor: {}",
         state.preamp_db
     );
+}
+
+#[tokio::test]
+async fn a_stream_that_pauses_two_seconds_keeps_the_pass_through_and_three_seconds_remove_it() {
+    let (mut control, chain, params) = flat_playing().await;
+    control.crossfeed(xf(false)).await.unwrap();
+    assert_eq!(removed(&chain), 0);
+    // Stopping two seconds out of every ten (a seek, a track change, a cork) never removes it.
+    for _ in 0..4 {
+        ticks(&mut control, 160).await;
+        params.set_playing(false);
+        ticks(&mut control, 40).await;
+        params.set_playing(true);
+    }
+    assert_eq!(removed(&chain), 0, "a gap of two seconds keeps the chain");
+    // Three consecutive looks that find nothing playing (a look a second) remove it: the last
+    // look that saw a stream was at most a second before the pause, so within 4 s of it.
+    ticks(&mut control, 40).await;
+    params.set_playing(false);
+    ticks(&mut control, 40).await;
+    assert_eq!(removed(&chain), 0, "not after two seconds");
+    ticks(&mut control, 60).await;
+    assert_eq!(removed(&chain), 1, "gone after three seconds and a look");
 }

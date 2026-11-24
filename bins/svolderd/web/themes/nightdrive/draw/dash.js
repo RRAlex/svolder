@@ -60,6 +60,18 @@ function eqKey(page, comp, inert) {
   });
 }
 
+/** The Bypass key beside the EQ key: pressed while the bypass is on, dim while nothing plays and nothing is held (a
+ * writer's press still goes to the daemon, which says why in its own words), disabled for a viewer who may not
+ * write. `bypass` is the core's `computer.bypassOf`; none, none drawn. */
+function bypassKey(bypass, comp, inert) {
+  if (!bypass || comp?.side !== 'computer') return '';
+  return key('bypass', DASH.bypass, {
+    inert,
+    cls: `cy${bypass.on ? ' on' : ''}${!bypass.can && !inert ? ' quiet' : ''}`,
+    attrs: ` id="nd-bypass-key" data-comp="bypass" aria-pressed="${bypass.on}" aria-label="${DASH.bypassLabel(bypass.on)}"`,
+  });
+}
+
 /** The input: its options as chips (up to `CHIPS_MAX`) or the current one as a chip that opens a
  * list; nothing for a device with no input choice. */
 function inputChips(device, inert) {
@@ -130,7 +142,7 @@ export const timeWordsOf = (prog) => `${timeWords(prog.elapsed)}${prog.length ? 
 function trackMarkup(p, localMs) {
   if (!p) return '<div class="nd-track" id="nd-track"></div>';
   const track = p.track;
-  if (!track) return `<div class="nd-track" id="nd-track"><b class="nd-title">${esc(DASH.nothing)}</b></div>`;
+  if (!track) return `<div class="nd-track" id="nd-track"><b class="nd-title">${esc(p.path ? DASH.noMpris : DASH.nothing)}</b></div>`;
   const prog = progressOf(p, track, localMs);
   const at = prog ? fraction(prog.elapsed, prog.length) : 0;
   const words = [track.artist, track.album].filter(Boolean).map(esc);
@@ -171,9 +183,10 @@ function transport(status, inert) {
 /**
  * The dash for `page` at the browser's `localMs`. With the computer as the side shown (`comp`, the core's `computer.view()`) its
  * volume keys stand where the device's would. The sheet's key is always there; the player's
- * transport only when the player has buttons to give (a guest is not given them).
+ * transport only when the player has buttons to give (a guest is not given them). `bypass` (the core's `computer.bypassOf`)
+ * puts the Bypass key by the EQ key while the computer is shown.
  */
-export function drawDash(page, view, localMs = Date.now(), comp = null) {
+export function drawDash(page, view, localMs = Date.now(), comp = null, bypass = null) {
   const device = page?.device ?? null;
   const inert = inertOf(page);
   const onComputer = comp?.side === 'computer';
@@ -182,6 +195,7 @@ export function drawDash(page, view, localMs = Date.now(), comp = null) {
   const volume = onComputer ? { mute: true, muted: comp.volume.muted } : device?.volume;
   const left = volumeKeys(volume, inert || (onComputer && comp.volume.inert))
     + eqKey(page, comp, inert)
+    + bypassKey(bypass, comp, inert)
     + (amp ? ampGauges(device, inert) : inputChips(device, inert));
   const right = (p?.buttons ? transport(p.track?.status, inert) : '')
     + key('sheet', DASH.device, { inert: false, cls: 'cy', attrs: ` id="nd-sheet" aria-haspopup="dialog" aria-label="${DASH.deviceLabel}"` });

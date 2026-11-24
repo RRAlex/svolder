@@ -44,3 +44,22 @@ fn usage_md_shows_the_target_and_the_side_pane_this_build_draws() {
         .collect();
     assert_usage_md_shows(&pane, "tone-control screen's side pane");
 }
+
+/// docs/usage/tui.md shows the computer side's strip and panels, byte for byte what this build
+/// draws at 80×24 with the stages the mockups hold: the whole screen with the EQ open, and the
+/// strip with each other panel under it (rows 12 to 23).
+#[test]
+fn usage_md_shows_the_computers_stages_this_build_draws() {
+    use crate::tui::app::{Space, Stage};
+    use crate::tui::test_support::assert_usage_md_shows_trimmed;
+
+    let draw = |app: &App| rows_of(app, 80, 24);
+    let eq = draw(&super::stages::stages_app(Space::Speakers, Stage::Eq));
+    assert_usage_md_shows_trimmed(&eq[..23], "computer side with the EQ panel");
+    let loudness = draw(&super::stages::stages_app(Space::Speakers, Stage::Loudness));
+    assert_usage_md_shows_trimmed(&loudness[11..23], "Loudness panel");
+    let space = draw(&super::stages::stages_app(Space::Crossfeed, Stage::Space));
+    assert_usage_md_shows_trimmed(&space[11..23], "Space panel");
+    let bypass = draw(&super::stages::bypassed_app());
+    assert_usage_md_shows_trimmed(&bypass[11..23], "Bypass panel");
+}

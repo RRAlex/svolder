@@ -1,5 +1,5 @@
 === 80 columns
- svolder  Gungnir 2  ● connected                                       mouse:on 
+ svolder  Gungnir 2  ● connected                                      mouse:on  
 ─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─
 ┌ Settings ─ tab→ ─ ¹Look ─ ²Effects ─ ³Behaviour ─ ⁴Host audio ─┤ ⁵Connect ├──┐
 │   Web UI             …                    │                                  │
@@ -25,7 +25,7 @@
 └ ~/.config/svolder/config.toml ──────────────────────────────────── esc close ┘
 === 120 columns
  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀                                                                                         
- ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    Gungnir 2  ● connected                                                        mouse:on 
+ ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    Gungnir 2  ● connected                                                       mouse:on  
 ─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────────────────────────────────────────────── ? help ─ esc menu ─
 ┌ Settings ─ tab→ ─ ¹Look ─ ²Effects ─ ³Behaviour ─ ⁴Host audio ─┤ ⁵Connect ├──────────────────────────────────────────┐
 │   Web UI             …                    │                                                                          │

@@ -45,6 +45,7 @@ fn route(product: &str) -> RouteFacts {
             rate_hz: Some(48_000),
             format: Some("S16LE".into()),
             volume_milli: Some(1000),
+            channels: Some(2),
             muted: false,
         }),
         player_match: PlayerMatch::Pid,
@@ -125,7 +126,10 @@ fn an_unavailable_host_has_no_card() {
 /// who may write) the buttons the page does not draw without a track.
 #[test]
 fn no_player_is_a_card_without_a_track() {
-    let card = card_on(&host(None, Some(route("Schiit Gungnir 2"))), None, OPEN).expect("a card");
+    let mut idle = route("Schiit Gungnir 2");
+    idle.player = None;
+    idle.player_match = PlayerMatch::NoPlayer;
+    let card = card_on(&host(None, Some(idle)), None, OPEN).expect("a card");
     assert!(card.track.is_none());
     assert!(card.path.is_none());
 }
@@ -550,6 +554,48 @@ fn a_dac_with_no_input_control_reads_untouched_on_the_page() {
     );
 }
 
+/// With no MPRIS player the card still has a path while a sound plays into the sink: the stream
+/// is judged and the player hop says it is not an MPRIS player; with nothing playing it has none.
+#[test]
+fn a_card_with_no_mpris_player_has_a_path_while_a_stream_plays() {
+    let p = profile_named("eitr2");
+    let name = info("Eitr 2");
+    let readings = [read(&p, "sample_rate", "2")];
+    let card = |route: RouteFacts| {
+        let view = host(None, Some(route));
+        let s = Snapshot {
+            host: &view,
+            ..shot(&name, &p, &readings)
+        };
+        playing(&s, Family::Dac).expect("a card")
+    };
+    let mut one = route("Eitr 2");
+    one.player_match = PlayerMatch::NoMpris;
+    let card_one = card(one);
+    assert!(card_one.track.is_none());
+    let path = card_one.path.expect("a path");
+    assert_eq!(
+        (path.verdict, path.words.join(" · ").as_str()),
+        ("untouched", "untouched · no MPRIS player")
+    );
+    assert_eq!(path.hops[0].label, "player (no MPRIS)");
+    assert_eq!(path.row.hops[0].label, "player (no MPRIS)");
+
+    let mut several = route("Eitr 2");
+    several.player = None;
+    several.player_match = PlayerMatch::NoPlayer;
+    several.others_mixing = 2;
+    let path = card(several).path.expect("a path");
+    assert!(path.hops.is_empty(), "{path:?}");
+    assert_eq!(path.words, vec!["no MPRIS player".to_string()]);
+    assert_eq!(path.verdict, "unknown");
+
+    let mut none = route("Eitr 2");
+    none.player = None;
+    none.player_match = PlayerMatch::NoPlayer;
+    assert!(card(none).path.is_none());
+}
+
 /// The link pill says the readings are old while the link is down and, once it is back, until the
 /// daemon has heard the device again (the stale flag), and not otherwise.
 #[test]
@@ -622,6 +668,38 @@ fn route_with(setup: Option<svolder_host::SetupFacts>) -> RouteFacts {
 fn setup_card(setup: Option<svolder_host::SetupFacts>) -> Playing {
     let view = host(Some(track_view()), Some(route_with(setup)));
     card_on(&view, Some("2"), OPEN).expect("a card")
+}
+
+/// The card carries the two io lines in the judge's words: what comes in from the player and what
+/// the open card runs at, and they are part of the card's change key, so a change of either one
+/// is sent.
+#[test]
+fn the_config_check_carries_what_comes_in_and_what_the_card_runs_at() {
+    use svolder_host::{HwParams, HwState};
+    let mut facts = passing_setup();
+    facts.alsa.as_mut().expect("alsa").card = Some(2);
+    facts.alsa.as_mut().expect("alsa").hw = HwState::Open(HwParams {
+        format: "S32_LE".into(),
+        rate: 48_000,
+        channels: 2,
+    });
+    let card = setup_card(Some(facts.clone()));
+    let setup = card
+        .path
+        .as_ref()
+        .expect("a path")
+        .setup
+        .as_ref()
+        .expect("a check");
+    assert_eq!(setup.from_player, "48 kHz · S16LE · stereo");
+    assert_eq!(setup.to_dac, "48 kHz · 32-bit (S32_LE) · stereo · hw:2");
+    facts.alsa.as_mut().expect("alsa").hw = HwState::Closed;
+    let closed = setup_card(Some(facts));
+    assert_eq!(
+        closed.path.as_ref().unwrap().setup.as_ref().unwrap().to_dac,
+        "not open"
+    );
+    assert_ne!(card.key(), closed.key(), "the card's key follows the line");
 }
 
 /// A DAC's card carries the config check of its sink: the class, the chip, the summary and the
@@ -854,9 +932,9 @@ fn the_models_json_carries_the_row_and_end_to_end() {
         serde_json::json!({
             "label": {"tone": "good", "words": "Path: untouched end to end"},
             "hops": [
-                {"label": "player", "words": []},
-                {"label": "computer", "words": []},
-                {"label": "DAC USB 1", "words": []},
+                {"key": "player", "label": "player", "words": []},
+                {"key": "computer", "label": "computer", "words": []},
+                {"key": "dac", "label": "DAC USB 1", "words": []},
             ],
             "values": [{"text": "48 kHz", "tone": "dim"}],
             "words": null,

@@ -74,6 +74,8 @@ pub struct RowWord {
 /// One hop of the row: its label and the words that say what it changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RowHop {
+    /// Which hop, for a front end's hooks: `player`, `computer` or `dac`.
+    pub key: &'static str,
     /// `player`, `computer` or `DAC USB 1`.
     pub label: String,
     /// The hop's changes in Warn (`resampled`), and a Dim `?` when something was not read.
@@ -92,6 +94,12 @@ pub struct PathRow {
     pub values: Vec<RowWord>,
     /// The short words for a row with no hops (`→ DELL S2721QS`).
     pub words: Option<String>,
+    /// What changes the sound, for the config box under its verdict: one entry per hop that has a
+    /// Warn word (player, computer, DAC in path order), each with exactly the Warn words the row
+    /// draws for it. Empty unless the path changes the sound end to end; absent from the JSON
+    /// when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub changes: Vec<RowHop>,
 }
 
 impl PathRow {
@@ -105,6 +113,7 @@ impl PathRow {
             hops: Vec::new(),
             values: Vec::new(),
             words: Some(ROUTE_NOT_READ.to_string()),
+            changes: Vec::new(),
         }
     }
 }
@@ -150,6 +159,7 @@ pub fn path_row(line: &PathLine, setup: Option<&SetupCheck>) -> PathRow {
             hops: Vec::new(),
             values: Vec::new(),
             words: Some(line.words_line()),
+            changes: Vec::new(),
         };
     }
     let fails = match setup.map(|check| check.summary) {
@@ -161,7 +171,34 @@ pub fn path_row(line: &PathLine, setup: Option<&SetupCheck>) -> PathRow {
         hops: line.hops.iter().map(row_hop).collect(),
         values: values(line, fails),
         words: None,
+        changes: changes(line),
     }
+}
+
+/// The hops that change the sound, in path order, each with its Warn words: a hop's own changes
+/// (`resampled`, `volume 50 %`, `muted`, ...) and, for the DAC, its stage's words (a lowered
+/// volume, tone control, balance, mute, phase, NOS filter). Empty unless the path changes the
+/// sound end to end; the union of the words is the Warn words the row draws, bar `config N`.
+fn changes(line: &PathLine) -> Vec<RowHop> {
+    if line.end_to_end() != EndToEnd::Changed {
+        return Vec::new();
+    }
+    line.hops
+        .iter()
+        .filter_map(|hop| {
+            let mut shown = row_hop(hop);
+            shown.words.retain(|word| word.tone == Tone::Warn);
+            if let Some(stage) = hop.stage {
+                shown.words.extend(
+                    stage
+                        .hop_words()
+                        .into_iter()
+                        .map(|text| word(text, Tone::Warn)),
+                );
+            }
+            (!shown.words.is_empty()).then_some(shown)
+        })
+        .collect()
 }
 
 /// The words of a path with no hops, for the label: the sentence of a sound that goes elsewhere,
@@ -223,13 +260,18 @@ fn row_hop(hop: &Hop) -> RowHop {
             });
         }
     }
-    if hop.unknown {
+    if hop.unknown || hop.unnamed {
         words.push(RowWord {
             text: "?".to_string(),
             tone: Tone::Dim,
         });
     }
-    RowHop { label, words }
+    let key = match (hop.stage.is_some(), hop.label.as_str()) {
+        (true, _) => "dac",
+        (false, label) if label.starts_with("player") => "player",
+        _ => "computer",
+    };
+    RowHop { key, label, words }
 }
 
 fn word(text: impl Into<String>, tone: Tone) -> RowWord {

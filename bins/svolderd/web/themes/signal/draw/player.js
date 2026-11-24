@@ -26,6 +26,11 @@ export function playerScreen(page, localMs = Date.now()) {
   // The player the Now playing bar shows: the shown device's reading of it, else the host's.
   const host = page.device?.playing ?? page.host;
   const track = host?.track;
+  if (!track && host?.path) {
+    // A sound plays with no MPRIS player behind it: no track, the path from its stream on.
+    return `<section id="sg-player" class="sg-plain"><p class="sg-detail">${esc(host.path.hops?.length ? PLAYER.noMpris : PLAYER.several)}</p>`
+      + `<span class="sg-lbl sg-gap">${esc(PLAYER.path)}</span>${pathLines(host.path)}</section>`;
+  }
   if (!track) return `<section id="sg-player" class="sg-plain"><p class="sg-detail">${esc(PLAYER.noTrack)}</p></section>`;
   const inert = inertPage(page);
   const prog = progressOf(host, track, localMs);

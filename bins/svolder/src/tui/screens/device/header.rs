@@ -327,7 +327,8 @@ pub(in crate::tui::screens) fn header_built(
             + faults.iter().map(Span::width).sum::<usize>()
             + mouse.width()
             + 1
-            + clock.width();
+            + clock.width()
+            + CLOCK_MARGIN;
         let room = width.saturating_sub(fixed + cells(&app.session.product).min(NAME_KEPT));
         [READINGS_OLD, READINGS_STALE, STALE]
             .into_iter()
@@ -348,8 +349,9 @@ pub(in crate::tui::screens) fn header_built(
         + faults.iter().map(Span::width).sum::<usize>()
         + mouse.width()
         + 1
-        + clock.width();
-    let name = match kept + cells(&app.session.product) > width {
+        + clock.width()
+        + CLOCK_MARGIN;
+    let name = match kept + 1 + cells(&app.session.product) > width {
         true => cut_cells(&app.session.product, width.saturating_sub(kept + 1)),
         false => app.session.product.clone(),
     };
@@ -370,16 +372,19 @@ pub(in crate::tui::screens) fn header_built(
     spans.extend(faults);
 
     let mut line = Line::from(spans);
-    let tail = mouse.width() + 1 + clock.width();
+    let tail = mouse.width() + 1 + clock.width() + CLOCK_MARGIN;
     let gap = width.saturating_sub(line.width() + tail);
     line.push_span(Span::raw(" ".repeat(gap)));
     marks.push((line.width(), mouse.width(), Hit::MouseMark));
     line.push_span(mouse);
     line.push_span(Span::raw(" "));
     line.push_span(clock);
+    line.push_span(Span::raw(" ".repeat(CLOCK_MARGIN)));
     (line, marks)
 }
 
+/// The blank cells after the clock: the corner keeps off the window's right edge.
+const CLOCK_MARGIN: usize = 1;
 /// [`READINGS_OLD`] where the header has no room for it.
 const READINGS_STALE: &str = "readings stale";
 /// [`READINGS_STALE`] where the header has no room for that either.

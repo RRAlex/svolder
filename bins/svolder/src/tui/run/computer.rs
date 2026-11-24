@@ -201,7 +201,7 @@ impl ComputerLink {
         let Some(control) = self.control.take() else {
             return;
         };
-        // The quit lets what waits run, except crossfeed, speakers and loudness changes (one asked
+        // The quit lets what waits run, except crossfeed, speakers, loudness and bypass changes (one asked
         // a moment before the quit must not turn it on again after the shutdown): the user's last
         // EQ edit is applied or kept. A change that is running is not cancelled, and neither is a
         // tick: the shutdown takes the lock after them.
@@ -462,7 +462,10 @@ async fn run(
     if quitting.load(std::sync::atomic::Ordering::SeqCst)
         && matches!(
             op,
-            HostEqOp::Crossfeed { .. } | HostEqOp::Speakers { .. } | HostEqOp::Loudness { .. }
+            HostEqOp::Crossfeed { .. }
+                | HostEqOp::Speakers { .. }
+                | HostEqOp::Loudness { .. }
+                | HostEqOp::Bypass { .. }
         )
     {
         return None;

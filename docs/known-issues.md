@@ -6,9 +6,10 @@ a present-tense statement of what the code does and why, naming the file it live
 
 The file has two parts:
 
-- **Things you may run into** is for people who use the CLI, the TUI, the daemon or Home Assistant:
-  something shown or printed wrong, a wait, a key that does nothing, a config the tool refuses or
-  reads wrong. It is grouped by area: Bluetooth and devices, Daemon, CLI, TUI, Web UI.
+- **Things you may run into** is for people who use the CLI, the TUI, the daemon, the GNOME
+  indicator or Home Assistant: something shown or printed wrong, a wait, a key that does nothing, a
+  config the tool refuses or reads wrong. It is grouped by area: Bluetooth and devices, Daemon, CLI,
+  TUI, Web UI, GNOME indicator.
 - **Maintainer notes** is for people who change the code: code shape, missing tests, and races or
   edges no user meets outside contrived cases. It is grouped by the part of the code it concerns.
 
@@ -248,6 +249,11 @@ that branch rather than listed here.
   seen between reads of the download, not while waiting for the response headers, so a stalled
   server keeps a cancelled fetch, and the store's gate with it, until the client's timeout
   (`crates/svolder-speakers/src/fetch.rs`).
+- [limit] **The bypass is not kept in the settings-only file.** The held set is saved in
+  `host-eq.toml`, which a chain's apply writes; the settings-only file (`host-eq-settings.toml`)
+  does not carry it. A bypass with no chain state cannot survive a restart, which is not reachable,
+  since a stage that plays has applied a chain (`crates/svolder-host/src/eq/control.rs`,
+  `save_state`).
 - [trade-off] **MCP judges a built-in setting against the floors it read at call
   time.** A band that another front end lowers after the call and before the writer applies the
   setting is raised back, and was judged against the earlier floor, so a rise can land larger than
@@ -395,6 +401,11 @@ that branch rather than listed here.
   bits below the top 24, a float stream's bits beyond the sink, or anything past the sink's
   converter (ALSA `hw`, the USB driver, the DAC). The words say so
   (`crates/svolder-ipc/src/host/path.rs`, `setup.rs`).
+- [limit] **A paused MPRIS player whose stream is corked still takes the route.** The route
+  matches the player to its stream by process id, and that match wins whether the stream runs or
+  not, so a sound from a player with no MPRIS name (mpv without its plugin) reads as `1 other sound
+  mixing`; when the paused player has no stream at all, that sound is `player assumed` under the
+  paused player's track (`find_player` in `crates/svolder-host/src/route.rs`).
 - [limit] **A stream rate missing from `clock.allowed-rates`, into a sink fixed at the stream's
   rate, may hide a resample.** The path line does not name it; the config check's `rates` line fails
   it (`crates/svolder-ipc/src/host/path.rs`, `computer_hop`).
@@ -503,6 +514,11 @@ that branch rather than listed here.
 - [trade-off] **A scene with crossfeed or virtual speakers on reads as no scene after a daemon
   restart.** Those stages never stay on across a restart, so the computer part no longer matches
   until the scene is recalled again (`crates/svolder-ipc/src/config/scenes/on.rs`).
+- [trade-off] **A chain adopted after a daemon restart is never untouched until its next apply.** A
+  daemon restarted over a running chain adopts the saved state and takes the loaded curve as the
+  chain's config, since it cannot tell the config was an identity one; its pass-through stops at the
+  curve's cut and never reads `pass-through, untouched` until the next apply
+  (`crates/svolder-host/src/eq/control.rs`, `adopt`).
 
 ### CLI
 
@@ -538,10 +554,11 @@ that branch rather than listed here.
 - [limit] **`svolder host speakers show` with no daemon names only the saved set's id.** The sets'
   sidecars are the daemon's to read, so without it the label, licence and loudness of the chosen set
   are not known to the command (`bins/svolder/src/commands/host_speakers.rs`, `show`).
-- [limit] **`svolder host check` with no daemon and no `--player` reads the player as unknown.** The
-  verdict is then `unknown`: following the MPRIS player as the daemon does is outside its one
-  `pw-dump` read, so name the player with `--player` (`bins/svolder/src/commands/host_check.rs`,
-  `own_route`).
+- [limit] **`svolder host check` with no daemon and no `--player` cannot name the player.** A lone
+  running stream is assumed to be the player's (`player assumed`); with several the verdict is
+  `unknown` and its words `no MPRIS player` only mean MPRIS was not read: following the MPRIS
+  player as the daemon does is outside its one `pw-dump` read, so name the player with `--player`
+  (`bins/svolder/src/commands/host_check.rs`, `own_route`).
 - [trade-off] **`svolder set` is outside the volume's glide.** `svolder set volume max`, a raw
   number above three quarters of the range and `svolder raw` on the volume write that step at
   once, as does `svolder set volume up --step N` that lands above three quarters with N of 4 or
@@ -607,6 +624,10 @@ that branch rather than listed here.
   link drop or a daemon restart the pane is laid out without it, and when the first host view
   arrives the pane can re-pack at 80x24, so a wheel on Volume moves to Balance for one notch
   (`bins/svolder/src/tui/screens/device/controls.rs`, `lines_reserving`).
+- [bug] **The Plays highlight is not reset by a view change.** The highlight the arrows put on the
+  Plays row of the Space panel is a TUI-side state; moving rows, `Tab` and `Enter` reset it, a view
+  that arrives while the arrows are mid-highlight does not
+  (`bins/svolder/src/tui/screens/tone/stages.rs`, `plays_row`).
 - [limit] **A key pressed in the instant the terminal is resized can be lost.** The first key
   after the window is grown or shrunk, or after a run of Esc presses closes boxes, such as a `q` or
   Ctrl-C, can go unread until the next input (a second press reads both), and a frame at the old
@@ -733,6 +754,14 @@ that branch rather than listed here.
   both lines scroll and the tag is in sight only part of the time. With scrolling off the tag is
   kept whole and the rest is cut with `…`, and `k` always opens the box
   (`bins/svolder/src/tui/screens/device/controls.rs`, `path_rows`).
+- [trade-off] **The Points table's numbers are not the mockups'.** The table writes `60.0 Hz` and
+  `+7.50 dB` (the existing `row_text`), where the design pictures draw `60 Hz` and `+7.5 dB`
+  (`bins/svolder/src/tui/screens/tone/stages.rs`).
+- [trade-off] **The TUI draws no Loudness curve.** The Loudness panel is four rows; the stage's own
+  curve (the old block beside the Points) is not drawn because the design pictures have none. The
+  Space panel's side box with the two curves needs 7 inner rows from 120 columns, which it always
+  has, and a crossfeed model with no curve in the view draws no box
+  (`bins/svolder/src/tui/screens/tone/stages.rs`, `draw_space`).
 
 ### Web UI
 
@@ -746,6 +775,9 @@ that branch rather than listed here.
   over its pink neon line at 1.0:1 where they cross. Text a canvas or a pattern paints, and Ember's
   text over its smoke, the sweep cannot measure (`scripts/web-checks/contrast-baseline.json`,
   `scripts/web-checks/phone-baseline.json`).
+- [bug] **Night drive's wide path line can run under the volume.** At 1280 px wide a long path line
+  (a crossfeed chain makes it long) runs under the big `100 %` of the volume; the top line's CSS and
+  words are as 0.36.x left them (`bins/svolderd/web/themes/nightdrive/style.css`).
 - [limit] **Plain HTTP sends the sign-in over the network.** On a listen address off loopback the
   cookie, the token typed on the sign-in page and the pairing code cross the network in the
   clear; svolderd speaks no TLS, which a reverse proxy adds (`bins/svolderd/src/web.rs`).
@@ -788,6 +820,9 @@ that branch rather than listed here.
   reach the page, so a running fetch says "Fetching..." with Cancel and no count; the TUI and the
   CLI show one (`bins/svolderd/web/core/popups/speakers/wire.js`). A progress bar needs the
   speakers' job stream forwarded to the web events.
+- [observed] **At 900 px wide Signal's Player hop label can be clipped.** The label ("Fake
+  Player", its 48 kHz line) was seen cut at the left edge of the line at that width in the stills;
+  where the labels are placed is `bins/svolderd/web/themes/signal/draw/line.js`.
 - [trade-off] **The Devices popup words some readings as numbers.** A choice's raw value (the input)
   and a readout's (the sample rate) have no words in the page's model, so their range under a graph
   and in its text alternative is drawn as numbers, and the readings table shows the daemon's words
@@ -850,10 +885,28 @@ that branch rather than listed here.
   Warm amber, Phosphor or Oxblood and brass in Signal gets Blueprint's deep blue bar over their
   ground, because the colour the page tells the browser is one per theme. Following the palette
   would mean `paintChrome` taking its ground (`bins/svolderd/src/web/themes.rs`,
-  `bins/svolderd/web/core/scheme.js`). - [observed] **At 900 px wide Signal's Player hop label can
-  be clipped.** The label ("Fake Player",
-  its 48 kHz line) was seen cut at the left edge of the line at that width in the stills; where
-  the labels are placed is `bins/svolderd/web/themes/signal/draw/line.js`.
+  `bins/svolderd/web/core/scheme.js`).
+- [trade-off] **Night drive's stage words open nothing under a finger.** The EQ line's stage words
+  (EQ, SPACE) open the Sound popup for a mouse press and the keyboard; under a coarse pointer the
+  line stays click-through, because tappable words took the grab of the bubbles under the line and a
+  44 px reach does not fit it without covering the mountains. A touch user reaches the popup from
+  the menu's `Sound…` row and its tabs, three taps instead of one (`.nd-lw` in
+  `bins/svolderd/web/themes/nightdrive/style.css`).
+- [trade-off] **Night drive's BYPASS key sits on the dash's second row on an upright phone.** The
+  first row holds four keys and the transport, so the key lands after the track instead of beside EQ
+  (`bins/svolderd/web/themes/nightdrive/style.css`, pinned in
+  `scripts/web-checks/computer_nightdrive.py`).
+
+### GNOME indicator
+
+- [observed] **With a UI font that has no minus sign, a hover can nudge the popup's rows.** Every
+  line beside the Path strip carries a mark that gives it the height of the dB unit's line, so the
+  row keeps one height as the line changes. A font without U+2212 draws the minus of `−24.1 dB`
+  from a taller fallback font, and from text scale 1.25 such a line is 1 to 2 px taller, so
+  hovering a segment can move the rows below by that much. Measured with Pango at 9 pt in the Noto
+  Sans installed here, which has no U+2212; Ubuntu Sans, the font of the headless shell and the
+  pictures, is fine (`contrib/gnome-shell/svolder-indicator@rralex.github.io/model.js`,
+  `stylesheet.css`).
 
 ## Maintainer notes
 
@@ -1082,6 +1135,14 @@ that branch rather than listed here.
   `a_page_with_no_device_gets_the_model_fleet_and_host` failed once in 4 on the order of the playing
   and paused events (`bins/svolderd/src/web/view/tests.rs`,
   `bins/svolderd/src/web/events/tests.rs`).
+- [test] **The preamp lab skips a repair line in the level rule.** After a `pw-cli` call lost a line
+  the lab leaves that line out of the level rule as it does of the unity rule: a lost line can leave
+  the node up to a few climb steps (0.64 dB) behind, and the line that follows lands them together
+  (`crates/svolder-host/src/eq/lab.rs`, `set_param`).
+- [test] **The fake route says `host EQ on` where a real untouched pass-through says nothing.**
+  `FakeRoute::chain_stages` drops the stages when none of the EQ, the loudness, the crossfeed or the
+  speakers is set, so a browser check over the fake sees a yellow computer hop for a chain the
+  daemon calls untouched (`bins/svolderd/src/host.rs`).
 
 ### CLI
 

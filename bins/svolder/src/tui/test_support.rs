@@ -110,6 +110,13 @@ pub(crate) fn assert_usage_md_shows(rows: &[String], what: &str) {
     );
 }
 
+/// [`assert_usage_md_shows`] for a picture the manual keeps without the blanks at the end of each
+/// row: `rows` with their trailing blanks cut must be a fenced block of docs/usage/tui.md.
+pub(crate) fn assert_usage_md_shows_trimmed(rows: &[String], what: &str) {
+    let trimmed: Vec<String> = rows.iter().map(|row| row.trim_end().to_string()).collect();
+    assert_usage_md_shows(&trimmed, what);
+}
+
 /// One value reading as a backend hands it over.
 pub(crate) fn vo(id: &str, key: Option<&str>, raw: Value, display: &str) -> ValueObject {
     ValueObject {
@@ -740,6 +747,8 @@ pub(crate) fn computer_eq(
         crossfeed: None,
         speakers: None,
         loudness: None,
+        levels: None,
+        bypass: None,
     })
 }
 
@@ -848,6 +857,78 @@ pub(crate) fn computer_eq_with_speakers(
     eq
 }
 
+/// What the computer side's stages hold in the mockups: nine points on the Bass preset, loudness
+/// at 60 % (reference 97 %, volume 42 %), crossfeed (Mid/Side bass) or the virtual speakers
+/// playing as `space` says, the chain's levels as the daemon words them and the bypass off with
+/// nothing held.
+pub(crate) fn computer_eq_stages(space: crate::tui::app::Space) -> Box<svolder_host::eq::EqView> {
+    use crate::tui::app::Space;
+    use svolder_host::eq::crossfeed::{CrossfeedSettings, CrossfeedView, Model};
+    use svolder_host::eq::loudness::{Level, LoudnessSettings, LoudnessView};
+    use svolder_host::eq::{BypassView, ChainLevels};
+    let points: Vec<(&str, f64, f64, f64)> = vec![
+        ("PK", 60.0, 7.5, 0.7),
+        ("LSC", 105.0, 2.0, 0.71),
+        ("PK", 250.0, -1.5, 1.0),
+        ("PK", 1000.0, 0.0, 1.0),
+        ("PK", 1000.0, 0.0, 1.0),
+        ("PK", 2515.0, 0.0, 4.3),
+        ("PK", 4000.0, -2.0, 2.0),
+        ("HSC", 8000.0, 1.0, 0.71),
+        ("PK", 10000.0, 0.0, 4.3),
+    ];
+    let mut eq = computer_eq_with_speakers(
+        space == Space::Speakers,
+        Some("synthetic"),
+        &[("synthetic", "no", "Synthetic, no room")],
+    );
+    eq.points = computer_eq(true, &points).points;
+    // the preamp sent holds crossfeed's headroom on top of the EQ's own share (levels.eq_db)
+    eq.preamp_db = -7.8;
+    eq.preset = Some("Bass".to_string());
+    let settings = CrossfeedSettings::for_model(Model::MidSide);
+    eq.crossfeed = Some(CrossfeedView::of(
+        &settings,
+        space == Space::Crossfeed,
+        48_000,
+        None,
+        None,
+    ));
+    let level = Level {
+        linear: 0.42_f64.powi(3),
+        muted: false,
+    };
+    eq.loudness = Some(LoudnessView::of(
+        &LoudnessSettings {
+            on: true,
+            strength_pct: 60.0,
+            reference_pct: 97.0,
+        },
+        Some(level),
+        11.3,
+        48_000,
+        None,
+        None,
+    ));
+    let space_db = match space {
+        Space::Off => 0.0,
+        Space::Crossfeed => -3.1,
+        Space::Speakers => -7.0,
+    };
+    if space == Space::Crossfeed {
+        eq.preamp_db = -7.8 + space_db;
+    }
+    eq.levels = Some(ChainLevels::of(
+        true,
+        -7.8,
+        space_db,
+        -7.8 + space_db,
+        false,
+    ));
+    eq.bypass = Some(BypassView::default());
+    eq
+}
+
 /// The Target line of a frame: its text, and the modifiers and foreground of the first cell of
 /// the device's `name` and of `Computer`, for the tests of which side the line makes stand out.
 #[cfg(test)]
@@ -911,23 +992,6 @@ pub(crate) fn style_at(buffer: &Buffer, row_has: &str, word: &str, past: usize) 
         "no row with {row_has:?} in the frame: {:#?}",
         crate::tui::test_support::text(buffer)
     );
-}
-
-/// The styles of a two-sided or many-worded choice drawn on the row holding `row_has`: its
-/// chosen word, one other word, its label, the cell right after the label and its `‹`.
-#[cfg(test)]
-pub(crate) fn choice_styles(
-    buffer: &Buffer,
-    row_has: &str,
-    (label, chosen, other): (&str, &str, &str),
-) -> [CellStyle; 5] {
-    [
-        style_of(buffer, row_has, chosen),
-        style_of(buffer, row_has, other),
-        style_of(buffer, row_has, label),
-        style_at(buffer, row_has, label, label.chars().count()),
-        style_of(buffer, row_has, "‹"),
-    ]
 }
 
 /// A scenes view of `rows` (each a name and its parts: who, present), with `on` lit and the

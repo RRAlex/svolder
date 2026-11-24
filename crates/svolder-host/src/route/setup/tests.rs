@@ -280,12 +280,25 @@ fn a_stream_with_no_format_reads_its_enum_format() {
 
 #[test]
 fn no_player_stream_means_no_stream_layout() {
-    let found = route(SCHIIT, None, "")
+    // No player is followed and the only stream is idle, so none is taken.
+    let idle = edited(SCHIIT, "pw-cat", |node| {
+        node["info"]["state"] = json!("idle");
+    });
+    let found = route(&idle, None, "")
         .expect("a dump")
         .setup
         .expect("setup");
     assert_eq!(found.stream_layout, None);
     assert_eq!(found.stream_filter, None);
+}
+
+#[test]
+fn a_stream_taken_with_no_mpris_player_has_its_stream_layout() {
+    let found = route(SCHIIT, None, "")
+        .expect("a dump")
+        .setup
+        .expect("setup");
+    assert!(found.stream_layout.is_some());
 }
 
 // (3) dither

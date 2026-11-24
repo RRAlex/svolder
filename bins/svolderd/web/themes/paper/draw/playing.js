@@ -31,7 +31,7 @@ export function playing(page, device, _view) {
   if (!p) return '';
   const label = `<h2 class="p-label p-head">${esc(WORDS.playingLabel)}</h2>`;
   const t = p.track;
-  if (!t) return `${label}<p class="p-track"><i>${esc(WORDS.nothingPlaying)}</i></p>`;
+  if (!t) return `${label}<p class="p-track"><i>${esc(p.path ? WORDS.noMpris : WORDS.nothingPlaying)}</i></p>`;
   const artist = t.artist ? `, ${esc(t.artist)}` : '';
   const words = `<p class="p-track"><i>${esc(t.headline)}</i>${artist}</p>`
     + `${p.buttons ? transport(t.status, Boolean(device?.inert)) : ''}`;

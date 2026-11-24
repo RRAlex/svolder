@@ -36,6 +36,11 @@ on the computer:
                                         stretch yellow and says so, chosen or not
   a_finger_adds_drags_and_pinches       (Chromium, touch emulation) a tap adds, a finger drags a dot,
                                         two fingers halve its Q
+  the_strip_and_bypass_follow_the_daemon   the strip under the mode names each stage with its level and
+                                        ends in the daemon's own words; Bypass posts on and off, the chip is
+                                        pressed, the stages read off and come back; a stage word opens the
+                                        Sound popup at its tab; the driver's `{computer: 'bypass'}` is the chip;
+                                        a guest's chip is inert
 Pictures of the computer side (desktop, phone, the phone's table) are saved under target/web-shots/signal/
 (Chromium run).
 Usage: python3 computer_signal.py chromium|firefox"""
@@ -1153,6 +1158,146 @@ def touch():
         d.stop()
 
 
+def stage_strip(b, d):
+    load(b, d)
+    flip(b, 'computer')
+    seed(b, 4)
+    b.page("window.__driver = __core.theme.driver")
+    b.page("__core.actions.computer.setComputerLoudness({ on: true, strength_pct: 60 }).then(() => 1)")
+    tap(b, '#sg-cm-eq')
+    poll(lambda: b.page(f'{COMPUTER}.eq.on === true && {COMPUTER}.eq.loudness?.on === true'))
+    strip = lambda: b.page("document.querySelector('#sg-cstrip')?.innerText.replace(/\\s+/g, ' ').trim() ?? null")  # noqa: E731
+    words = lambda: b.page(f'{COMPUTER}.eq.levels?.words')  # noqa: E731
+    got = poll(strip)
+    check('the_strip_and_bypass_follow_the_daemon: the strip names the stages and their levels',
+          bool(got) and 'EQ ' in got and 'Loudness 60 %' in got and 'Space off' in got, got)
+    check('the_strip_and_bypass_follow_the_daemon: it ends in the daemon\'s own words',
+          bool(words()) and got.endswith(words()), [got, words()])
+    chip = '[data-act="cbypass"]'
+    check('the_strip_and_bypass_follow_the_daemon: the Bypass chip sits in the mode\'s set, off',
+          b.page(f"document.querySelector('#sg-cm-eq').parentElement.contains(document.querySelector('{chip}'))") is True
+          and b.page(f"document.querySelector('{chip}').getAttribute('aria-pressed')") == 'false', b.page('document.querySelector("#sg-cmode").innerHTML'))
+    check('the_strip_and_bypass_follow_the_daemon: the chip is a button',
+          b.page(f"document.querySelector('{chip}').tagName") == 'BUTTON')
+    forget(b)
+    tap(b, chip)
+    got = poll(lambda: posts(b, 'api/v1/host/bypass'))
+    check('the_strip_and_bypass_follow_the_daemon: a tap posts bypass on', bool(got) and got[0][1] == {'on': True}, got)
+    check('the_strip_and_bypass_follow_the_daemon: the chip is pressed and the model holds the bypass',
+          poll(lambda: b.page(f"document.querySelector('{chip}').getAttribute('aria-pressed') === 'true'"
+                              f" && {COMPUTER}.eq.bypass.on === true && {COMPUTER}.eq.on === false")),
+          b.page(f'{COMPUTER}.eq.bypass'))
+    got = poll(lambda: 'EQ off' in (strip() or '') and 'Loudness off' in (strip() or '') and strip())
+    check('the_strip_and_bypass_follow_the_daemon: bypassed, every stage reads off and the words are the daemon\'s',
+          bool(got) and got.endswith(words()), [got, words()])
+    forget(b)
+    tap(b, chip)
+    got = poll(lambda: posts(b, 'api/v1/host/bypass'))
+    check('the_strip_and_bypass_follow_the_daemon: a second tap posts bypass off', bool(got) and got[0][1] == {'on': False}, got)
+    check('the_strip_and_bypass_follow_the_daemon: and the stages come back',
+          poll(lambda: b.page(f"document.querySelector('{chip}').getAttribute('aria-pressed') === 'false'"
+                              f" && {COMPUTER}.eq.on === true && {COMPUTER}.eq.loudness.on === true")),
+          b.page(f'{COMPUTER}.eq.bypass'))
+    check('the_strip_and_bypass_follow_the_daemon: with their levels',
+          poll(lambda: 'Loudness 60 %' in (strip() or '') and 'EQ off' not in (strip() or '')), strip())
+    # the driver's target is the chip, and operating it is a person's tap
+    check('the_strip_and_bypass_follow_the_daemon: the driver reaches the bypass target',
+          b.page('__driver.reach({ computer: "bypass" })') is True)
+    forget(b)
+    b.page('__driver.operate({ computer: "bypass" }, { on: true })')
+    check('the_strip_and_bypass_follow_the_daemon: the driver turns it on and shows it',
+          poll(lambda: b.page(f"{COMPUTER}.eq.bypass.on === true")) is True
+          and b.page('__driver.shown({ computer: "bypass" })') == 'on',
+          b.page(f"{COMPUTER}.eq.bypass"))
+    check('the_strip_and_bypass_follow_the_daemon: and the driver shows it as on, as Ember and Paper do',
+          b.page('__driver.shown({ computer: "bypass" })') == 'on')
+    b.page('__driver.operate({ computer: "bypass" }, { on: false })')
+    poll(lambda: b.page(f"{COMPUTER}.eq.bypass.on === false"))
+    check('the_strip_and_bypass_follow_the_daemon: and off as off',
+          poll(lambda: b.page('__driver.shown({ computer: "bypass" })') == 'off'))
+    # the focus on a stage word survives the redraws a reading brings
+    b.page("document.getElementById('sg-cstage-eq').focus()")
+    b.page("__core.actions.computer.setPoint(1, { g: 3 }, { done: true }).then(() => 1)")
+    poll(lambda: b.page(f"{POINTS}[0].g === 3 && /3/.test(document.querySelector('#sg-cf-1g').value)"))
+    check('the_strip_and_bypass_follow_the_daemon: the focus stays on the stage word through a redraw',
+          b.page('document.activeElement.id') == 'sg-cstage-eq', b.page('document.activeElement.id'))
+    # a stage word opens the Sound popup at its tab
+    tap(b, '[data-act="cstage"][data-stage="loudness"]')
+    poll(lambda: b.page('__core.router.state().popup') == 'sound')
+    state_ = b.page('__core.router.state()')
+    check('the_strip_and_bypass_follow_the_daemon: the Loudness word opens the Sound popup at the Loudness tab',
+          state_.get('popup') == 'sound' and state_.get('page') == 'loudness', state_)
+    b.page("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+    poll(lambda: b.page('__core.router.state().popup') is None)
+    tap(b, '[data-act="cstage"][data-stage="eq"]')
+    poll(lambda: b.page('__core.router.state().popup') == 'sound')
+    state_ = b.page('__core.router.state()')
+    check('the_strip_and_bypass_follow_the_daemon: the EQ word opens the Sound popup at the EQ library',
+          state_.get('popup') == 'sound' and state_.get('page') in (None, 'autoeq', 'upload', 'saved'), state_)
+    b.page("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+    poll(lambda: b.page('__core.router.state().popup') is None)
+
+
+def stage_strip_dim(b, d):
+    """Nothing plays: the chip is dim, a writer's tap still posts and the daemon's own words are shown."""
+    load(b, d)
+    flip(b, 'computer')
+    tap(b, '#sg-cm-off')
+    poll(lambda: b.page(f'{COMPUTER}.eq.on === false'))
+    chip = poll(lambda: b.page("(() => { const c = document.querySelector('[data-act=cbypass]');"
+                               " return c && c.classList.contains('quiet') && [c.getAttribute('aria-disabled'), c.title]; })()"))
+    check('the_strip_and_bypass_follow_the_daemon: with nothing to bypass the chip is dim, not disabled, with no copy of the refusal',
+          chip == [None, ''], chip)
+    forget(b)
+    tap(b, '[data-act="cbypass"]')
+    got = poll(lambda: posts(b, 'api/v1/host/bypass'))
+    check('the_strip_and_bypass_follow_the_daemon: a writer\'s tap on it posts', bool(got) and got[0][1] == {'on': True}, got)
+    toast = poll(lambda: b.page("[...document.querySelectorAll('#toasts .toast')].map((t) => t.textContent).join('|')"))
+    said = b.page("fetch('api/v1/host/bypass', { method: 'POST', headers: { 'content-type': 'application/json' },"
+                  " body: JSON.stringify({ on: true }) }).then((r) => r.json()).then((j) => j.error)")
+    check('the_strip_and_bypass_follow_the_daemon: and the words shown are the 409\'s own error text',
+          bool(said) and (toast or '') == said, [toast, said])
+
+
+def stage_strip_guest(b, d):
+    load(b, d)
+    flip(b, 'computer')
+    chip = poll(lambda: b.page("(() => { const c = document.querySelector('[data-act=cbypass]');"
+                               " return c && [c.getAttribute('aria-disabled'), c.classList.contains('quiet')]; })()"))
+    check('the_strip_and_bypass_follow_the_daemon: a guest\'s Bypass chip is inert', chip == ['true', True], chip)
+    check('the_strip_and_bypass_follow_the_daemon: a guest\'s stage words are text, not buttons',
+          b.page("!document.querySelector('[data-act=cstage]') && !!document.querySelector('#sg-cstage-eq')") is True)
+    forget(b)
+    tap(b, '[data-act="cbypass"]')
+    check('the_strip_and_bypass_follow_the_daemon: and a tap on it writes nothing, saying why',
+          poll(lambda: b.page("document.querySelectorAll('#toasts .toast').length") > 0)
+          and posts(b, 'api/v1/host/bypass') == [], posts(b, 'api/v1/host/bypass'))
+
+
+def stage_strip_phone():
+    """The strip and the chip at a phone's width: both on the first screen, the chip a 44 px target, no sideways scroll."""
+    d = common.Daemon('gungnir2-v2', host='fake', env={})
+    b = common.Chromium(size=(390, 844), dpr=2, touch=True)
+    b.preload(HOOK)
+    try:
+        load(b, d)
+        flip(b, 'computer')
+        tap(b, '#sg-cm-eq')
+        poll(lambda: b.page(f'{COMPUTER}.eq.on === true && !!document.querySelector("#sg-cstrip")'))
+        box = b.page("(() => { const c = document.querySelector('[data-act=cbypass]'); const r = c.getBoundingClientRect();"
+                     " const s = document.querySelector('#sg-cstrip').getBoundingClientRect();"
+                     " return { h: r.height, w: r.width, strip: s.right, inOpen: !!document.querySelector('#sg-open #sg-cbypass'),"
+                     " over: document.documentElement.scrollWidth > document.documentElement.clientWidth }; })()")
+        check('the_strip_and_bypass_follow_the_daemon: on a phone the chip is a 44 px target on the first screen',
+              box['h'] >= 44 and box['inOpen'] is True, box)
+        check('the_strip_and_bypass_follow_the_daemon: and the strip wraps inside the screen',
+              box['strip'] <= 390 and box['over'] is False, box)
+        check('the_strip_and_bypass_follow_the_daemon: phone, no page error', errors(b) == [], errors(b)[:3])
+    finally:
+        b.close()
+        d.stop()
+
+
 def one(name, fn, env=None, fleet=FLEET, web='auth = "none"', size=(1280, 1100)):
     d = common.Daemon('gungnir2-v2', host='fake', fleet=fleet, env=env or {}, web=web)
     b = make(size)
@@ -1220,7 +1365,11 @@ one('a_question_opens_after_the_shelf_was_drawn_again', question_after_redraw)
 one('the_amp_page_flips_to_the_computer_with_the_dac_parts', amp)
 one('a_load_with_the_computer_kept_but_unavailable_shows_the_dac', unavailable, env={'SVOLDER_FAKE_HOST_EQ': 'off'})
 one('the_wire_still_shows_the_eq_changing_the_sound', wire, env={'SVOLDER_FAKE_ROUTE': 'changed'})
+one('the_strip_and_bypass_follow_the_daemon', stage_strip)
+one('a_dim_bypass_chip_still_asks_the_daemon', stage_strip_dim)
+one('a_guests_bypass_chip_is_inert', stage_strip_guest, web='guest = "read"')
 if browser == 'chromium':
+    stage_strip_phone()
     touch()
     pictures()
 print(f'computer_signal.py {browser}: {passed} passed, {len(fails)} failed in {time.time() - t0:.0f} s')

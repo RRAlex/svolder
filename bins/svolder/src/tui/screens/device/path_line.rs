@@ -17,7 +17,7 @@ use crate::tui::theme::{Role, Theme};
 use crate::tui::widgets::text::{cells, wrap as wrap_words};
 
 /// What joins one value of the values line to the next.
-pub(super) const VALUE_JOIN: &str = " · ";
+pub(crate) const VALUE_JOIN: &str = " · ";
 /// What joins one hop of the path to the next.
 pub(super) const HOP_JOIN: &str = " → ";
 
@@ -27,7 +27,7 @@ pub(super) const MAX_LINES: usize = 5;
 pub(super) const MAX_BASE_LINES: usize = 2;
 
 /// The colour a tone is drawn in.
-pub(super) fn role(tone: Tone) -> Role {
+pub(crate) fn role(tone: Tone) -> Role {
     match tone {
         Tone::Plain => Role::Text,
         Tone::Dim => Role::Dim,

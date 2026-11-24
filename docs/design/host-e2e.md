@@ -48,6 +48,57 @@ It runs phase B (below, with phase C's check of svolder's words on the same rows
 phases above, and prints `host-e2e: PASS` as its last line, so a PASS
 means every phase passed; it fails on a process it started that is still there.
 
+## Phase P0: an identity config with the curve live
+
+Run first (the daemon is started and stopped around it; `HOST_E2E_ONLY=P0` runs it alone and exits
+3). It proves option D, on which the climb stands
+([host-control-preamp.md](host-control-preamp.md#a-chain-started-from-an-identity-config)), before
+anything is built on it. The daemon writes two configs, the flat curve and a +6 dB peak on the tone
+(under its -6 dB cut); the phase then runs a chain of its own from each (no daemon), the tone
+through it, a recorder on the sink's monitor, and `pw-cli` sending the lines. The envelope of the
+tone (a 4 ms Hann window every ms) is read against the level at the start:
+
+- **D1**, the flat (identity) config: the curve live (the cut first), the preamp climbed to 0 dB
+  with the slot flat, then the sink at 44.1 and back at 48 kHz: the envelope is never more than 0.15
+  dB over the start level, the curve under its cut plays the tone at unity, and the graph reads back
+  a flat slot and a preamp of exactly 1.0.
+- **D2**: the curve live at its cut, then the same rebuilds: never over unity, and the chain plays
+  flat at the cut afterwards (quieter, -6.0 dB), the slot read back flat.
+- **Red**: the curve IN the config, the preamp sent to 0 dB with the slot flat, then the rebuilds:
+  the envelope goes +6.0 dB over unity. `HOST_E2E_P0_RED=1` asks D1's limit of this config, which
+  fails.
+
+## The climb phases (P1 to P5)
+
+They run after the scenes phase and before the daemon's restarts (X4), while the daemon lives;
+`HOST_E2E_ONLY=P` runs them alone and exits 3. The daemon's idle time is the default (3 s): the run
+no longer sets `SVOLDER_EQ_IDLE_TICKS`. The phases that wait for a pass-through to be exact first
+wait for the view to say no climb is in progress.
+
+- **P1**: a chain for crossfeed alone (Mid/Side bass, 3.1 dB under the input) with the tone, then
+  crossfeed off. The level climbs from -3.1 to 0 dB, taking no less than 0.4 s from -3.0 to -0.1 dB
+  (a 50 ms window every 10 ms). No pair of 50 ms windows 50 ms apart rises more than 0.75 dB: a tick
+  is 0.32 dB, and a pair that straddles two ticks reads up to about 0.7 dB (0.41 to 0.68 dB
+  measured), so the limit guards the pace and the step size itself is what the preamp lab guards.
+  The view ends `pass-through, untouched` and the graph reads the identity.
+- **P2**: a stream of digital silence then a seeded 24-bit pattern goes through a Mid/Side bass
+  chain into phase B's S24LE pipe sink, crossfeed turned off once it runs. The view reads untouched,
+  the pattern comes out exactly (phase B's comparator), and `svolder host check --json`, asked of
+  the daemon without `--player` (a named player is read from the graph alone, which tells no stages,
+  and the run holds a route subscription so the daemon reads the route), names no stage for the
+  chain. `HOST_E2E_BITS_FLIP=1` flips one bit of P2's capture, which fails P2.
+- **P3**, the negative: the daemon is stopped (SIGSTOP) once the preamp port reads between -3.1 and
+  -1.9 dB, so the chain keeps a preamp under 0 dB. The pattern is not exact. After SIGCONT, before
+  the climb can end, the view and the host check are asked: neither says untouched (the view says it
+  is climbing, the path names a stage). The climb then ends.
+- **P4**: the bypass with the EQ, loudness and the virtual speakers on and the tone. The chain is
+  kept (same node and process), the level starts where it was heard and climbs to 0 dB, and the
+  restore brings the three back.
+- **P5**: the tone stops and the chain goes after about 3 s (still there at 2 s); a 1.5 s pause
+  keeps it.
+
+
+
 ## The loudness phases
 
 They run after the V phases, before phase U. Three tones play at once (50 Hz, 1 kHz and 12.5 kHz, each at -26 dBFS,

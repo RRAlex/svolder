@@ -150,6 +150,43 @@ pub fn draw(
     rect
 }
 
+/// Draw `toast` as one line on the last row of `screen`, right-aligned and cut to fit: where the
+/// last row is kept blank for it (the computer side of the tone screen, whose panel reaches the
+/// row above), a boxed toast would cover the panel. Records the line as a mouse target and
+/// returns it.
+pub fn draw_row(
+    frame: &mut Frame,
+    screen: Rect,
+    toast: &Toast,
+    theme: &Theme,
+    hits: &mut HitMap,
+) -> Rect {
+    let room = usize::from(screen.width).saturating_sub(usize::from(FRAME_WIDTH + RIGHT_MARGIN));
+    let one_line = toast.text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text = widgets::text::cut_to_cells(&one_line, room.max(1));
+    let wide = u16::try_from(widgets::text::cells(&text))
+        .unwrap_or(u16::MAX)
+        .saturating_add(FRAME_WIDTH)
+        .min(screen.width);
+    let rect = Rect {
+        x: screen
+            .right()
+            .saturating_sub(RIGHT_MARGIN + wide)
+            .max(screen.x),
+        y: screen.bottom().saturating_sub(1),
+        width: wide,
+        height: 1,
+    };
+    widgets::surfaces::raise(frame, rect, theme);
+    let line = Line::from(vec![
+        Span::styled("\u{258c}", theme.style(toast.kind.border())),
+        Span::styled(format!(" {text} "), theme.style(Role::Text)),
+    ]);
+    frame.render_widget(Paragraph::new(line), rect);
+    hits.push(rect, Hit::Toast);
+    rect
+}
+
 /// The cells of a toast, taken out of a frame to be put back after the animation layer has
 /// painted over it.
 pub struct Lifted {

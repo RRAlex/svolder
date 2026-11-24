@@ -47,6 +47,12 @@ pub struct ToneEdit {
     /// left rather than always opening on Mode; [`App::move_tone_row`] and a click on either
     /// half keep it current whenever the cursor rests on the header.
     pub(super) header_loudness: bool,
+    /// The stage whose panel the computer side's tone screen shows: the one the keys are in, or
+    /// were last in while they are on the header. A cell since [`App::open_stage`] notes it.
+    pub(super) stage: std::cell::Cell<super::Stage>,
+    /// The choice the arrows have highlighted on the Plays row, which `Enter` applies; `None`
+    /// while the highlight is on what plays.
+    pub(super) plays: Option<super::Space>,
     /// The last non-Flat mode the tone control was seen in or asked for this device session (a
     /// reading, a Mode-select step, a preset recall's mode, `f` itself, or a band edit's switch
     /// to EQ — [`App::note_mode`]), for `f` to come back to when it toggles off Flat

@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 // `svolder-chain-card`: the computer's sound chain as four keyed modules, numbered 1 to 4 with a
-// coloured top edge: EQ, Loudness, Crossfeed, Speakers. Each has its switch, one setting, a tiny
+// coloured top edge: EQ, Loudness, Crossfeed, Speakers, under a line with the total level and the
+// Bypass key (each only while its entity exists). Each has its switch, one setting, a tiny
 // picture and a word of why. A control is writable only when its entity is (commands on); with
 // commands off the module shows the same words without a way to change them.
 import {
@@ -16,6 +17,11 @@ const PIC = {
 };
 
 const CSS = `
+.head { display: flex; align-items: center; justify-content: space-between; gap: 4px 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.head .total { font-size: 12px; min-width: 0; }
+.head .total b { font-weight: 500; }
+.head .key { min-height: 30px; padding: 0 10px; font-size: 12px; }
+.head .key[aria-pressed=true] { border-color: var(--sv-warn); }
 .mods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 @container (min-width: 560px) { .mods { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .mod { border: 1px solid var(--sv-line); border-top: 3px solid var(--sv-faint); border-radius: 4px; padding: 8px 9px;
@@ -47,6 +53,10 @@ export class SvolderChainCard extends SvolderCard {
     const pick = (re) => firstId(hass, re);
     const entities = {
       eq: pick(/^(switch|binary_sensor)\.(?!.*(loudness|crossfeed|virtual)).*_eq$/),
+      bypass: pick(/^(switch|binary_sensor)\..*_bypass$/),
+      level_chain: pick(/^sensor\..*_chain_level$/),
+      level_eq: pick(/^sensor\..*_eq_level$/),
+      level_space: pick(/^sensor\..*_space_level$/),
       loudness: pick(/^(switch|binary_sensor)\..*_loudness$/),
       crossfeed: pick(/^(switch|binary_sensor)\..*_crossfeed$/),
       speakers: pick(/^(switch|binary_sensor)\..*_virtual_speakers$/),
@@ -66,6 +76,13 @@ export class SvolderChainCard extends SvolderCard {
       loud: { sw: sw(E.loudness), n: numberOf(h, E.loudness_strength, { min: 0, max: 127, step: 1 }) },
       xf: { sw: sw(E.crossfeed), sel: selectOf(h, E.crossfeed_preset) },
       sp: { sw: sw(E.speakers), sel: selectOf(h, E.speakers_set) },
+      bypass: sw(E.bypass),
+      // The daemon's own words for the chain's levels, the attribute of the Chain level sensor.
+      words: (() => {
+        const st = E.level_chain && h.states[E.level_chain];
+        const words = st && st.attributes ? st.attributes.words : null;
+        return typeof words === 'string' ? words : '';
+      })(),
       path: path ? path.state : null,
       config: cfg ? cfg.state : null,
     };
@@ -95,8 +112,19 @@ export class SvolderChainCard extends SvolderCard {
     add(2, 'Loudness', PIC.loud, m.loud.sw, loudSetting, 'follows the volume');
     add(3, 'Crossfeed', PIC.xf, m.xf.sw, sel('xf', m.xf.sel), both ? 'on with speakers: pick one' : 'exclusive with speakers', both);
     add(4, 'Speakers', PIC.sp, m.sp.sw, sel('sp', m.sp.sel), both ? 'on with crossfeed: pick one' : 'exclusive with crossfeed', both);
-    const root = this.draw(`<div class="mods">${mods.join('')}</div>${m.path !== null || m.config !== null
+    const total = m.words ? `<span class="total"><b>${esc(m.words)}</b></span>` : '';
+    const byp = m.bypass ? `<button type="button" class="key" data-bypass aria-label="Bypass" aria-pressed="${m.bypass.on}"${
+      m.bypass.writable && m.bypass.known ? '' : ' disabled'}>${m.bypass.known ? (m.bypass.on ? 'Bypass on' : 'Bypass off') : 'Bypass \u2014'}</button>` : '';
+    const head = total || byp ? `<div class="head">${total || '<span></span>'}${byp}</div>` : '';
+    const root = this.draw(`${head}<div class="mods">${mods.join('')}</div>${m.path !== null || m.config !== null
       ? `<div class="foot"><span>${m.path !== null ? `Path <b>${esc(m.path)}</b>` : ''}</span><span>${m.config !== null ? `Config <b>${esc(m.config)}</b>` : ''}</span></div>` : ''}`, CSS);
+    const bypassKey = root.querySelector('[data-bypass]');
+    if (bypassKey) {
+      bypassKey.addEventListener('click', () => {
+        if (!m.bypass.writable || !m.bypass.known) return;
+        this.call('switch', m.bypass.on ? 'turn_off' : 'turn_on', { entity_id: m.bypass.id });
+      });
+    }
     const src = { 1: m.eq.sw, 2: m.loud.sw, 3: m.xf.sw, 4: m.sp.sw };
     for (const b of root.querySelectorAll('[data-sw]')) {
       b.addEventListener('click', () => {

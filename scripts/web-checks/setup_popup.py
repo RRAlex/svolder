@@ -11,15 +11,23 @@ the one that fails (`SVOLDER_FAKE_CONFIG=fail`, `config N`). The logic is node's
                                      drive draws none
   the_chip_opens_the_popup           a real click on the chip opens PipeWire config; the menu row `PipeWire
                                      config…` opens it too, in every theme, Night drive included
-  the_popup_prints_the_card          the title, the sink, the summary, seven lines (the failing ones tagged,
-                                     as many as the card says) and the limit; nothing scrolls sideways; the
-                                     rows are at least 24 px
+  the_popup_prints_the_card          the title, the sink, the `From player` and `To DAC` rows (the card's
+                                     words, `hw:3` for the fake), the summary, seven lines (the failing ones
+                                     tagged, as many as the card says), a row per hop of the section and the
+                                     limit
+                                     12 px under the last list; nothing scrolls sideways; the rows are at
+                                     least 24 px
   the_keyboard_opens_and_closes_it   Tab reaches the button, Enter opens the popup, a redraw of the card and
                                      of the host comes while it stands, Escape closes it and the focus is on
                                      the button again
   signal_computer_side               (Signal) the chip under the computer's shelf opens it too
+  the_popup_names_the_hops           the Path row's `changes` is drawn as the section `What changes the
+                                     sound`, one row per hop, key, label and words as the row has them; the
+                                     fake DAC is below 0 dB so the DAC row is always there, the failing fake
+                                     adds the computer's
   paper_fails_in_pencil              (Paper) a failing line and the summary dot are in `--paper-pencil`
 Usage: python3 setup_popup.py chromium|firefox"""
+import os
 import sys
 import time
 
@@ -31,6 +39,7 @@ from popups import DESK, PHONE, by_the_menu, centre, close_popup, ready, rects
 browser = modal.browser
 
 SETUP = "__core.model.page().device?.playing?.path?.config ?? null"
+CHANGES = "__core.model.page().device?.playing?.path?.row?.changes ?? null"
 CHIPS = {'ember': '#np-config', 'signal': '#sg-config', 'paper': '#p-config'}
 # Ember draws its chip only while the check fails; while it passes the label `Path` is the button
 LABEL = '#np-label'
@@ -162,11 +171,52 @@ def case(b, d, theme, size, fail):
                       " sum: q('.fpk-sum')?.textContent, rows: document.querySelectorAll('#popup-setup .fp-row').length,"
                       " fails: document.querySelectorAll('#popup-setup .fp-tag').length,"
                       " low: [...document.querySelectorAll('#popup-setup .fp-row')].filter((r) => r.getBoundingClientRect().height < 24).length,"
-                      " note: document.querySelector('#popup-setup .fp-page > .fp-note')?.textContent ?? null }; })()")
+                      " note: document.querySelector('#popup-setup .fp-page > .fp-note')?.textContent ?? null,"
+                      " gap: (() => { const n = document.querySelector('#popup-setup .fp-page > .fp-note');"
+                      " return n ? getComputedStyle(n).marginTop : null; })() }; })()")
         fails = sum(1 for line in card['lines'] if line['outcome'] == 'fail')
-        check(f'the_popup_prints_the_card {tag}: title, sink, summary, seven lines, the failing tagged',
+        # the section is the Path row's `changes`: the passing fake changes the sound only at its DAC
+        # (always below 0 dB, fake host, playing.py), so that row is required in every theme; the
+        # failing fake adds the computer (a filter in the sink, a forced-rate resample)
+        changes = b.page(CHANGES)
+        seen = b.page("(() => { const list = document.querySelector('#popup-setup [data-changes]');"
+                      " return list ? { hops: [...list.querySelectorAll('[data-hop]')].map((r) => ({"
+                      " hop: r.dataset.hop, label: r.querySelector('.fp-row-label')?.textContent,"
+                      " words: r.querySelector('.fp-row-value')?.textContent })),"
+                      " heading: [...document.querySelectorAll('#popup-setup .fp-heading')].map((h) => h.textContent) } : null; })()")
+        want = [{'hop': c['key'], 'label': c['label'],
+                 'words': ' · '.join(w['text'] for w in c['words'])} for c in changes or []]
+        check(f'the_popup_names_the_hops {tag}: the section is the row\'s changes, shown, with its words',
+              bool(changes) and seen is not None and seen['hops'] == want
+              and any(c['hop'] == 'dac' and c['words'].startswith('volume') for c in want)
+              and (not fail or any(c['hop'] == 'computer' for c in want))
+              and 'What changes the sound' in seen['heading'], [changes, seen])
+        want_rows = 9 + len(changes or [])
+        io = b.page("(() => { const out = {}; for (const r of document.querySelectorAll('#popup-setup [data-io]'))"
+                    " out[r.dataset.io] = { label: r.querySelector('.fp-row-label')?.textContent,"
+                    " words: r.querySelector('.fp-row-value')?.textContent }; return out; })()")
+        check(f'the_popup_prints_the_card {tag}: From player and To DAC are the card\'s words, under the sink',
+              bool(card.get('from_player')) and bool(card.get('to_dac'))
+              and io == {'from_player': {'label': 'From player', 'words': card['from_player']},
+                         'to_dac': {'label': 'To DAC', 'words': card['to_dac']}}
+              and card['to_dac'].endswith('stereo \u00b7 hw:3') and 'kHz' in card['from_player'],
+              [io, card.get('from_player'), card.get('to_dac')])
+        gap = b.page("(() => { const rows = document.querySelectorAll('#popup-setup [data-io]');"
+                     " const sum = document.querySelector('#popup-setup .fpk-sum');"
+                     " return rows.length && sum ? Math.round(sum.getBoundingClientRect().top"
+                     " - rows[rows.length - 1].getBoundingClientRect().bottom) : null; })()")
+        check(f'the_popup_prints_the_card {tag}: the summary stands 12 px under the last io row',
+              gap == 12, gap)
+        check(f'the_popup_prints_the_card {tag}: title, sink, summary, seven lines and the hops, the failing tagged',
               page['title'] == 'PipeWire config' and page['sink'] == card['sink'] and page['sum'] == card['summary']
-              and page['rows'] == 7 and page['fails'] == fails and page['low'] == 0 and bool(page['note']), [page, fails])
+              and page['rows'] == want_rows and page['fails'] == fails and page['low'] == 0 and bool(page['note']), [page, fails])
+        folder = os.environ.get('WEB_CHECK_SHOTS')
+        if folder:
+            time.sleep(0.5)
+            with open(os.path.join(folder, f'{theme}-setup-{size}-{"fail" if fail else "pass"}.png'), 'wb') as out:
+                out.write(b.shot())
+        check(f'the_popup_prints_the_card {tag}: the limit sits 12 px under the last list, the section or not',
+              page['gap'] == '12px', page['gap'])
         check(f'the_popup_prints_the_card {tag}: nothing scrolls sideways', b.page(OVER) == [0],
               rects(b, 'setup')['over'])
         if theme == 'paper' and fail:

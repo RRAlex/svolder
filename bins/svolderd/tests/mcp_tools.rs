@@ -249,7 +249,7 @@ const READ_TOOLS: [&str; 6] = [
     "get_host",
     "list_scenes",
 ];
-const WRITE_TOOLS: [&str; 14] = [
+const WRITE_TOOLS: [&str; 15] = [
     "set_control",
     "load_preset",
     "mute",
@@ -260,6 +260,7 @@ const WRITE_TOOLS: [&str; 14] = [
     "set_host_crossfeed",
     "set_host_speakers",
     "set_host_loudness",
+    "set_host_bypass",
     "load_scene",
     "save_scene",
     "rename_scene",

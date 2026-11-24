@@ -41,6 +41,7 @@ fn stream() -> StreamFacts {
         rate_hz: Some(48_000),
         format: Some("S16LE".into()),
         volume_milli: Some(1000),
+        channels: None,
         muted: false,
     }
 }
@@ -212,6 +213,7 @@ fn chain(eq: bool, crossfeed: bool, speakers: bool) -> RouteFacts {
         loudness: false,
         crossfeed,
         speakers,
+        untouched: false,
     });
     route
 }
@@ -226,6 +228,21 @@ fn loudness_is_named_after_the_eq_and_before_the_crossfeed() {
     let mut alone = chain(false, false, false);
     alone.stages.as_mut().unwrap().loudness = true;
     assert_eq!(path_line(&alone, &dac()).words, ["loudness on"]);
+}
+
+#[test]
+fn a_pass_through_proved_untouched_names_no_stage_and_the_hop_is_green() {
+    let mut route = chain(false, false, false);
+    // The flat pass-through kept for a stream is told as such until the daemon proves it untouched.
+    assert_eq!(path_line(&route, &dac()).words, ["EQ pass-through"]);
+    route.stages.as_mut().unwrap().untouched = true;
+    let line = path_line(&route, &dac());
+    assert_eq!(line.verdict, Verdict::Untouched);
+    assert!(line.hops.iter().all(|hop| !hop.changes), "{:?}", line.hops);
+    // The word never hides a stage that plays.
+    let mut playing = chain(true, false, false);
+    playing.stages.as_mut().unwrap().untouched = true;
+    assert_eq!(path_line(&playing, &dac()).words, ["host EQ on"]);
 }
 
 #[test]
@@ -450,13 +467,72 @@ fn a_stream_without_a_match_is_not_identified() {
 }
 
 #[test]
-fn no_player_is_unknown_in_its_own_words() {
+fn no_player_and_nothing_running_says_nothing_playing() {
     let mut route = clean();
     route.player = None;
     route.player_match = PlayerMatch::NoPlayer;
     let line = path_line(&route, &dac());
     assert_eq!(line.verdict, Verdict::Unknown);
-    assert_eq!(line.words, vec!["no player".to_string()]);
+    assert_eq!(line.words, vec!["nothing playing".to_string()]);
+}
+
+#[test]
+fn no_player_and_several_streams_is_not_judged_and_says_no_mpris_player() {
+    let mut route = clean();
+    route.player = None;
+    route.player_match = PlayerMatch::NoPlayer;
+    route.others_mixing = 2;
+    for line in [path_line(&route, &dac()), computer_line(&route)] {
+        assert_eq!(line.verdict, Verdict::Unknown);
+        assert!(line.hops.is_empty(), "{line:?}");
+        assert_eq!(line.words, vec!["no MPRIS player".to_string()]);
+    }
+    // With nothing else running it is silence.
+    route.others_mixing = 0;
+    assert_eq!(
+        path_line(&route, &dac()).words,
+        vec!["nothing playing".to_string()]
+    );
+}
+
+#[test]
+fn a_stream_with_no_mpris_player_is_judged_from_the_stream_on() {
+    let mut route = clean();
+    route.player_match = PlayerMatch::NoMpris;
+    let line = path_line(&route, &dac());
+    assert_eq!(line.verdict, Verdict::Untouched);
+    assert_eq!(
+        line.words,
+        vec!["untouched".to_string(), "no MPRIS player".to_string()]
+    );
+    assert!(
+        line.sentence()
+            .is_some_and(|s| s.contains("(no MPRIS player)")),
+        "{line:?}"
+    );
+    assert_eq!(line.hops[0].label, "player (no MPRIS)");
+    assert_eq!(line.hops[0].detail, "48 kHz S16LE, volume 100 %");
+    assert_eq!(line.hops[0].rate_hz, Some(48_000));
+    assert!(line.hops[0].unnamed && !line.hops[0].unknown);
+
+    // Its volume, its mute and its rate are judged as an identified player's are.
+    route.player.as_mut().unwrap().volume_milli = Some(500);
+    let line = path_line(&route, &dac());
+    assert_eq!(line.verdict, Verdict::Changed);
+    assert_eq!(line.words, vec!["player volume 50 %".to_string()]);
+    route.player.as_mut().unwrap().volume_milli = Some(1000);
+    route.player.as_mut().unwrap().rate_hz = Some(44_100);
+    route.others_mixing = 1;
+    let line = path_line(&route, &dac());
+    assert_eq!(line.verdict, Verdict::Changed);
+    assert!(
+        line.words.iter().any(|w| w.contains("resampled")),
+        "{line:?}"
+    );
+    assert!(
+        line.words.contains(&"1 other sound mixing".to_string()),
+        "{line:?}"
+    );
 }
 
 #[test]
@@ -1997,6 +2073,7 @@ fn the_computer_records_resampling_volume_eq_and_mixing() {
         loudness: true,
         crossfeed: true,
         speakers: true,
+        untouched: false,
     });
     let line = path_line(&route, &dac());
     assert_eq!(

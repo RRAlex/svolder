@@ -49,8 +49,22 @@
 }
 
 .svolder-strip {
-    spacing: 2px;
+    spacing: 0;
     padding-right: 10px;
+}
+
+/* The 2 px between drawn segments is padding inside the reactive bins, so the pointer never
+   crosses a gap that belongs to no bin. */
+.svolder-bin {
+    padding: 0 1px;
+}
+
+.svolder-bin:first-child {
+    padding-left: 0;
+}
+
+.svolder-bin:last-child {
+    padding-right: 0;
 }
 
 .svolder-segment {
@@ -60,9 +74,9 @@
     background-color: #666666;
 }
 
-.svolder-path-off {
-    color: #f8e45c;
+.svolder-path-line {
     font-size: 9pt;
+    max-width: 340px;
 }
 
 .svolder-failure {

@@ -175,6 +175,7 @@ fn bare_state() -> HostEqState {
         speakers_on: false,
         speakers_loaded: None,
         loudness: None,
+        bypass: None,
     }
 }
 

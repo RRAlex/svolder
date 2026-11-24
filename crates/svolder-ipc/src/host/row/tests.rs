@@ -27,7 +27,15 @@ fn check(summary: SetupSummary) -> SetupCheck {
         sink: "Schiit Gungnir 2".into(),
         lines: Vec::new(),
         summary,
+        io: Default::default(),
     }
+}
+
+/// [`super::path_row`], with the section tied to the row on every case this file builds.
+fn path_row(line: &PathLine, check: Option<&SetupCheck>) -> PathRow {
+    let row = super::path_row(line, check);
+    assert_ties(&row);
+    row
 }
 
 fn word(text: &str, tone: Tone) -> RowWord {
@@ -82,6 +90,20 @@ fn case_untouched_end_to_end() {
         vec![word("48 kHz", Tone::Dim), word("volume 0 dB", Tone::Dim)]
     );
     assert_eq!(row.words, None);
+    assert_eq!(line.end_to_end(), EndToEnd::Untouched);
+}
+
+#[test]
+fn a_stream_with_no_mpris_player_says_so_with_a_dim_question_mark_and_stays_green() {
+    let mut route = clean();
+    route.player_match = PlayerMatch::NoMpris;
+    let line = path_line(&route, &dac(Some(0.0)));
+    let row = path_row(&line, None);
+    assert_eq!(row.label.tone, Tone::Good);
+    assert_eq!(row.hops[0].key, "player");
+    assert_eq!(row.hops[0].label, "player (no MPRIS)");
+    assert_eq!(row.hops[0].words, vec![word("?", Tone::Dim)]);
+    assert!(row.changes.is_empty());
     assert_eq!(line.end_to_end(), EndToEnd::Untouched);
 }
 
@@ -256,6 +278,7 @@ fn another_sink_and_another_input_have_no_hops_and_a_plain_label() {
     );
     assert!(row.hops.is_empty() && row.values.is_empty());
     assert_eq!(row.words.as_deref(), Some("→ DELL S2721QS"));
+    assert!(row.changes.is_empty(), "the player elsewhere: no section");
     assert_eq!(line.end_to_end(), EndToEnd::NotThisDac);
 
     let mut optical = dac(None);
@@ -271,6 +294,7 @@ fn another_sink_and_another_input_have_no_hops_and_a_plain_label() {
     );
     assert!(row.hops.is_empty() && row.values.is_empty());
     assert_eq!(row.words.as_deref(), Some("the DAC listens to Optical"));
+    assert!(row.changes.is_empty(), "another input: no section");
     assert_eq!(line.end_to_end(), EndToEnd::OtherInput);
 }
 
@@ -423,6 +447,7 @@ fn short_forms_that_repeat_are_drawn_once_at_the_hop() {
         loudness: true,
         crossfeed: true,
         speakers: true,
+        untouched: false,
     });
     setup.dither = Some(Dither {
         method: "triangular".into(),
@@ -538,4 +563,353 @@ fn the_row_serializes_with_snake_case_tones() {
         serde_json::json!({"text": "48 kHz", "tone": "dim"})
     );
     assert_eq!(json["words"], serde_json::Value::Null);
+}
+
+/// The section's hops as (label, words as text) pairs.
+fn changes_of(row: &PathRow) -> Vec<(String, Vec<String>)> {
+    row.changes
+        .iter()
+        .map(|hop| {
+            let words = hop.words.iter().map(|w| w.text.clone()).collect();
+            (hop.label.clone(), words)
+        })
+        .collect()
+}
+
+fn named(label: &str, words: &[&str]) -> (String, Vec<String>) {
+    (
+        label.to_string(),
+        words.iter().map(|w| w.to_string()).collect(),
+    )
+}
+
+/// The Warn words the row draws (hops and values) less `config N`, and the words of the section,
+/// both sorted: the section's rule is that these are equal.
+fn warn_words(row: &PathRow) -> (Vec<String>, Vec<String>) {
+    let mut shown: Vec<String> = row
+        .hops
+        .iter()
+        .flat_map(|hop| hop.words.iter())
+        .chain(row.values.iter())
+        .filter(|w| w.tone == Tone::Warn && !w.text.starts_with("config "))
+        .map(|w| w.text.clone())
+        .collect();
+    let mut named: Vec<String> = row
+        .changes
+        .iter()
+        .flat_map(|hop| hop.words.iter())
+        .map(|w| w.text.clone())
+        .collect();
+    shown.sort();
+    named.sort();
+    (shown, named)
+}
+
+/// The rule that ties the section to the row: its words are the row's Warn words.
+fn assert_ties(row: &PathRow) {
+    let (shown, named) = warn_words(row);
+    assert_eq!(named, shown, "{row:?}");
+    assert!(
+        row.changes
+            .iter()
+            .flat_map(|hop| hop.words.iter())
+            .all(|w| w.tone == Tone::Warn),
+        "{row:?}"
+    );
+}
+
+#[test]
+fn changes_name_the_dacs_tone_control() {
+    let mut device = dac(Some(0.0));
+    device.stage.tone = true;
+    let row = path_row(&path_line(&clean(), &device), None);
+    assert_eq!(changes_of(&row), [named("DAC USB 1", &["tone control"])]);
+    assert_ties(&row);
+}
+
+#[test]
+fn changes_name_a_lowered_dac_volume_then_the_other_words() {
+    let mut device = dac(Some(-12.0));
+    device.stage.tone = true;
+    let row = path_row(&path_line(&clean(), &device), None);
+    assert_eq!(
+        changes_of(&row),
+        [named("DAC USB 1", &["volume -12.0 dB", "tone control"])]
+    );
+    assert_ties(&row);
+    let lowered = path_row(&path_line(&clean(), &dac(Some(-12.0))), None);
+    assert_eq!(
+        changes_of(&lowered),
+        [named("DAC USB 1", &["volume -12.0 dB"])]
+    );
+    assert_ties(&lowered);
+}
+
+#[test]
+fn changes_name_a_muted_dac_and_show_beside_a_failing_check() {
+    let mut device = dac(Some(0.0));
+    device.stage.muted = true;
+    let row = path_row(
+        &path_line(&clean(), &device),
+        Some(&check(SetupSummary::Changes(2))),
+    );
+    assert_eq!(changes_of(&row), [named("DAC USB 1", &["muted"])]);
+    assert_ties(&row);
+}
+
+#[test]
+fn changes_name_a_player_volume_below_full() {
+    let mut route = clean();
+    route.player.as_mut().unwrap().volume_milli = Some(500);
+    let row = path_row(&path_line(&route, &dac(Some(0.0))), None);
+    assert_eq!(row.label.words, "Path: the player changes the sound");
+    assert_eq!(changes_of(&row), [named("player", &["volume 50 %"])]);
+    assert_ties(&row);
+}
+
+#[test]
+fn changes_name_a_computer_volume_below_full() {
+    let mut route = clean();
+    route.sink.as_mut().unwrap().volume_milli = Some(800);
+    let row = path_row(&path_line(&route, &dac(Some(0.0))), None);
+    assert_eq!(changes_of(&row), [named("computer", &["volume 80 %"])]);
+    assert_ties(&row);
+}
+
+#[test]
+fn changes_name_a_muted_player_and_a_muted_computer() {
+    let mut route = clean();
+    route.player.as_mut().unwrap().muted = true;
+    route.sink.as_mut().unwrap().muted = true;
+    let row = path_row(&path_line(&route, &dac(Some(0.0))), None);
+    assert_eq!(
+        changes_of(&row),
+        [named("player", &["muted"]), named("computer", &["muted"])]
+    );
+    assert_ties(&row);
+}
+
+#[test]
+fn changes_name_another_sound_mixing() {
+    let mut route = clean();
+    route.others_mixing = 1;
+    let row = path_row(&path_line(&route, &dac(Some(0.0))), None);
+    assert_eq!(
+        changes_of(&row),
+        [named("computer", &["1 other sound mixing"])]
+    );
+    assert_ties(&row);
+}
+
+#[test]
+fn changes_name_the_computers_eq() {
+    let mut route = clean();
+    route.host_eq = true;
+    let row = path_row(&path_line(&route, &dac(Some(0.0))), None);
+    assert_eq!(row.changes.len(), 1, "{row:?}");
+    assert_eq!(row.changes[0].label, "computer");
+    assert!(
+        row.changes[0].words.iter().any(|w| w.text.contains("EQ")),
+        "{row:?}"
+    );
+    assert_ties(&row);
+}
+
+#[test]
+fn changes_name_a_resample_with_a_passing_or_failing_config() {
+    let mut route = clean();
+    route.player.as_mut().unwrap().rate_hz = Some(44_100);
+    let line = path_line(&route, &dac(Some(0.0)));
+    for summary in [SetupSummary::Untouched, SetupSummary::Changes(1)] {
+        let row = path_row(&line, Some(&check(summary)));
+        assert_eq!(changes_of(&row), [named("computer", &["resampled"])]);
+        assert_ties(&row);
+    }
+}
+
+#[test]
+fn changes_name_every_hop_in_path_order() {
+    let mut route = clean();
+    route.player.as_mut().unwrap().volume_milli = Some(500);
+    route.sink.as_mut().unwrap().volume_milli = Some(800);
+    route.others_mixing = 2;
+    let mut device = dac(Some(-6.0));
+    device.stage.tone = true;
+    let row = path_row(
+        &path_line(&route, &device),
+        Some(&check(SetupSummary::Changes(1))),
+    );
+    let labels: Vec<_> = row.changes.iter().map(|hop| hop.label.as_str()).collect();
+    assert_eq!(labels, ["player", "computer", "DAC USB 1"]);
+    let keys: Vec<_> = row.changes.iter().map(|hop| hop.key).collect();
+    assert_eq!(keys, ["player", "computer", "dac"]);
+    assert_eq!(row.changes[0].words[0].text, "volume 50 %");
+    assert_eq!(
+        row.changes[2]
+            .words
+            .iter()
+            .map(|w| w.text.as_str())
+            .collect::<Vec<_>>(),
+        ["volume -6.0 dB", "tone control"]
+    );
+    assert_ties(&row);
+}
+
+#[test]
+fn changes_are_empty_when_the_path_is_not_changed_end_to_end() {
+    // Untouched, with a failing check alone: the box's own lines say it.
+    let untouched = path_row(&path_line(&clean(), &dac(Some(0.0))), None);
+    assert!(untouched.changes.is_empty());
+    let failing = path_row(
+        &path_line(&clean(), &dac(Some(0.0))),
+        Some(&check(SetupSummary::Changes(2))),
+    );
+    assert!(failing.changes.is_empty());
+    let json = serde_json::to_value(&untouched).unwrap();
+    assert!(json.get("changes").is_none());
+    // Unknown.
+    let mut route = clean();
+    route.sink.as_mut().unwrap().volume_milli = None;
+    let unknown = path_row(&path_line(&route, &dac(None)), None);
+    assert_eq!(unknown.label.words, "Path: not everything could be read");
+    assert!(unknown.changes.is_empty());
+    // Another sink, no route.
+    let mut other = clean();
+    other.sink = Some(SinkFacts {
+        name: "alsa_output.pci".into(),
+        description: "DELL S2721QS".into(),
+        rate_hz: Some(48_000),
+        format: None,
+        volume_milli: Some(1000),
+        muted: false,
+        usb_vendor_id: None,
+        usb_product: None,
+    });
+    let elsewhere = path_row(&path_line(&other, &dac(Some(0.0))), None);
+    assert_eq!(elsewhere.label.tone, Tone::Plain);
+    assert!(elsewhere.changes.is_empty());
+    assert!(PathRow::not_read().changes.is_empty());
+}
+
+#[test]
+fn changes_name_the_dacs_own_rate_change_once_before_its_stage_words() {
+    let mut device = dac(Some(0.0));
+    device.rate_hz = Some(44_100);
+    device.stage.tone = true;
+    let row = path_row(&path_line(&clean(), &device), None);
+    assert_eq!(row.changes.len(), 1, "{row:?}");
+    let (label, words) = (&row.changes[0].label, &row.changes[0].words);
+    assert_eq!(label, "DAC USB 1");
+    assert_eq!(words.len(), 2, "{words:?}");
+    assert_eq!(words[1], word("tone control", Tone::Warn));
+    assert!(words[0].text.starts_with("reads"), "{words:?}");
+    assert_eq!(words[0].tone, Tone::Warn);
+    let dac_hop = row.hops.last().unwrap();
+    assert_eq!(
+        dac_hop.words,
+        vec![words[0].clone()],
+        "the row's hop says the same"
+    );
+    assert_ties(&row);
+}
+
+#[test]
+fn changes_leave_a_not_read_mark_out() {
+    let mut device = dac(Some(0.0));
+    device.input = None;
+    device.stage.tone = true;
+    let row = path_row(&path_line(&clean(), &device), None);
+    assert!(
+        row.hops
+            .last()
+            .unwrap()
+            .words
+            .contains(&word("?", Tone::Dim)),
+        "the row's hop carries the dim ?: {:?}",
+        row.hops
+    );
+    assert_eq!(changes_of(&row), [named("DAC", &["tone control"])]);
+    assert_ties(&row);
+}
+
+/// DAC stages: a volume and the stage's other words, one at a time and all at once.
+fn stages() -> Vec<(Option<f64>, DacStage)> {
+    let flat = DacStage::default();
+    vec![
+        (Some(0.0), flat),
+        (Some(-9.0), flat),
+        (Some(f64::NEG_INFINITY), flat),
+        (None, flat),
+        (
+            Some(0.0),
+            DacStage {
+                balance: true,
+                ..flat
+            },
+        ),
+        (
+            Some(0.0),
+            DacStage {
+                muted: true,
+                ..flat
+            },
+        ),
+        (
+            Some(0.0),
+            DacStage {
+                phase: true,
+                ..flat
+            },
+        ),
+        (Some(0.0), DacStage { nos: true, ..flat }),
+        (
+            Some(-3.0),
+            DacStage {
+                balance: true,
+                muted: true,
+                phase: true,
+                nos: true,
+                ..flat
+            },
+        ),
+    ]
+}
+
+/// Every case the tests above build, and the property that ties the section to the row.
+#[test]
+fn the_sections_words_are_the_rows_warn_words_over_every_combination() {
+    for player in [1000, 500] {
+        for computer in [1000, 800] {
+            for mixing in [0, 1, 3] {
+                for eq in [false, true] {
+                    for rate in [48_000, 44_100] {
+                        for tone in [false, true] {
+                            for (volume, stage) in stages() {
+                                for config in [None, Some(SetupSummary::Changes(2))] {
+                                    let mut route = clean();
+                                    route.player.as_mut().unwrap().volume_milli = Some(player);
+                                    route.player.as_mut().unwrap().rate_hz = Some(rate);
+                                    route.sink.as_mut().unwrap().volume_milli = Some(computer);
+                                    route.others_mixing = mixing;
+                                    route.host_eq = eq;
+                                    let mut device = dac(volume);
+                                    device.stage = DacStage {
+                                        tone,
+                                        volume_db: volume,
+                                        ..stage
+                                    };
+                                    let check = config.map(check);
+                                    let row = path_row(&path_line(&route, &device), check.as_ref());
+                                    assert_ties(&row);
+                                    let changed = row.label.words.contains("changes the sound")
+                                        || row.label.words.contains("change the sound");
+                                    assert_eq!(row.changes.is_empty(), !changed, "{row:?}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

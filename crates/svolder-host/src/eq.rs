@@ -455,6 +455,10 @@ pub struct HostEqState {
     /// reference. `None` until it is first set; a state from before it loads with none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loudness: Option<loudness::LoudnessSettings>,
+    /// The stages the bypass turned off, `[bypass]` in the file: present only while the bypass
+    /// holds, so a restart can bring them back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bypass: Option<levels::HeldStages>,
 }
 
 impl HostEqState {
@@ -655,6 +659,7 @@ mod control;
 pub mod crossfeed;
 #[cfg(test)]
 mod lab;
+pub mod levels;
 pub mod live;
 pub mod loudness;
 mod manage;
@@ -668,14 +673,15 @@ pub mod speakers;
 mod systemd;
 
 pub use control::{
-    CUSTOM, CrossfeedEdit, Edit, EqControl, EqView, Keep, LEGACY_NOTE, LEVEL_HELD_NOTE, LIVE_NOTE,
-    LevelHint, LoudnessEdit, PASSTHROUGH_NOTE, PointView, Recalled, SpeakersEdit, kind_word,
-    parse_kind,
+    CUSTOM, CrossfeedEdit, Edit, EqControl, EqView, Keep, LEGACY_NOTE, LEVEL_CLIMB_DB_PER_TICK,
+    LEVEL_HELD_NOTE, LIVE_NOTE, LevelHint, LoudnessEdit, PASSTHROUGH_NOTE, PointView, Recalled,
+    SpeakersEdit, kind_word, parse_kind,
 };
 pub use crossfeed::{
     CrossfeedSettings, CrossfeedView, Model as CrossfeedModel, Stage as CrossfeedStage,
     StageResponse, stage_response,
 };
+pub use levels::{BypassView, ChainLevels, HeldStages};
 pub use live::{LiveNode, NodeKey, PREAMP, PreampCarrier, SHAPE, SlotShape};
 pub use loudness::{
     Level, LoudnessChange, LoudnessSettings, LoudnessView, Stage as LoudnessStage,

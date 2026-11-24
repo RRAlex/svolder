@@ -818,6 +818,10 @@ pub(crate) struct SetupModel {
     pub(crate) summary: String,
     /// The sink the check judges.
     pub(crate) sink: String,
+    /// What comes in from the player (the judge's words).
+    pub(crate) from_player: String,
+    /// What the card is open at (the judge's words).
+    pub(crate) to_dac: String,
     pub(crate) lines: Vec<SetupLineModel>,
 }
 
@@ -879,6 +883,8 @@ impl From<&Playing> for PlayingModel {
                     chip: setup.chip.clone(),
                     summary: setup.summary.clone(),
                     sink: setup.sink.clone(),
+                    from_player: setup.from_player.clone(),
+                    to_dac: setup.to_dac.clone(),
                     lines: setup
                         .lines
                         .iter()

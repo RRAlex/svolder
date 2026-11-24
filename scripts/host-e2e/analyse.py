@@ -598,9 +598,22 @@ def xf_case(conn, label, f, mono=False, left=None):
     return cl, cr, want_l, want_r, delay
 
 
+def climb_over(deadline=8.0):
+    """Wait until the daemon's view says no climb is in progress."""
+    conn = STATE.get('conn')
+    if conn is None:
+        return
+    try:
+        settles(lambda: ((conn.view()['eq'].get('levels') or {}).get('climb_to_db')) is None, deadline)
+    except (Fail, OSError):
+        pass
+
+
 def null_test(label, f, block):
     """The left-only tone `f` through a chain that should do nothing: the recording is the input,
-    sample for sample, and the right channel is exactly silent."""
+    sample for sample, and the right channel is exactly silent. A pass-through that is climbing to 0 dB
+    (a stage was just turned off) is waited for first: only the end of the climb is the input."""
+    climb_over()
     xl, xr, fr = capture(1.6)
     per = fr // math.gcd(int(f), fr)
     ref = block[:per, 0].astype(float)
@@ -1580,6 +1593,500 @@ def cpu_seconds(pid):
     return (int(fields[11]) + int(fields[12])) / os.sysconf('SC_CLK_TCK')
 
 
+# ---- P0: option D, an identity config with the curve sent live ---------------------------------
+
+# The curve of the proof: a +6 dB peak on the tone (1 kHz, Q 1) under the preamp it needs.
+P0_PEAK = {'op': 'set', 'index': 1, 'kind': 'PK', 'f': 1000.0, 'g': 6.0, 'q': 1.0, 'done': True}
+P0_FLAT = {'op': 'set', 'index': 1, 'kind': 'PK', 'f': 1000.0, 'g': 0.0, 'q': 1.0, 'done': True}
+# The most the envelope of the tone may rise over its unity level while the chain is rebuilt: the
+# 4 ms window's own ripple is under 0.05 dB, so this is margin and not a loophole.
+P0_OVER_DB = 0.15
+RAW_PORTS = ('b0', 'b1', 'b2', 'a0', 'a1', 'a2')
+
+
+def p0_conf_ports(text):
+    """The slot-1 coefficients (as {port: value}) and the preamp's Mult a chain config holds."""
+    m = re.search(r'name = l01 label = bq_raw config = \{ coefficients = \[ \{ rate = \d+ ' +
+                  ' '.join(r'%s = (\S+)' % k for k in RAW_PORTS), text)
+    pre = re.search(r'name = lpre label = linear control = \{ Mult = (\S+)', text)
+    if not m or not pre:
+        raise Fail('the chain config has no slot 1 or no preamp to read')
+    return dict(zip(RAW_PORTS, (float(v) for v in m.groups()))), float(pre.group(1))
+
+
+def p0_line(slot, mult):
+    """The parameters of one live line: slot 1 on both channels and the preamp on both."""
+    params = []
+    for ch in 'lr':
+        params += [('%s01:%s' % (ch, k), slot[k]) for k in RAW_PORTS]
+    pre = [('%spre:Mult' % ch, mult) for ch in 'lr']
+    return params, pre
+
+
+def p0_send(node_id, first, second):
+    """One `pw-cli set-param` with `first` before `second` (a falling preamp is the first group, a
+    rising one the second)."""
+    body = ' '.join('"%s" %r' % (k, v) for k, v in first + second)
+    r = tool('pw-cli', 'set-param', str(node_id), 'Props', '{ params = [ %s ] }' % body)
+    if r.returncode != 0:
+        raise Fail('pw-cli set-param failed: ' + r.stderr.strip())
+
+
+def p0_confs(conn):
+    """The chain configs the daemon writes for the flat curve and for the +6 dB peak, as text."""
+    out = {}
+    for name, edit in (('flat', P0_FLAT), ('peak', P0_PEAK)):
+        conn.eq(edit)
+        conn.eq({'op': 'mode', 'on': True})
+        wait_until('the %s chain' % name, lambda: node(CHAIN), 10)
+        wait_until('the %s config' % name, lambda: chain_conf(), 10)
+        out[name] = open(chain_conf()).read()
+        conn.eq({'op': 'mode', 'on': False})
+        wait_until('the %s chain to go' % name, lambda: node(CHAIN) is None, 10)
+    conn.eq(P0_FLAT)
+    conn.eq({'op': 'mode', 'on': False})
+    wait_until('the daemon\'s EQ off', lambda: conn.view()['eq']['on'] is False and node(CHAIN) is None, 10)
+    return out
+
+
+def p0_run(label, conf_text, steps, red=False):
+    """One chain started from `conf_text` on its own pipewire (the daemon is not involved), the tone
+    through it, a recorder on the sink's monitor, and `steps(rec_marks, node_id)` driving it. Returns
+    (the envelope of the tone in dB re the level at the start, the marks as seconds into the recording,
+    the chain's ports as the graph holds them at the end)."""
+    path = '%s/p0-%s.conf' % (RUN, label)
+    with open(path, 'w') as fh:
+        fh.write(conf_text)
+    chain = spawn('pipewire', '-c', path)
+    wait_until('the chain\'s node', lambda: node(CHAIN), 15)
+    STATE['tone'] = spawn('pw-cat', '-p', '--properties', 'node.name=svtone', RUN + '/tone.wav')
+    wait_until('the tone', lambda: node('svtone'))
+    wait_until('the chain to play', chain_playing, 15)
+    rec = Recording()
+    time.sleep(1.5)
+    marks = {'start': time.monotonic()}
+    node_id = node(CHAIN)['id']
+    steps(marks, node_id)
+    time.sleep(0.6)
+    held = chain_params()
+    x, fr = rec.finish()
+    env, ts = ld_envelope(x, fr, TONE_HZ)
+    end = len(x) / fr
+    at = {k: end - (rec.t_stop - t) for k, t in marks.items()}
+    go_quiet()
+    stop(chain)
+    wait_until('the chain to go', lambda: node(CHAIN) is None, 10)
+    return env, ts, at, held
+
+
+def p0_rate(marks, name, rate):
+    """Force the sink's rate (a graph rebuild) and wait for the sink to run at it."""
+    marks[name] = time.monotonic()
+    r = tool('pw-metadata', '-n', 'settings', '0', 'clock.force-rate', str(rate))
+    check(r.returncode == 0, 'clock.force-rate %d set on the private instance' % rate)
+    target = rate or 48000
+    wait_until('the sink at %d' % target, lambda: sink_rate() == target, 8)
+    time.sleep(2.5)
+
+
+def p0_phase(conn, daemon, start_daemon):
+    """Option D, proved on the private PipeWire before anything is built on it: a chain started from
+    an IDENTITY config and sent its curve live never plays over unity at a graph rebuild, while a chain
+    started with the curve IN its config does (the red proof). Returns the daemon and its connection
+    (the daemon is restarted: the phase holds no daemon while its own chains run)."""
+    tone_wav(RUN + '/tone.wav')
+    confs = p0_confs(conn)
+    conn.ask({'cmd': 'stop'})
+    conn.close()
+    daemon.wait(10)
+    flat_slot, flat_mult = p0_conf_ports(confs['flat'])
+    peak_slot, peak_mult = p0_conf_ports(confs['peak'])
+    check(flat_slot['b0'] == 1.0 and flat_mult == 1.0, 'P0 the flat config holds the identity (slot 1 b0 %r, preamp %r)' % (flat_slot['b0'], flat_mult))
+    check(peak_mult < 0.6 and peak_slot['b0'] != 1.0, 'P0 the peak config holds the curve under its cut (preamp Mult %.4f, %.2f dB)' % (peak_mult, 20 * math.log10(peak_mult)))
+    cut = 20 * math.log10(peak_mult)
+    state = {}
+
+    def over(env, ts, at, a, b, base):
+        """The most the envelope is over `base` between two marks, and where (seconds)."""
+        sel = (ts >= at[a]) & (ts <= at[b])
+        i = int(np.argmax(env[sel]))
+        return float(env[sel][i] - base), float(ts[sel][i])
+
+    def level(env, ts, at, a, b, base):
+        sel = (ts >= at[a]) & (ts <= at[b])
+        return float(np.median(env[sel]) - base)
+
+    # D1: from the identity config, the curve live (the cut first), the preamp climbed to 0 dB with
+    # the slots flat, then a rate change (44.1 kHz) and back.
+    def d1(marks, nid):
+        marks['peak'] = time.monotonic()
+        p0_send(nid, *reversed(p0_line(peak_slot, peak_mult)))   # the cut first, then the slot
+        time.sleep(1.2)
+        marks['flat'] = time.monotonic()
+        p0_send(nid, *p0_line(flat_slot, 1.0))                   # the slot flat, then the preamp up
+        time.sleep(1.2)
+        p0_rate(marks, 'r44', 44100)
+        p0_rate(marks, 'r48', 0)
+        marks['end'] = time.monotonic()
+
+    env, ts, at, held = p0_run('d1', confs['flat'], d1)
+    base = float(np.median(env[(ts >= 0.3) & (ts <= at['start'] - 0.1)]))
+    o, when = over(env, ts, at, 'peak', 'end', base)
+    say('P0 D1 identity config, +6 dB curve live under %.2f dB, climbed to 0 dB flat, 44.1 then 48 kHz: the envelope peaks %+.3f dB '
+        're the start level at %.2f s' % (cut, o, when))
+    check(o <= P0_OVER_DB, 'P0 D1 the output is never over unity around the rebuilds (%+.3f dB, limit %+.2f)' % (o, P0_OVER_DB))
+    lv = level(env, ts, at, 'peak', 'flat', base)
+    check(abs(lv) <= 0.3, 'P0 D1 the curve live under its cut plays the tone at unity (%+.3f dB)' % lv)
+    check(held.get('l01:b0') == 1.0 and held.get('l01:b1') == 0.0 and held.get('lpre:Mult') == 1.0,
+          'P0 D1 the slot reads back flat and the preamp at 0 dB after the rebuilds (slot 1 b0 %r, Mult %r)' % (held.get('l01:b0'), held.get('lpre:Mult')))
+    state['d1'] = o
+
+    # D2: the opposite order: the curve live at its cut, a rate change, flat at the cut (quieter).
+    def d2(marks, nid):
+        marks['peak'] = time.monotonic()
+        p0_send(nid, *reversed(p0_line(peak_slot, peak_mult)))
+        time.sleep(1.2)
+        p0_rate(marks, 'r44', 44100)
+        p0_rate(marks, 'r48', 0)
+        marks['end'] = time.monotonic()
+
+    env, ts, at, held = p0_run('d2', confs['flat'], d2)
+    base = float(np.median(env[(ts >= 0.3) & (ts <= at['start'] - 0.1)]))
+    o, when = over(env, ts, at, 'peak', 'end', base)
+    after = float(np.median(env[(ts >= at['end'] - 2.0) & (ts <= at['end'] - 0.2)]) - base)
+    say('P0 D2 identity config, curve live at its cut, then 44.1 and 48 kHz: the envelope peaks %+.3f dB re the start level; settled %+.3f dB '
+        '(the cut is %.2f dB)' % (o, after, cut))
+    check(o <= P0_OVER_DB, 'P0 D2 the output is never over unity at the rebuilds (%+.3f dB)' % o)
+    check(abs(after - cut) <= 0.4, 'P0 D2 after the rebuild the chain plays flat at the cut: %+.3f dB (the cut is %.2f dB)' % (after, cut))
+    check(held.get('l01:b0') == 1.0 and abs(held.get('lpre:Mult', 0) - peak_mult) < 1e-5,
+          'P0 D2 the slot reads back flat and the preamp keeps its cut (b0 %r, Mult %r)' % (held.get('l01:b0'), held.get('lpre:Mult')))
+
+    # R: the red proof: the curve IN the config, the preamp climbed to 0 dB with the slot flat live,
+    # then a rebuild puts the curve back under the preamp that stayed at 0 dB.
+    def red(marks, nid):
+        marks['flat'] = time.monotonic()
+        p0_send(nid, *p0_line(flat_slot, 1.0))
+        time.sleep(1.2)
+        p0_rate(marks, 'r44', 44100)
+        p0_rate(marks, 'r48', 0)
+        marks['end'] = time.monotonic()
+
+    env, ts, at, held = p0_run('red', confs['peak'], red)
+    base = float(np.median(env[(ts >= 0.3) & (ts <= at['start'] - 0.1)]))
+    o, when = over(env, ts, at, 'flat', 'end', base)
+    say('P0 red: the curve IN the config, flat and 0 dB sent live, then 44.1 and 48 kHz: the envelope peaks %+.3f dB over unity at %.2f s' % (o, when))
+    if os.environ.get('HOST_E2E_P0_RED') == '1':
+        # the proof that the D checks fail on this chain: the same limit, on the config that holds the curve
+        check(o <= P0_OVER_DB, 'P0 red the output is never over unity around the rebuilds (%+.3f dB, limit %+.2f)' % (o, P0_OVER_DB))
+    check(o > 3.0, 'P0 red the curve in the config goes over unity at the rebuild (%+.3f dB, expected about +6)' % o)
+    return start_daemon()
+
+
+# ---- P1 to P5: the climb, an untouched pass-through, idle in 3 s ---------------------------------
+
+import bits  # noqa: E402  (the comparator and the pipe sinks of phase B)
+
+# The most the tone's level may rise between two 50 ms windows a step apart during a climb: one tick is 0.32 dB, a window pair that straddles two ticks reads up to 0.7 dB (0.68 measured).
+P_RISE_DB = 0.75
+# The shortest a climb of 3.1 dB may take, measured from -3.0 dB to -0.1 dB (0.32 dB every 50 ms is 0.45 s).
+P_CLIMB_MIN_S = 0.4
+
+
+def p_levels_of(x, fr, rec, t_from, t_to, base, stride=0.01, win=0.05):
+    """The tone's level in dB re `base` on `win` s windows every `stride` s between two monotonic times, as
+    [(seconds from t_from, dB)]."""
+    out = []
+    t = t_from
+    while t + win <= t_to:
+        out.append((t - t_from, rec.window(x, fr, t, t + win) - base))
+        t += stride
+    return out
+
+
+def p_all_off(conn):
+    """Every stage and the EQ off and no chain: the clean state each P phase starts from."""
+    old = STATE.pop('tone', None)
+    if old is not None:
+        stop(old)
+    conn.eq({'op': 'bypass', 'on': False}, expect_ack=False)
+    conn.eq({'op': 'speakers', 'on': False})
+    conn.eq({'op': 'crossfeed', 'on': False})
+    conn.eq({'op': 'loudness', 'on': False})
+    conn.eq({'op': 'mode', 'on': False})
+    wait_until('no chain', lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 15)
+
+
+def p_view(conn):
+    return conn.view()['eq']
+
+
+def p1_climb(conn, base):
+    """P1: a chain for crossfeed alone (Mid/Side bass, about 3.1 dB under the input) with the tone; crossfeed
+    off: the level climbs from -3.1 dB to 0 dB in no less than 0.4 s, never rising more than 0.6 dB in any 50
+    ms, and the view ends `untouched`."""
+    p_all_off(conn)
+    retone()
+    conn.eq({'op': 'crossfeed', 'on': True, 'model': 'mid-side'})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    check(settles(chain_playing, 10.0), 'P1 the tone plays through the crossfeed-only chain')
+    ok, _, lv = wait_level(base, -3.1, 0.3, 15)
+    check(ok, 'P1 Mid/Side bass plays the tone about 3.1 dB under the input (%+.2f dB)' % (lv if lv is not None else float('nan')))
+    check(p_view(conn)['levels']['untouched'] is False and p_view(conn)['levels']['passthrough'] is False,
+          'P1 a chain with a stage on is not untouched')
+    rec = Recording()
+    time.sleep(0.8)
+    t_cmd = time.monotonic()
+    conn.eq({'op': 'crossfeed', 'on': False})
+    mid = p_view(conn)['levels']
+    time.sleep(3.0)
+    x, fr = rec.finish()
+    lvls = p_levels_of(x, fr, rec, t_cmd - 0.4, t_cmd + 2.6, base)
+    before = [db for t, db in lvls if t < 0.3]
+    after = [db for t, db in lvls if t > 2.4]
+    start_db, end_db = float(np.median(before)), float(np.median(after))
+    lo = next((t for t, db in lvls if t > 0.35 and db >= -3.0), None)
+    hi = next((t for t, db in lvls if t > 0.35 and db >= -0.1), None)
+    rise = max(lvls[i + 5][1] - lvls[i][1] for i in range(len(lvls) - 5))
+    steps_over = [(round(lvls[i][0] - 0.4, 2), round(lvls[i + 5][1] - lvls[i][1], 2)) for i in range(len(lvls) - 5)
+                  if lvls[i + 5][1] - lvls[i][1] > P_RISE_DB]
+    say('P1 crossfeed off over the tone: %+.2f dB before, %+.2f dB after; -3.0 dB at %s s, -0.1 dB at %s s after the command; '
+        'most any 50 ms rose: %.2f dB; the view right after the command: %s' % (
+            start_db, end_db, None if lo is None else round(lo - 0.4, 2), None if hi is None else round(hi - 0.4, 2), rise, mid['words']))
+    check(abs(start_db + 3.1) <= 0.3, 'P1 the level before is about -3.1 dB (%+.2f)' % start_db)
+    check(abs(end_db) <= 0.1, 'P1 the level after is unity (%+.3f dB re the unfiltered tone)' % end_db)
+    check(lo is not None and hi is not None and hi - lo >= P_CLIMB_MIN_S,
+          'P1 the climb from -3.0 dB to -0.1 dB takes %s s, no less than %.1f s' % (None if lo is None or hi is None else round(hi - lo, 2), P_CLIMB_MIN_S))
+    check(rise <= P_RISE_DB, 'P1 no 50 ms window pair rises more than %.2f dB (most %.2f dB; over: %s)' % (P_RISE_DB, rise, steps_over))
+    check(mid['climb_to_db'] == 0.0 and mid['words'] == 'climbing to 0.0 dB',
+          'P1 right after the command the view says it climbs (%r)' % (mid,))
+    check(settles(lambda: p_view(conn)['levels']['untouched'], 5.0), 'P1 the view ends untouched (%r)' % (p_view(conn)['levels'],))
+    check(p_view(conn)['levels']['words'] == 'pass-through, untouched', 'P1 and says so in its words (%r)' % p_view(conn)['levels']['words'])
+    pp = chain_params()
+    check(pp.get('lpre:Mult') == 1.0 and pp.get('l01:b0') == 1.0 and pp.get('lmix:Gain 2') == 0.0,
+          'P1 the graph reads the identity (preamp Mult %r, slot 1 b0 %r, stage mix %r)' % (pp.get('lpre:Mult'), pp.get('l01:b0'), pp.get('lmix:Gain 2')))
+
+
+def p_pattern_file(path, zero_s, bits_n=24, seed=bits.SEED):
+    """A raw 24-bit-in-S32 stereo file: `zero_s` seconds of digital silence (a stream the chain counts as
+    playing), the seeded pattern for 2 s, then silence again; returns the pattern."""
+    pat = bits.pattern(bits_n, bits.RATE * bits.SECONDS, 2, seed)
+    with open(path, 'wb') as fh:
+        fh.write(bytes(bits.RATE * zero_s * 8))
+        fh.write(bits.source_bytes(pat, bits_n))
+        fh.write(bytes(8192 * 8))
+    return pat
+
+
+def p_host_check(sock, player='Fixture Player'):
+    """`svolder host check --json` (the built binary) asked of the daemon of this run; the parsed JSON."""
+    env = {k: v for k, v in os.environ.items() if k in KEEP_ENV}
+    env.update(SVOLDER_TRANSPORT='daemon', SVOLDER_SOCKET=sock, SVOLDER_NO_START='1',
+               SVOLDER_AUTOEQ_URL='http://127.0.0.1:9/', SVOLDER_SYSTEMCTL='/bin/false')
+    argv = [bits.SVOLDER, 'host', 'check', '--json'] + (['--player', player] if player else [])
+    r = subprocess.run(argv, capture_output=True, text=True,
+                       timeout=30, env=env, cwd=RUN)
+    if r.returncode != 0:
+        raise Fail('svolder host check exited %d: %s%s' % (r.returncode, r.stdout.strip(), r.stderr.strip()))
+    return json.loads(r.stdout)
+
+
+P_STAGE_WORDS = ('host EQ on', 'loudness on', 'crossfeed on', 'virtual speakers on', 'EQ pass-through')
+
+
+def p_chain_words(j):
+    """The stage words the path says for the computer's chain (none when the hop is green)."""
+    return [w for w in (j.get('path') or {}).get('words', []) if w in P_STAGE_WORDS]
+
+
+def p_exact_phase(conn, daemon, sock, stop_half_way):
+    """P2 (`stop_half_way` False) and P3 (True): a Mid/Side bass chain in front of the S24LE pipe sink, a
+    stream of digital silence then the seeded 24-bit pattern through it, crossfeed turned off once the sink
+    runs. P2: the climb ends, the chain is an untouched pass-through and the pattern comes out of the sink
+    exactly (bits.py's comparator), `svolder host check --json` reading the computer hop untouched. P3: the
+    daemon is stopped half way up the climb (a condition: the preamp port reads between -3 and -0.4 dB),
+    so the chain stays at a preamp under 0 dB: the pattern is NOT exact, the view said it was climbing and
+    the computer hop is not untouched. HOST_E2E_BITS_FLIP=1 flips one bit of the capture, which fails P2."""
+    tag = 'P3' if stop_half_way else 'P2'
+    p_all_off(conn)
+    with open(HERE + '/bits.conf') as fh:
+        conf = fh.read().replace('@RUN@', RUN)
+    conf_path = RUN + '/bits-p.conf'
+    with open(conf_path, 'w') as fh:
+        fh.write(conf)
+    sinks = spawn('pipewire', '-c', conf_path, log=RUN + '/bits-p-pipewire.log')
+    wait_until('the pipe sinks', lambda: all(node(n) for n in bits.SINKS), 15)
+    was_default = bits.default_now()
+    bits.set_default('bits_s24')
+    player = reader = None
+    # A subscription holds the daemon's route reads open (it reads the graph only for a watcher).
+    routes = Watch(sock)
+    try:
+        conn.eq({'op': 'crossfeed', 'on': True, 'model': 'mid-side'})
+        wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+        src = '%s/p-pattern-%s.raw' % (RUN, tag)
+        zero_s = 7
+        pat = p_pattern_file(src, zero_s)
+        fifo = RUN + '/bits_s24.pipe'
+        reader = bits.Reader(fifo)
+        reader.drain()
+        reader.start()
+        player = spawn('pw-cat', '-p', '--raw', '--rate', str(bits.RATE), '--channels', '2', '--format', 's32',
+                       '--target', 'bits_s24', '--volume', '1.0', '-P',
+                       '{ node.name = bits_player application.name = "Fixture Player" }', src)
+        check(settles(chain_playing, 10.0), '%s the silent stream plays through the chain into the S24LE sink' % tag)
+        time.sleep(0.4)
+        conn.eq({'op': 'crossfeed', 'on': False})
+        view_mid = p_view(conn)['levels']
+        if stop_half_way:
+            def half():
+                mult = chain_params().get('lpre:Mult')
+                return mult is not None and 0.70 < mult < 0.80
+            check(settles(half, 3.0, 0.02), '%s the preamp port reads between -3.1 and -1.9 dB while the climb runs' % tag)
+            os.kill(daemon.pid, signal.SIGSTOP)
+            frozen = chain_params().get('lpre:Mult')
+            time.sleep(0.5)
+            check(chain_params().get('lpre:Mult') == frozen and frozen < 1.0,
+                  '%s the chain stays half way up while the daemon is stopped (preamp Mult %r)' % (tag, frozen))
+            check(view_mid['untouched'] is False and view_mid['climb_to_db'] == 0.0,
+                  '%s the view said it was climbing, not untouched (%r)' % (tag, view_mid))
+        else:
+            check(settles(lambda: p_view(conn)['levels']['untouched'], 5.0), 'P2 the view reads untouched before the pattern (%r)' % (p_view(conn)['levels'],))
+            check(settles(lambda: ((routes.route or {}).get('stages') or {}).get('untouched') is True, 8.0),
+                  'P2 the daemon\'s route carries the untouched chain (%s)' % ((routes.route or {}).get('stages'),))
+            j = p_host_check(sock, None)   # the daemon's own route carries the stages (a named player is read from the graph alone)
+            say('P2 host check: %s [%s]' % ((j.get('path') or {}).get('verdict'), ' | '.join((j.get('path') or {}).get('words') or [])))
+            check(p_chain_words(j) == [],
+                  'P2 `svolder host check --json` says no stage for the computer\'s chain: the hop is untouched (%s)' % (j['path']['words'],))
+            check(p_view(conn)['levels']['words'] == 'pass-through, untouched', 'P2 the view says pass-through, untouched')
+        # the pattern starts `zero_s` s into the stream: wait until the sink has had it, then the tail
+        frames = bits.RATE * bits.SECONDS
+        try:
+            player.wait(zero_s + bits.SECONDS + 15)
+        except subprocess.TimeoutExpired:
+            raise Fail('pw-cat did not end for ' + tag)
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 8 and not bits.has_tail(b''.join(reader.chunks), 'S24LE', frames):
+            time.sleep(0.2)
+        if stop_half_way:
+            # The daemon goes on, and before its climb can end the view and the host check are asked:
+            # the chain is half way up, so neither may say untouched.
+            os.kill(daemon.pid, signal.SIGCONT)
+            v_after = p_view(conn)['levels']
+            words_after = p_chain_words(p_host_check(sock, None))
+            check(v_after['untouched'] is False and v_after['words'] != 'pass-through, untouched',
+                  'P3 the view does not say untouched with the climb stopped half way (%r)' % (v_after,))
+            check(words_after != [],
+                  'P3 `svolder host check --json` does not read the computer hop untouched (%s)' % (words_after,))
+    finally:
+        raw = reader.finish() if reader is not None else b''
+        if player is not None:
+            stop(player)
+        if stop_half_way:
+            try:
+                os.kill(daemon.pid, signal.SIGCONT)
+            except OSError:
+                pass
+        routes.close()
+        bits.set_default(was_default or SINK)
+        stop(sinks)
+    if bits.FLIP:
+        raw = bits.flip_one(raw, 'S24LE')
+    out = bits.decode(raw, 'S24LE', 2)
+    res = bits.compare(out, bits.dom32(pat, 24))
+    say('%s the pattern at the sink: start frame %s, %d of %d samples differ, largest gap %d steps of 24 bits%s' % (
+        tag, res['start'], res['differing'], res['total'], res['max_lsb'], (', ' + res['why']) if res['why'] else ''))
+    if stop_half_way:
+        check(not res['exact'] and res['why'] is None and res['max_lsb'] > 1000,
+              'P3 the pattern is NOT exact with the climb stopped half way (%d of %d samples differ, largest gap %d steps)'
+              % (res['differing'], res['total'], res['max_lsb']))
+    else:
+        check(res['exact'], 'P2 the pattern comes out of the S24LE sink exactly through the untouched pass-through (%d of %d samples differ)'
+              % (res['differing'], res['total']))
+    # the daemon goes on: the climb ends, the chain is untouched, the sink's rig is gone
+    if stop_half_way:
+        check(settles(lambda: p_view(conn)['levels']['climb_to_db'] is None, 6.0), 'P3 the daemon goes on and the climb ends')
+    p_all_off(conn)
+
+
+def p4_bypass(conn, base):
+    """P4: the bypass with the EQ, loudness and the virtual speakers on and the tone: the chain is kept
+    (the same node and process), the level climbs to 0 dB, and the restore brings the three back."""
+    p_all_off(conn)
+    fixture = RUN + '/vs-room.wav'
+    if not os.path.exists(fixture):
+        r = subprocess.run([VS_EXPECT, '--write', fixture], capture_output=True, text=True, timeout=30)
+        check(r.returncode == 0, 'P4 vs_expect wrote the synthetic room')
+    entry = vs_import(conn, fixture)
+    conn.ask({'cmd': 'host_volume', 'pct': 100})
+    conn.eq({'op': 'apply', 'name': 'Bass', 'correction': {'preamp_db': 0.0, 'filters': [
+        {'kind': 'Peaking', 'f': 100.0, 'g': 6.0, 'q': 1.0}]}})
+    wait_until('the EQ on', lambda: p_view(conn)['on'], 10)
+    conn.eq({'op': 'loudness', 'on': True})
+    conn.eq({'op': 'speakers', 'set': entry['id']})
+    conn.eq({'op': 'speakers', 'on': True})
+    check(settles(lambda: p_view(conn)['speakers']['on'] and p_view(conn)['loudness']['on'] and p_view(conn)['on'], 15.0),
+          'P4 the EQ, loudness and the virtual speakers are on')
+    retone()
+    check(settles(chain_playing, 10.0), 'P4 the tone plays through the chain')
+    time.sleep(1.5)
+    before = (which(node(CHAIN)), _private_pids('host-eq.conf'))
+    heard = p_view(conn)['levels']['total_db']
+    conn.eq({'op': 'bypass', 'on': True})
+    mid = p_view(conn)
+    check(mid['bypass']['on'] and mid['bypass']['held'] == {'eq': True, 'loudness': True, 'crossfeed': False, 'speakers': True},
+          'P4 the bypass holds the EQ, loudness and the speakers (%s)' % (mid['bypass'],))
+    check(mid['levels']['climb_to_db'] is not None and mid['levels']['total_db'] <= heard + 0.5,
+          'P4 the level starts where it was heard (%+.2f dB) and climbs to %s' % (mid['levels']['total_db'], mid['levels']['climb_to_db']))
+    check(settles(lambda: p_view(conn)['levels']['climb_to_db'] is None and p_view(conn)['levels']['passthrough'], 8.0),
+          'P4 the climb ends at a pass-through')
+    check((which(node(CHAIN)), _private_pids('host-eq.conf')) == before, 'P4 the chain is kept: the same node and process (%s)' % (before,))
+    ok, _, lv = wait_level(base, 0.0, 0.2, 10)
+    check(ok, 'P4 the tone is back at the unfiltered level (%+.2f dB re it)' % (lv if lv is not None else float('nan')))
+    conn.eq({'op': 'bypass', 'on': False})
+    check(settles(lambda: p_view(conn)['on'] and p_view(conn)['speakers']['on'] and p_view(conn)['loudness']['on']
+                  and not p_view(conn)['bypass']['on'], 15.0),
+          'P4 restoring brings the EQ, loudness and the speakers back (%s)' % (p_view(conn)['bypass'],))
+    p_all_off(conn)
+
+
+def p5_idle(conn):
+    """P5: the tone stops and the chain goes after 3 s (not before 2 s); a 1.5 s pause keeps it. The
+    default idle time is used (SVOLDER_EQ_IDLE_TICKS is not set for this run)."""
+    p_all_off(conn)
+    retone()
+    conn.eq({'op': 'crossfeed', 'on': True, 'model': 'mid-side'})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    check(settles(chain_playing, 10.0), 'P5 the tone plays through the chain')
+    conn.eq({'op': 'crossfeed', 'on': False})
+    check(settles(lambda: p_view(conn)['levels']['passthrough'], 5.0), 'P5 the chain is a pass-through')
+    ident = which(node(CHAIN))
+    # a pause of 1.5 s keeps the chain
+    stop(STATE.pop('tone'))
+    wait_until('the tone to leave', lambda: not node('svtone'), 5)
+    time.sleep(1.5)
+    retone()
+    time.sleep(2.5)
+    check(which(node(CHAIN)) == ident, 'P5 a pause of 1.5 s keeps the chain (node %s)' % (ident,))
+    # the tone stops for good: the chain goes after about 3 s, not before 2 s
+    stop(STATE.pop('tone'))
+    t_stop = time.monotonic()
+    time.sleep(2.0)
+    still = node(CHAIN) is not None
+    gone = wait_until('the pass-through chain to go', lambda: node(CHAIN) is None, 8)
+    took = time.monotonic() - t_stop
+    say('P5 the chain went %.1f s after the tone stopped' % took)
+    check(still and gone, 'P5 the chain is still there 2 s after the tone stopped and goes (after %.1f s)' % took)
+    check(took <= 6.0, 'P5 and it goes within 3 s plus a look and the remove (%.1f s)' % took)
+
+
+def climb_phases(conn, daemon, sock, base):
+    p1_climb(conn, base)
+    p_exact_phase(conn, daemon, sock, stop_half_way=False)
+    p_exact_phase(conn, daemon, sock, stop_half_way=True)
+    p4_bypass(conn, base)
+    p5_idle(conn)
+
+
 def main():
     proof = tool('bash', LAUNCHER, 'proof')
     if proof.returncode != 0:
@@ -1611,7 +2118,7 @@ def main():
     web_sock.close()
     web_token = 'host-e2e-' + os.urandom(12).hex()
     env.update(SVOLDER_HOST_EQ_MANAGER='child', SVOLDER_SYSTEMCTL='/bin/false',
-               SVOLDER_TRANSPORT='fake', SVOLDER_SOCKET=sock, SVOLDER_EQ_IDLE_TICKS='60', DBUS_SESSION_BUS_ADDRESS='unix:path=' + bus,
+               SVOLDER_TRANSPORT='fake', SVOLDER_SOCKET=sock, DBUS_SESSION_BUS_ADDRESS='unix:path=' + bus,
                SVOLDER_SPEAKERS_URL='http://127.0.0.1:9/', SVOLDER_AUTOEQ_URL='http://127.0.0.1:9/',
                # the VU phase reads the levels-only frames over the daemon's web page: a free loopback port
                # of this run (never 8737 or 8738) and a token of its own
@@ -1628,6 +2135,7 @@ def main():
         c = wait_until('a connection', lambda: _try_conn(sock) if p.poll() is None else Fail('the daemon ended'), 15)
         if isinstance(c, Fail):
             raise c
+        STATE['conn'] = c
         return p, c
 
     daemon, conn = start_daemon()
@@ -1637,6 +2145,17 @@ def main():
 
     def point():
         return conn.view()['eq']['points'][0]
+
+    # P0: option D, proved before the other phases (the daemon is restarted after it).
+    daemon, conn = p0_phase(conn, daemon, start_daemon)
+    if os.environ.get('HOST_E2E_ONLY') == 'P0':
+        conn.ask({'cmd': 'stop'})
+        conn.close()
+        daemon.wait(10)
+        if STATE['failed']:
+            raise Fail('%d check(s) failed: %s' % (len(STATE['failed']), '; '.join(STATE['failed'])))
+        STATE['dev'] = True
+        return
 
     watch = Watch(sock)
     if os.environ.get('HOST_E2E_ONLY') == 'L':
@@ -1665,6 +2184,21 @@ def main():
     tone_wav(RUN + '/tone.wav')
     STATE['tone'] = spawn('pw-cat', '-p', '--properties', 'node.name=svtone', RUN + '/tone.wav')
     wait_until('the tone', lambda: node('svtone'))
+    if os.environ.get('HOST_E2E_ONLY') == 'P':
+        # The climb phases alone while they are worked on: like the others it can never report a pass.
+        ok, _, _ = wait_level(0.0, TONE_DBFS, 0.1, 15)
+        rec = Recording()
+        time.sleep(1.5)
+        x, fr = rec.finish()
+        climb_phases(conn, daemon, sock, level_db(x, fr, 0.2, len(x) / fr - 0.1))
+        conn.ask({'cmd': 'stop'})
+        watch.close()
+        conn.close()
+        daemon.wait(10)
+        if STATE['failed']:
+            raise Fail('%d check(s) failed: %s' % (len(STATE['failed']), '; '.join(STATE['failed'])))
+        STATE['dev'] = True
+        return
 
     # A. the unfiltered level (the tone reaches the sink: polled, not waited for)
     t0 = time.monotonic()
@@ -1833,9 +2367,10 @@ def main():
     say('E  rate change: 44100 seen after %.2f s, the right level %.2f s after the change (%+.3f dB, model %+.3f); back at 48000 %+.3f dB '
         '(model %+.3f); near-zero runs >= 0.5 ms: %s' % (seen44, took44 + seen44, lv44 or 0, want44, lv48b or 0, want48, zero_runs(x, fr, 24)))
 
-    # E2. After a live softening, a forced rate change never plays over unity. The graph goes back
-    # to the config's coefficients (the hot curve the chain was applied with, a +6 dB peak on the
-    # tone); the preamp does not, so it must never have risen past what that curve needs.
+    # E2. After a live softening, a forced rate change never plays over unity. The chain was applied from an
+    # identity config and got the +6 dB peak live: the graph goes back to the flat config, the preamp
+    # does not, so the softened curve plays at its own preamp (no cap) and a rebuild only ever puts back
+    # a flat chain.
     old = which(node(CHAIN))
     go_quiet()   # a chain nothing plays through is removed at once (with a stream it stays as a pass-through)
     conn.eq({'op': 'mode', 'on': False})
@@ -1882,9 +2417,9 @@ def main():
     say('E2 softened live, forced rate change: highest 0.1 s level %+.3f dB re the unfiltered tone over %.1f s (%d windows); '
         'preamp %+.1f dB (applied %+.1f)' % (top, len(x) / fr, len(tl), softened['eq']['preamp_db'], applied['eq']['preamp_db']))
     check(top <= 0.1, 'no 0.1 s window of the tone plays over unity through the rate changes (highest %+.3f dB)' % top)
-    check(softened['eq']['preamp_db'] <= applied['eq']['preamp_db'] + 0.05,
-          'the preamp stayed at the applied curve\'s %+.1f dB after the live softening (%+.1f dB)'
-          % (applied['eq']['preamp_db'], softened['eq']['preamp_db']))
+    check(softened['eq']['preamp_db'] >= applied['eq']['preamp_db'] + 5.9 and softened['eq']['note'] is None,
+          'the softened curve plays at its own preamp, no level held (%+.1f dB after %+.1f dB, note %r)'
+          % (softened['eq']['preamp_db'], applied['eq']['preamp_db'], softened['eq']['note']))
 
     # E3. 16 points: a live update carries every slot (about 5 KB a line). The drag of one point
     # reaches the chain whole and the chain is not restarted.
@@ -1893,7 +2428,7 @@ def main():
     wait_until('16 points', lambda: len(conn.view()['eq']['points']) == 16, 5)
     chain16 = (which(node(CHAIN)), _private_pids('host-eq.conf'))
     # The drag moves the point under the tone (1 kHz), by -3 dB: that is a 3 dB change at the tone,
-    # ten times the tolerance, and a cut leaves the preamp where E2 capped it. The level is
+    # ten times the tolerance, and a cut moves the preamp with it. The level is
     # read before the drag and after it: a line that is cut or refused leaves the chain at the
     # first level, and the step fails, where the model alone (which follows the view) would not.
     tone_at = min(range(len(conn.view()['eq']['points'])),
@@ -1931,19 +2466,19 @@ def main():
     check(node(CHAIN) is not None and which(node(CHAIN)) == f_id and tone_link_ids() == f_links,
           'F Off with a stream playing keeps the chain (node %s) and the tone\'s links %s (now %s)' % (f_id, f_links, tone_link_ids()))
     check(conn.view()['eq']['note'] == 'chain kept as a pass-through until idle', 'F the view says the chain is kept (%r)' % conn.view()['eq']['note'])
-    # The pass-through plays flat under the preamp the chain was loaded with (a rate change puts the
-    # slots back to that config, so it never goes above what that needs): here the E-phase curve's -6 dB.
-    held_db = conn.view()['eq']['preamp_db']
-    say('F the pass-through preamp: %+.2f dB' % held_db)
-    reached, _, rel = wait_level(base, held_db, 0.1, 10)
+    # The pass-through climbs from the preamp the curve had to 0 dB (the chain started from an identity config,
+    # so a rate change can only put back a flat chain): the level ends at the unfiltered tone's.
+    cut_db = conn.view()['eq']['preamp_db']
+    say('F the pass-through preamp after Off: %+.2f dB, climbing to 0 dB' % cut_db)
+    reached, _, rel = wait_level(base, 0.0, 0.1, 10)
     time.sleep(0.3)
     x, fr = rec.finish()
     gap, runs = longest_zero_ms(x, fr)
     lv = (rel if rel is not None else float('nan')) + base
     off = conn.view()
     say('F  Off: level %.3f dB (%+.3f re the unfiltered level); near-zero runs >= 0.5 ms: %s' % (lv, lv - base, zero_runs(x, fr, 24)))
-    check(reached, 'the level settles at the pass-through\'s preamp (%+.2f dB) after Off' % held_db)
-    # Idle (the tone ends): the chain goes after the idle time (3 s here).
+    check(reached, 'the level climbs to unity (the unfiltered level, within 0.1 dB) after Off')
+    # Idle (the tone ends): the chain goes after the idle time (3 s, the default).
     go_quiet()
     gone = wait_until('the pass-through chain to go once idle', lambda: node(CHAIN) is None, 12)
     check(gone and node(CHAIN) is None, 'F the pass-through chain is removed once nothing plays through it')
@@ -2693,11 +3228,10 @@ def main():
     say('host-e2e: VU phase U done')
 
     # R. A preset recall while a player plays through pipewire-pulse (as a desktop player does): a
-    # player may pause when its sink is removed, so a recall that needs more preamp than the curve
-    # the chain was started with goes live, no restart: no pulse sink removed or added, the stream
-    # not moved, the same chain node and process. The level is held at the deeper preamp and the
-    # view says so; once nothing has played for the idle time (3 s here) the chain is applied again
-    # and the curve plays at its own level.
+    # player may pause when its sink is removed, so a recall goes live, no restart: no pulse sink removed
+    # or added, the stream not moved, the same chain node and process. The chain was started from an
+    # identity config, so a softer curve plays at its own preamp at once (nothing is held) and a deeper
+    # curve plays under its own deeper preamp.
     deep = {'preamp_db': 0.0, 'filters': [{'kind': 'Peaking', 'f': 100.0, 'g': 6.0, 'q': 1.0}]}
     flat = {'preamp_db': 0.0, 'filters': [{'kind': 'Peaking', 'f': 1000.0, 'g': 0.0, 'q': 1.0}]}
 
@@ -2728,19 +3262,18 @@ def main():
     time.sleep(1.5)
     v = conn.view()['eq']
     say('R  Flat while playing: preamp %+.2f dB, note %r, live %s' % (v['preamp_db'], v['note'], v['live']))
-    check(v['note'] == 'level held until the music pauses' and abs(v['preamp_db'] - deep_db) <= 0.01,
-          'R the flat curve plays live with the level held at the deep preamp (%+.2f dB, note %r)' % (v['preamp_db'], v['note']))
-    held_want = expected_db(conn.view(), RATE)
-    ok, _, held_lv = wait_level(base, held_want, 0.1, 10)
-    check(ok, 'R the held level is %s dB re the unfiltered tone, the model %+.2f' % (held_lv, held_want))
-    # Back to the deep curve (a lower preamp: live, nothing held), then the flat one again.
+    check(v['note'] is None and abs(v['preamp_db']) <= 0.01 and v['live'],
+          'R the flat curve plays live at its own preamp, nothing held (%+.2f dB, note %r)' % (v['preamp_db'], v['note']))
+    flat_want = expected_db(conn.view(), RATE)
+    ok, _, flat_lv = wait_level(base, flat_want, 0.1, 10)
+    check(ok, 'R the flat level is %s dB re the unfiltered tone, the model %+.2f' % (flat_lv, flat_want))
+    # Back to the deep curve (a lower preamp), then the flat one again, then 5 s of playing on.
     recall('Deep', deep)
     time.sleep(0.5)
     v = conn.view()['eq']
     check(v['note'] is None and abs(v['preamp_db'] - deep_db) <= 0.01,
-          'R the deep curve again plays at its own preamp, nothing held (%+.2f dB, note %r)' % (v['preamp_db'], v['note']))
+          'R the deep curve again plays at its own preamp (%+.2f dB, note %r)' % (v['preamp_db'], v['note']))
     recall('Flat', flat)
-    # Playing on past the idle time keeps it held.
     time.sleep(5.0)
     v = conn.view()['eq']
     after = (chain_ids(), pulse_links(), pulse_sink_inputs())
@@ -2752,31 +3285,7 @@ def main():
           'R the pulse stream was not moved: links %s -> %s, sink inputs %s -> %s' % (before[1], after[1], before[2], after[2]))
     sink_events = [e for e in seen if ' on sink #' in e and ("'remove'" in e or "'new'" in e)]
     check(not sink_events, 'R no pulse sink removed or added (%s)' % sink_events)
-    check(v['note'] == 'level held until the music pauses', 'R still held while the player plays (%r)' % v['note'])
-    # The music pauses (the player ends): the chain is applied again once idle, the pulse server
-    # sees that sink go, and the curve plays at its own level.
-    t_quiet = time.monotonic()
-    stop(player)
-    wait_until('the player to leave', lambda: not pulse_stream(), 5)
-    restarted = settles(lambda: chain_ids()[0] not in (None, before[0][0]), 15.0)
-    took = time.monotonic() - t_quiet
-    lifted = settles(lambda: conn.view()['eq']['note'] is None and abs(conn.view()['eq']['preamp_db']) <= 0.01)
-    v = conn.view()['eq']
-    seen = events.since(t_quiet)
-    say('R  after the music paused: chain %s after %.1f s, then preamp %+.2f dB, note %r; pulse events %s'
-        % (chain_ids()[0], took, v['preamp_db'], v['note'], seen))
-    check(restarted, 'R the chain is applied again once nothing has played for the idle time (%.1f s)' % took)
-    check(any(' on sink #' in e and "'remove'" in e for e in seen),
-          'R the restart is seen by the pulse server as a sink removed (the event the recall avoided)')
-    check(lifted, 'R the flat curve plays at its own preamp, nothing held (%+.2f dB, note %r)' % (v['preamp_db'], v['note']))
-    player = pulse_play(RUN + '/tone.wav')
-    wait_until('the player to play through the chain', chain_playing, 10)
-    full_want = expected_db(conn.view(), RATE)
-    ok, _, full_lv = wait_level(base, full_want, 0.1, 10)
-    say('R  levels re the unfiltered tone: held %s dB, full %s dB' % (held_lv, full_lv))
-    check(ok, 'R the full level is %s dB re the unfiltered tone, the model %+.2f' % (full_lv, full_want))
-    check(held_lv is not None and full_lv is not None and abs((full_lv - held_lv) + deep_db) <= 0.2,
-          'R the level came up by the deep preamp (%s -> %s dB)' % (held_lv, full_lv))
+    check(v['note'] is None and abs(v['preamp_db']) <= 0.01, 'R nothing is held while the player plays (%r, %+.2f dB)' % (v['note'], v['preamp_db']))
     stop(player)
     events.close()
     wait_until('the player to leave', lambda: not pulse_stream(), 5)
@@ -2786,7 +3295,8 @@ def main():
     say('host-e2e: pulse recall phase R done')
 
     scene_phase(conn, watch)
-
+    # P1-P5: the climb, an untouched pass-through, idle (the daemon is alive here and the tone is the run's)
+    climb_phases(conn, daemon, sock, base)
 
     # X4. a restart of the daemon: crossfeed is off after it, and a chain for it alone is gone
     def restart_checks(what):

@@ -150,6 +150,8 @@ impl EqControl {
     /// Set the crossfeed off in the state and the view, with `why` and `note`, and owe the chain
     /// the rest ([`EqControl::finish_reset`]); `plays` says whether the stage may be on it.
     pub(super) fn reset_xf(&mut self, why: OffReason, note: String, plays: bool) {
+        // The stage goes off by itself: the sound climbs back as it does for a hand's off.
+        self.arm_climb();
         self.xf_on = false;
         self.xf_for = None;
         self.stage_dirty = false;
@@ -370,7 +372,10 @@ impl EqControl {
     /// (`done: false`) is sent on the next tick and not saved; the last value of it and every
     /// other change is sent at once and saved.
     pub async fn crossfeed(&mut self, edit: CrossfeedEdit) -> Result<(), EqFailure> {
+        self.rise_ok_until = self.ticks + RISE_OK_TICKS;
         let result = self.crossfeed_inner(edit).await;
+        self.disarm_climb();
+        self.end_bypass_if_on();
         self.publish();
         result
     }
@@ -444,7 +449,10 @@ impl EqControl {
             }
             (true, true) => self.xf_change(next, edit.done).await,
             (false, true) => self.xf_start(next).await,
-            (true, false) => self.xf_stop(next).await,
+            (true, false) => {
+                self.arm_climb();
+                self.xf_stop(next).await
+            }
         };
         if result.is_err() {
             (self.xf, self.xf_kept, self.xf_note, self.xf_reason) = was;

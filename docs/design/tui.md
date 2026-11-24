@@ -148,8 +148,8 @@ all the query's; any other chord with control or alt asks for nothing), the quit
 menu, the help overlay, the Settings box, the device editor and its removal question, the preset
 list, a band's edit line, `Esc` ending a curve drag, and only then `App::on_screen`. That tries
 `Tab`, then the keys every screen shares (`global_key`), then the screen's own (`device_key`,
-`tone_key`, `telemetry_key`, `devices_key`). Before any of it, `App::key` stops a volume climb and
-lets go of a held bar, so a key never lands on top of a motion the user did not mean to continue.
+`tone_key`, `telemetry_key`, `devices_key`); `stage_key` ([tui-stages.md](tui-stages.md)) comes
+first on the computer's tone screen. Before all of it `App::key` stops a climb and lets go of a held bar.
 
 ### The three rules
 

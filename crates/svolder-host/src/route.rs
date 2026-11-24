@@ -117,9 +117,13 @@ pub enum PlayerMatch {
     /// A player is followed, but none of the streams could be taken as its own (or its own
     /// stream is linked to no sink).
     NotFound,
-    /// No player is followed, so there is no stream to look for.
+    /// No player is followed, so there is no stream to look for: nothing plays into the sink,
+    /// or several streams do and none can be told from the others.
     #[default]
     NoPlayer,
+    /// No MPRIS player is followed, and exactly one stream is running into the sink: taken as
+    /// the sound's source, though what plays it cannot be named or controlled.
+    NoMpris,
 }
 
 /// A [`PlayerMatch`] from the wire, with a way this build has no name for read as `NotFound`
@@ -147,8 +151,9 @@ pub struct RouteFacts {
     /// The default sink, or the real sink behind the computer EQ's when that is the default;
     /// `None` when the dump names no default sink or the node is not in it.
     pub sink: Option<SinkFacts>,
-    /// The followed player's stream into the sink, when one was found (see [`PlayerMatch`]; none
-    /// for `Elsewhere`).
+    /// The stream into the sink taken as the sound's source: the followed player's, or with no
+    /// MPRIS player the lone running one, when one was found (see [`PlayerMatch`]; none for
+    /// `Elsewhere`).
     pub player: Option<StreamFacts>,
     /// How the player's stream was found; a way a newer daemon knows and this build does not
     /// reads as [`PlayerMatch::NotFound`].
@@ -187,12 +192,16 @@ pub struct ChainStages {
     pub crossfeed: bool,
     /// The virtual speakers play.
     pub speakers: bool,
+    /// The chain is a pass-through the daemon proved untouched (`levels.untouched`): no stage
+    /// word is told for it, so the computer hop reads as changing nothing.
+    pub untouched: bool,
 }
 
 impl ChainStages {
     /// The stages the computer's EQ view says are on; `None` when the view cannot vouch for them
     /// (the controls are unavailable, an older svolder's chain, or no stage on and no word that
-    /// the chain is a kept pass-through or runs for loudness), so the line says only that a chain
+    /// the chain is a kept pass-through, by its note or by `levels.passthrough` when another note
+    /// stands, or runs for loudness), so the line says only that a chain
     /// is on. A chain that runs for loudness while the volume is at its reference changes nothing:
     /// it is told as a pass-through.
     pub fn of_view(view: &crate::eq::EqView) -> Option<Self> {
@@ -209,9 +218,15 @@ impl ChainStages {
             loudness: loudness_on && view.loudness.as_ref().is_some_and(|ld| ld.depth_db > 0.0),
             crossfeed: view.crossfeed.as_ref().is_some_and(|xf| xf.on),
             speakers: view.speakers.as_ref().is_some_and(|sp| sp.on),
+            untouched: view.levels.as_ref().is_some_and(|levels| levels.untouched),
         };
         let any = stages.eq || stages.loudness || stages.crossfeed || stages.speakers;
-        (any || loudness_on || view.note.as_deref() == Some(PASSTHROUGH_NOTE)).then_some(stages)
+        let passthrough = view.note.as_deref() == Some(PASSTHROUGH_NOTE)
+            || view
+                .levels
+                .as_ref()
+                .is_some_and(|levels| levels.passthrough);
+        (any || loudness_on || passthrough).then_some(stages)
     }
 }
 
@@ -253,6 +268,8 @@ pub struct StreamFacts {
     pub rate_hz: Option<u32>,
     /// The sample format name, such as `S16LE`, when it has a format.
     pub format: Option<String>,
+    /// How many channels the stream plays, when its format says.
+    pub channels: Option<u32>,
     /// The stream's own volume in thousandths, on the same scale as [`SinkFacts::volume_milli`]
     /// (master `volume` times the lowest channel volume, cube-rooted); `None` when the node
     /// reports no channel volumes. A player that turned itself down reads below 1000 here.
@@ -542,7 +559,13 @@ impl<'a> Graph<'a> {
     ) -> (PlayerMatch, Option<&'s Stream<'a>>) {
         let identity = identity.trim();
         if pid.is_none() && identity.is_empty() {
-            return (PlayerMatch::NoPlayer, None);
+            let mut running = streams
+                .iter()
+                .filter(|stream| stream.reaches() && stream.running);
+            return match (running.next(), running.next()) {
+                (Some(lone), None) => (PlayerMatch::NoMpris, Some(lone)),
+                _ => (PlayerMatch::NoPlayer, None),
+            };
         }
         let by_pid = streams
             .iter()
@@ -813,6 +836,10 @@ fn stream_facts(node: &Value) -> StreamFacts {
     StreamFacts {
         rate_hz: format.as_ref().and_then(|format| format.0),
         format: format.and_then(|format| format.1),
+        channels: node["info"]["params"]["Format"]
+            .get(0)
+            .and_then(|format| format["channels"].as_u64())
+            .and_then(|channels| u32::try_from(channels).ok()),
         volume_milli: linear_volume(node).map(milli_of),
         muted: muted(node),
     }

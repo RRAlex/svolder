@@ -237,8 +237,12 @@ traffic; a seek or a new track is picked up when the player says so.
 The cover is the picture the player itself publishes (a file it wrote, or Spotify's own cache);
 svolder never asks the network for one. A track with no cover leaves its place empty, and the card
 does not move: it has the same size with art, without it, and with no player at all, where the
-card is one quiet line, `No player`, with no buttons. The buttons go to the player that is
-playing; a guest, and a page with `[web] writes` off, see the card without them.
+card is one quiet line, `No player`, with no buttons. A sound that plays with no MPRIS player
+behind it (mpv without its MPRIS plugin) has no track either: the card says `No MPRIS player` and
+draws the Path row from the stream on (`player (no MPRIS)` with a dim `?`), at its natural
+height and never folded; with several streams and no player nothing is judged and the row says
+`no MPRIS player`. The buttons go to the player that is playing; a guest, and a page with `[web]
+writes` off, see the card without them.
 
 The **signal path** is one row from the player to the DAC, the same row the terminal draws. In
 Ember it starts with the word **Path**, which is green when the sound is untouched end to end
@@ -260,7 +264,7 @@ the same verdict as before, its colour taken from the end-to-end result; when on
 changes the sound its Path words are the label's words without `Path: ` (`the DAC changes the
 sound`), in yellow. Where a chip wraps onto a new line it starts bare and the chip before it ends
 with the arrow; a value (`44.1 → 48 kHz`, `volume -24.1 dB`) never breaks and no line starts with
-`·`. The row with no hops (`nothing playing`, `route not read`, another sink or input)
+`·`. The row with no hops (`route not read`, `no MPRIS player`, another sink or input)
 is plain, as in the terminal. Ember's chips name each change in short (`resampled`, `volume 54 %`,
 `EQ`, `2 other sounds mixing`, `cut to 16 bits`, `dither`, `channels remapped`, `reads 44.1 kHz`);
 the judge's full words below are what Signal and Paper show and what `svolder host check` and MCP
@@ -307,8 +311,12 @@ sound, and the `Path` label turns yellow). A check that passes or is not read sh
 still draw a short chip beside the verdict: `config ✓` when all seven pass, `config 2` when two
 fail, `config ?` when a line could not be read; Night drive has only the menu row. A chip is a
 button: a click opens the PipeWire config popup. It prints the daemon's words and
-judges nothing. There is no chip while no route is read, on an amp's page, when the default sink is
-not the DAC, or while nothing is judged; the popup then says `config not read`.
+judges nothing. When the path changes the sound, a `What changes the sound` section under the
+seven lines has one row per hop that does (the player, the computer, the DAC) with its words in
+the same yellow as the Path row, so a yellow row always has its reason in the popup (a config
+that fails alone is explained by its lines); an untouched path has no such section. There is no
+chip while no route is read, on an amp's page, when the default sink is not the DAC, or while
+nothing is judged; the popup then says `config not read`.
 
 **The visualizer.** Beside Now playing (the band's right half on a desktop, a 180 px card under the
 volume on a phone, under the meters on an amp's page) the page draws what the computer plays, live,
@@ -458,6 +466,23 @@ Flipping writes nothing, and the side is yours: it is kept in your browser, othe
 and a guest can flip to look but every control stays quiet. Where the computer cannot be used, a
 sentence says why (`computer controls unavailable: no pw-cli on this computer`) in the switch's
 place and the device's side stays.
+
+On the computer side, Ember and Paper show the chain under the mode: each stage with its level (EQ
+in dB, Loudness in %, Space with its kind and dB) and the total in the daemon's words, such as
+`plays −14.8 dB in all`. A stage word opens the Sound popup at its tab. `Bypass` turns every stage
+off at once and, pressed again, brings back the ones that were on; it is dim while nothing plays (a
+tap then shows the daemon's reason) and for a guest.
+
+Signal and Night drive show the same on the computer side. Signal: under the mode chips a strip
+names each stage with its level and ends with the total (`plays −14.8 dB in all`); a stage word
+opens the Sound popup at its tab, and the `Bypass` chip beside Off and EQ turns every stage off and
+back as they were, dim while nothing plays. Night drive: the EQ line after the preset reads `SPACE
+−7.0 · −14.8 dB`, and a `BYPASS` key in the dash sits beside the EQ key (on an upright phone on the
+second row). The EQ line's stage words (EQ, SPACE) open the Sound popup at their tab for a writer
+with a mouse or the keyboard (plain text for a guest; under a finger the line stays click-through,
+and the popup is reached from the menu's `Sound…` row); while the chain is a pass-through the line
+shows the daemon's words in place of the total. The Bypass chip and key are dim while nothing plays;
+a writer's tap still goes to the daemon, and its words show.
 
 On the computer side the mode reads `Off | EQ` (no Loudness). The curve is the points, up to 16:
 drag one for its frequency and gain while the sound changes with no gap, turn the wheel or pinch two
@@ -798,18 +823,22 @@ list is read again once. The popup is the same in all four themes, drawn with ea
 look.
 
 **PipeWire config** is the menu's *PipeWire config…* row (plain, with no state text), in every
-theme, for everyone: a guest and a page with `[web] writes` off see it too, since it only shows
-what the daemon read. One popup with the sink the check judges, the one-line summary, then all
-seven lines always listed (`rates`, `forced rate`, `dither`, `24-bit output`, `no plug`,
-`stereo to stereo`, `no filter in the sink`), each with a mark and the daemon's words, a failing
-line in Paper's red pencil and in the warning colour elsewhere, and under them the limit: what the
-check cannot judge. The summary reads `PipeWire config lets it through untouched`, `PipeWire config
-changes the sound: 2`, `PipeWire config not fully read: 1` or `PipeWire config not read`. The popup
-says `config not read` also when the shown device is an amp, the computer plays to another sink or
-nothing plays: the daemon then had nothing to judge, and the popup never claims clean. It closes
-with a change of the shown device, since it is about that device's path. The check judges the
-config from the player's stream on, reads only, and judges at most 24 bits; it cannot see inside a
-player, nor past the sink's converter (ALSA `hw`, USB, the DAC).
+theme, for everyone: a guest and a page with `[web] writes` off see it too, since it only shows what
+the daemon read. One popup with the sink the check judges, under it `From player` (the player's
+stream as PipeWire negotiated it, `44.1 kHz · S16LE · stereo`, or `not read`) and `To DAC` (what the
+card is open at, `44.1 kHz · 32-bit (S32_LE) · stereo · hw:2`, or `not open`; the `rates` line keeps
+the allowed range), the one-line summary, then all seven lines always listed (`rates`, `forced
+rate`, `dither`, `24-bit output`, `no plug`, `stereo to stereo`, `no filter in the sink`), each with
+a mark and the daemon's words, a failing line in Paper's red pencil and in the warning colour
+elsewhere, then, when the path changes the sound, `What changes the sound` (see the Path row above),
+and under them the limit: what the check cannot judge. The summary reads `PipeWire config lets it
+through untouched`, `PipeWire config changes the sound: 2`, `PipeWire config not fully read: 1` or
+`PipeWire config not read`. The popup says `config not read` also when the shown device is an amp,
+the computer plays to another sink or nothing plays: the daemon then had nothing to judge, and the
+popup never claims clean. It closes with a change of the shown device, since it is about that
+device's path. The check judges the config from the player's stream on, reads only, and judges at
+most 24 bits; it cannot see inside a player, nor past the sink's converter (ALSA `hw`, USB, the
+DAC).
 
 **Ember's effects** have three levels, chosen in the menu:
 
@@ -1228,6 +1257,15 @@ rebuilds it once when the chain does not hold the set yet; off is live; turning 
 crossfeed off in the same update and the other way round. A body that names nothing, a set that is
 not fetched and no set chosen are each a `409` in the daemon's words. The view is `eq.speakers`.
 
+`POST api/v1/host/bypass` is a write like the others and turns the computer's bypass on or off:
+`{"on"}`. On turns the EQ and every stage off as one change and keeps which ones played; off brings
+back exactly those. On with nothing playing is a `409` in the daemon's words, as is a restore the
+daemon cannot make (the bypass then stays on); a body that is not `{"on": true|false}` is a `422`.
+`api/v1/host` carries the bypass under the computer's `eq` as `bypass` (`on`, and `held` with `eq`,
+`loudness`, `crossfeed` and `speakers`) and the chain's levels as `levels` (`eq_db`, `space_db`,
+`total_db`, `climb_to_db`, `passthrough`, `untouched` and `words`); a host that has none sends
+`null`.
+
 `POST api/v1/host/loudness` is a write like the others (it needs `writes` and a signed-in visitor)
 and changes the computer's loudness:
 `{"on"?, "strength_pct"?, "reference_pct"?, "reference_now"?, "done"?}`. A body that names nothing
@@ -1293,6 +1331,7 @@ below are all there is. The table is checked against the daemon's sources and th
 | POST | `api/v1/hops/move` | not listed |
 | POST | `api/v1/hops/remove` | not listed |
 | GET | `api/v1/host` | not listed |
+| POST | `api/v1/host/bypass` | not listed |
 | GET | `api/v1/host/cover` | not listed |
 | POST | `api/v1/host/crossfeed` | not listed |
 | POST | `api/v1/host/eq` | not listed |

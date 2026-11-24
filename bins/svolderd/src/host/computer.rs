@@ -478,7 +478,9 @@ pub(super) async fn run(
             shared.view.send_if_modified(|view| {
                 let same = view.eq.as_ref() == Some(&eq);
                 if !same {
-                    view.eq = Some(eq);
+                    let was = view.eq.replace(eq.clone());
+                    super::wake_route_if_unfiltered(&shared, view, was.as_ref(), &eq);
+                    super::staged(&shared, view);
                 }
                 !same
             });

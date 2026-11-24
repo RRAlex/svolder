@@ -14,6 +14,22 @@ pub const SCHIIT_VENDOR_ID: u16 = 0x30be;
 /// What a front end says of the path while the route has not been read.
 pub const ROUTE_NOT_READ: &str = "route not read";
 
+/// The player hop's label for a stream with no MPRIS player behind it.
+pub(crate) const NO_MPRIS_HOP: &str = "player (no MPRIS)";
+
+/// What the Path says when several streams play and no MPRIS player tells them apart.
+pub const NO_MPRIS_PLAYER: &str = "no MPRIS player";
+
+/// What the Path says when no stream plays into the sink.
+pub const NOTHING_PLAYING: &str = "nothing playing";
+
+/// Whether the route has a sound playing into the sink: a stream the route took (the player's, or
+/// the lone one with no MPRIS player) or several running that none can be told from. Front ends
+/// ask it while no MPRIS player is followed, to tell a sound that plays from silence.
+pub fn plays_without_player(route: &RouteFacts) -> bool {
+    route.player.is_some() || route.others_mixing > 0
+}
+
 /// The word for a path that nothing alters.
 const UNTOUCHED: &str = "untouched";
 /// What follows the words of an untouched path in its tooltip: the verdict cannot see inside
@@ -86,7 +102,7 @@ impl DacStage {
     }
 
     /// The stage as short hop words: `volume -3.3 dB`, `tone control`, `balance off centre`.
-    fn hop_words(&self) -> Vec<String> {
+    pub(super) fn hop_words(&self) -> Vec<String> {
         let mut words = Vec::new();
         if let Some(db) = self.lowers() {
             words.push(Self::volume_word(db));
@@ -333,6 +349,9 @@ pub struct Hop {
     pub changes: bool,
     /// Whether something of this hop was not read; its words are in the path's `unknown` list.
     pub unknown: bool,
+    /// Whether this hop cannot be named or controlled (a stream with no MPRIS player behind
+    /// it); a row draws it with a dim `?` though nothing of it was missed.
+    pub unnamed: bool,
     /// What this hop changes, each change recorded at the hop that makes it, in the order the
     /// path's words name them. Empty when `changes` is only the DAC's own stage.
     pub changed: Vec<Change>,
@@ -357,7 +376,8 @@ pub struct PathLine {
     /// What the path does to the signal.
     pub verdict: Verdict,
     /// What changes the signal, or what is not known, in hop order; `untouched` for an
-    /// untouched path (with `player assumed` after it when the stream was only assumed); the
+    /// untouched path (with `player assumed` after it when the stream was only assumed, `no MPRIS
+    /// player` when no player was followed); the
     /// short words (`→ SINK`, `player → SINK`) for a sound that goes elsewhere.
     pub words: Vec<String>,
     /// What the device's own stage does after the path (`the Bifrost 3 then lowers it by 3.3
@@ -515,6 +535,9 @@ pub fn path_line(route: &RouteFacts, dac: &DacFacts) -> PathLine {
         };
     }
 
+    if is_several_streams(route) {
+        return several_streams();
+    }
     let mut side = computer_side(route, sink);
     let device = dac_hop(sink, dac, &mut side.unknown);
     let hops = vec![side.player, side.computer, device];
@@ -538,6 +561,9 @@ pub fn computer_line(route: &RouteFacts) -> PathLine {
     if let PlayerMatch::Elsewhere { sink: other } = &route.player_match {
         return elsewhere(format!("player → {other}"), other.clone(), true);
     }
+    if is_several_streams(route) {
+        return several_streams();
+    }
     let side = computer_side(route, sink);
     let hops = vec![side.player, side.computer];
     let (verdict, words) = verdict_of(route, change_words(&hops), side.unknown);
@@ -547,6 +573,22 @@ pub fn computer_line(route: &RouteFacts) -> PathLine {
         words,
         dac_stage: None,
     }
+}
+
+/// The line for several running streams and no MPRIS player: not judged, with no hops, as the
+/// sound's source cannot be told from the others.
+fn several_streams() -> PathLine {
+    PathLine {
+        hops: Vec::new(),
+        verdict: Verdict::Unknown,
+        words: vec![NO_MPRIS_PLAYER.to_string()],
+        dac_stage: None,
+    }
+}
+
+/// Whether the route has several running streams and no MPRIS player to tell them apart.
+fn is_several_streams(route: &RouteFacts) -> bool {
+    route.player_match == PlayerMatch::NoPlayer && route.others_mixing > 0
 }
 
 /// The line for a route whose sink the dump did not name.
@@ -586,7 +628,8 @@ fn computer_side(route: &RouteFacts, sink: &SinkFacts) -> Side {
 }
 
 /// The verdict and words of the changes and unknowns found: a change outranks an unknown, and
-/// an untouched path says so (with `player assumed` after it for an assumed stream).
+/// an untouched path says so (with `player assumed` after it for an assumed stream, `no MPRIS
+/// player` for one with no player).
 fn verdict_of(
     route: &RouteFacts,
     changes: Vec<String>,
@@ -600,6 +643,11 @@ fn verdict_of(
         (
             Verdict::Untouched,
             vec![UNTOUCHED.to_string(), "player assumed".to_string()],
+        )
+    } else if route.player_match == PlayerMatch::NoMpris {
+        (
+            Verdict::Untouched,
+            vec![UNTOUCHED.to_string(), NO_MPRIS_PLAYER.to_string()],
         )
     } else {
         (Verdict::Untouched, vec![UNTOUCHED.to_string()])
@@ -629,7 +677,7 @@ pub(super) fn sink_name(sink: &SinkFacts) -> String {
 fn identified_stream(route: &RouteFacts) -> Option<&StreamFacts> {
     let identified = matches!(
         route.player_match,
-        PlayerMatch::Pid | PlayerMatch::Name | PlayerMatch::Assumed
+        PlayerMatch::Pid | PlayerMatch::Name | PlayerMatch::Assumed | PlayerMatch::NoMpris
     );
     route.player.as_ref().filter(|_| identified)
 }
@@ -638,7 +686,7 @@ fn identified_stream(route: &RouteFacts) -> Option<&StreamFacts> {
 fn player_hop(route: &RouteFacts, unknown: &mut Vec<String>) -> Hop {
     let Some(stream) = identified_stream(route) else {
         unknown.push(match route.player_match {
-            PlayerMatch::NoPlayer => "no player".to_string(),
+            PlayerMatch::NoPlayer => NOTHING_PLAYING.to_string(),
             _ => "player not identified".to_string(),
         });
         return Hop {
@@ -646,6 +694,7 @@ fn player_hop(route: &RouteFacts, unknown: &mut Vec<String>) -> Hop {
             detail: "not identified".to_string(),
             changes: false,
             unknown: true,
+            unnamed: false,
             changed: Vec::new(),
             rate_hz: None,
             resamples_to: None,
@@ -670,11 +719,13 @@ fn player_hop(route: &RouteFacts, unknown: &mut Vec<String>) -> Hop {
     if route.player_match == PlayerMatch::Assumed {
         detail.push("assumed".to_string());
     }
+    let no_mpris = route.player_match == PlayerMatch::NoMpris;
     Hop {
-        label: "player".to_string(),
+        label: if no_mpris { NO_MPRIS_HOP } else { "player" }.to_string(),
         detail: detail.join(", "),
         changes: !changed.is_empty(),
         unknown: unknown.len() > unknown_before,
+        unnamed: no_mpris,
         changed,
         rate_hz: stream.rate_hz,
         resamples_to: None,
@@ -785,6 +836,7 @@ fn computer_hop(route: &RouteFacts, sink: &SinkFacts, unknown: &mut Vec<String>)
         detail: detail.join(", "),
         changes: !changed.is_empty(),
         unknown: unknown.len() > unknown_before,
+        unnamed: false,
         changed,
         rate_hz: sink.rate_hz,
         resamples_to,
@@ -1076,13 +1128,18 @@ fn alsa_words(
 }
 
 /// The words for the filter chain in the path: each stage that plays, in chain order, or the
-/// flat pass-through kept while a stream plays; `host EQ on` where the stages were not told. The
+/// flat pass-through kept while a stream plays (none for one proved untouched); `host EQ on`
+/// where the stages were not told. The
 /// Night drive's top line (`STAGE_WORDS` in bins/svolderd/web/themes/nightdrive/hud.js) picks these
 /// words out of the path by their text: change both together.
 fn chain_words(stages: Option<svolder_host::ChainStages>) -> Vec<String> {
     let Some(stages) = stages else {
         return vec!["host EQ on".to_string()];
     };
+    // A pass-through the daemon proved untouched changes nothing: no word, so the hop is green.
+    if stages.untouched && !(stages.eq || stages.loudness || stages.crossfeed || stages.speakers) {
+        return Vec::new();
+    }
     let words: Vec<String> = [
         (stages.eq, "host EQ on"),
         (stages.loudness, "loudness on"),
@@ -1133,6 +1190,7 @@ fn dac_hop(sink: &SinkFacts, dac: &DacFacts, unknown: &mut Vec<String>) -> Hop {
         detail: detail.join(", "),
         changes: !changed.is_empty() || dac.stage.changes(),
         unknown: unknown.len() > unknown_before,
+        unnamed: false,
         changed,
         rate_hz: dac.rate_hz,
         resamples_to: None,

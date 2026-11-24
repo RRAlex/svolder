@@ -244,7 +244,7 @@ any raw reading no control names, where the level comes from and what the host i
 sink:
 
 ```
- svolder  Gungnir 2 · fw 3 · 0102…08  ● connected                 mouse:on 14:02
+ svolder  Gungnir 2 · fw 3 · 0102…08  ● connected                mouse:on 14:02 
 ─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─
 ┌ Controls ─────────── mute ─ 0 centre ┐┌ Tone control ──────── flat ─ presets ┐
 │ ▶ Input        ‹ 3 · Optical ›       ││   Mode      ‹ EQ ›                   │
@@ -380,29 +380,33 @@ whether or not the row is focused.
 On the computer's side, where the daemon (or the TUI itself) serves the computer's loudness, the
 pane keeps a Loudness row at the bottom, under the points table: `Loudness ‹ on › ████░░ 50 %`, with
 a dim line of what the stage plays at the volume it read under it
-(`ref 100 % · 35 %: bass +7.3 · mids −7.3 dB`; the stage's shelf gains, not the response at three
+(`at 35 %: bass +7.3 · mids −7.3 dB`; the stage's shelf gains, not the response at three
 frequencies), and a dim "the DAC's loudness is on too" when the device's own Loudness plays as well.
 `←→` step the strength, `␣` turns it on and off (`Enter` too), and `r` sets the reference to the
-current volume; the tone screen (`e`) has the section with its Reference row (see "Loudness" below).
-A daemon that does not offer loudness shows no row.
+current volume; the tone screen (`e`) has the stage's own panel with its Reference row (see "The
+computer's stages" below). A daemon that does not offer loudness shows no row.
 
-Under it, where the daemon (or the TUI itself) serves the computer's crossfeed, the
-pane keeps one more row at the bottom, under the loudness: `Crossfeed ‹ on › Bauer · Chu Moy`,
-with a dim line of its numbers under it (`33 % · −9.5 dB · 700 Hz · 0.26 ms`). `←→` or `␣` turn it
-on and off, `,` and `.` pick the preset, and `Enter` or `X` open the tone screen with the crossfeed
-section unfolded (see "Crossfeed" below). On a short pane the dim line goes first, then rows of the
-points table, which scrolls to keep the focused point in sight. A daemon that does not offer
-crossfeed shows no row.
+Under it, where the daemon (or the TUI itself) serves the computer's crossfeed, the pane keeps the
+**Crossfeed** row, `Crossfeed ‹ on ›`, and, while crossfeed plays, a Model row and a Preset row
+under it: `Model      ‹ Bauer ›` and `Preset     ‹ Chu Moy ›`. `←→` or `␣` turn crossfeed on and
+off on the first row, `←→` step the model or the preset round the ends on the others
+(a model's first preset loads with it), and `Enter` or `X` open the tone screen with the Space
+panel on the row. On a short pane the Model and Preset rows go first, then rows of the points
+table, which scrolls to keep the focused point in sight. A daemon that does not offer crossfeed
+shows no row.
 
 Where the daemon also offers [virtual speakers](eq.md#virtual-speakers), that row becomes the
 **Space** row: `Space ‹ Virtual speakers ›`, a choice of **Off**, **Crossfeed** or **Virtual
-speakers** that `←→` or `,` `.` step and `␣` turns off, or on again (the speakers where a set is
-chosen, else crossfeed). Two dim lines under it say what plays: for the speakers the set with its
-choice and term (`SADIE II, D2 · No room · HRTF`), then how loud and how long
-(`7 dB quieter · 5.3 ms`: the loudness change and the length, `cut to 0.5 s` when cut); for
-crossfeed its model and preset, then its numbers. Choosing Virtual speakers with no set chosen
-turns on the first fetched one, and with none fetched opens the set list. `Enter` or `X` open the
-tone screen with the section unfolded, as before.
+speakers** whose `←→` move a highlight that `Enter` plays, and `␣` turns off, or on again (the
+speakers where a set is chosen, else crossfeed); a click on its `‹ ›` highlights too. With the
+speakers playing, two dim lines under it say what plays: the set
+with its choice and term (`SADIE II, D2 · No room · HRTF`), then how loud and how long
+(`7 dB quieter · 5.3 ms`: the loudness change and the length, `cut to 0.5 s` when cut); with
+crossfeed playing the Model and Preset rows stand under it, as above. Choosing Virtual speakers
+with no set chosen turns on the first fetched one, and with none fetched opens the set list.
+`Enter` or `X` open the tone screen with the panel on the row. `f` is the bypass here too (see
+below), and the Volume row of the computer's side says what the chain adds to the volume:
+`42 % · chain −14.8 dB` (nothing with no chain).
 
 Below the Loudness row, the pane names the preset the tone control is on, as the tone-control
 screen's header does (see below): `Preset    NAME`, `NAME*` once the curve has moved off the one
@@ -568,7 +572,7 @@ waiting, as `HH:MM`, and no control of a placeholder profile is drawn. The heade
 while the wait lasts. An 80×24 terminal waiting for the device `amp`:
 
 ```
- svolder  amp  ○ disconnected                                     mouse:on 14:02
+ svolder  amp  ○ disconnected                                    mouse:on 14:02 
 ─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─
 ┌ Waiting ──────────────────────────────────────────────────────────── refresh ┐
 │ amp not found yet                                                            │
@@ -686,8 +690,11 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
   - `Path`, on a DAC joined to a daemon that speaks for the host, under `Transport`: where the sound
     goes from the player to the DAC, which no key reaches. The row is there for as long as the
     daemon speaks for the host, so the group does not change height as playback starts and stops:
-    with no player it reads `nothing playing`, and with a player the daemon has not read the route
-    for yet, `route not read`, both plain. The row is two lines under the label `Path`. The first
+    with no player and no stream playing it reads `nothing playing` (a stream with no MPRIS
+    player, such as mpv without its MPRIS plugin, is judged all the same: the player hop reads
+    `player (no MPRIS)` with a dim `?`; with several streams and no player the row says `no MPRIS
+    player` and judges nothing), and with a player the daemon has not read the route for yet,
+    `route not read`, both plain. The row is two lines under the label `Path`. The first
     line is the hops, `player → computer → DAC USB 1`, the DAC with the input it listens to. The
     second is the values the hops share, dim: the rate once (`48 kHz`, or `44.1 → 48 kHz` when the
     computer resamples), then the DAC's volume (`volume 0 dB`), then, in the warning colour, what
@@ -751,18 +758,26 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
     label and every line it wraps to, opens the PipeWire config box, as does `k` on the Device
     screen of a DAC or of the computer's side (with `host_audio` on; the Controls border says `k
     check`), opens the **PipeWire config** box. It is a box over the screen like the quit question:
-    the sink the check judges, the seven lines (`rates`, `forced rate`, `dither`, `24-bit output`,
-    `no plug`, `stereo to stereo`, `no filter in the sink`) each with `✓`, `✗` or `?` and the
+    the sink the check judges, under it `From player` (the player's stream as PipeWire negotiated
+    it: `44.1 kHz · S16LE · stereo`, or `not read` with no identified stream) and `To DAC` (what the
+    card is open at, from its ALSA `hw_params`: `44.1 kHz · 32-bit (S32_LE) · stereo · hw:2`, or
+    `not open` when the card is closed), the seven lines (`rates`, `forced rate`, `dither`,
+    `24-bit output`, `no plug`, `stereo to stereo`, `no filter in the sink`) each with `✓`, `✗` or
+    `?` and the
     daemon's words (a failing line in the warning colour), the summary (`PipeWire config lets it
     through untouched`, `PipeWire config changes the sound: 2`, `PipeWire config not fully read: 1`,
-    `PipeWire config not read`) and, dim, the limit: svolder judges the config from the player's
-    stream on, cannot see inside a player nor past the sink's converter, judges at most 24 bits, and
-    only reads. `k` or `Esc` closes it, and every other key is swallowed while it is open. With a
-    daemon the box shows the daemon's route; with no daemon the TUI reads `pw-dump` itself, once
-    when the box opens and every 2 s while it is open (`reading the PipeWire graph…` until the first
-    answer, `svolder could not read the PipeWire graph (pw-dump)` when a read fails: every line then
-    reads not read and the summary `PipeWire config not read`, never the last read's marks), and
-    never with `host_audio` off. The same check is `svolder host check` ([cli](cli.md#host-check)).
+    `PipeWire config not read`), under it, when the path changes the sound, a `What changes the
+    sound` section with one row per hop that does (the player, the computer, the DAC) and its words
+    in the warning colour, so a yellow Path row always has its reason in the box (a config that
+    fails alone is explained by its lines), and, dim, the limit: svolder judges the config from the
+    player's stream on, cannot see inside a player nor past the sink's converter, judges at most 24
+    bits, and only reads. `k` or `Esc` closes it, and every other key is swallowed while it is open.
+    With a daemon the box shows the daemon's route; with no daemon the TUI reads `pw-dump` itself,
+    once when the box opens and every 2 s while it is open (`reading the PipeWire graph…` until the
+    first answer, `svolder could not read the PipeWire graph (pw-dump)` when a read fails: every
+    line then reads not read and the summary `PipeWire config not read`, never the last read's
+    marks), and never with `host_audio` off. The same check is `svolder host check`
+    ([cli](cli.md#host-check)).
   - `Spectrum`, in the wide and tall tiers only and while `visualizer` is on: what the default sink
     plays, in its sixteen bands from 40 Hz to 16 kHz spread over the pane's width to the edge the
     Volume row reaches (between neighbouring bands, on the same log axis; a pane with no more room
@@ -999,25 +1014,9 @@ key focuses it: `Target NAME  computer controls unavailable: no pw-cli on this c
 
 On the computer the mode reads `Mode ‹ Off | EQ ›`, with no Loudness, and `←→` or a click on it
 turns the computer EQ on or off. It is drawn as the Target switch is: the side in force bright and
-the other dim, and with the keys on the row the label and the side in force boxed. Under the curve
-the Points pane lists the points, `#  Type  Freq  Gain  Q`, the type `PK`, `LSC` or `HSC`, up to 16
-rows. The pane keeps one height, so it scrolls with `↓ more` and `↑ more` on its bottom border,
-which also says the preamp, and its title says `7 of 16`. The keys are the band keys' own on the
-focused point: `↑↓` move, `←→` step the gain by half a dB, `,` and `.` move the frequency a
-semitone, `[` and `]` the Q, `1`-`9` pick a point, `0` puts every point at 0 dB, `a` adds a peaking
-point at 1 kHz, `x` removes the focused one (the only point left is set to 0 dB and stays, with its
-frequency, type and Q), `y` cycles its type PK, LSC, HSC, and `Enter` (or a double-click on a value)
-opens the edit line: frequency, gain and Q typed as numbers, `Tab` between them, `Enter` writes the
-ones changed, each held to the hand range on its own, `Esc` cancels. A click on a Type cell cycles
-it. In the preset list on this side `n` saves the computer's points as a new preset (not the
-device's curve) and `u` does nothing. If the chain's state could not be looked at, the mode reads as
-the state file says with `not verified` after it. A drag on the curve moves a point as it does a
-band: left for the frequency and gain, right for the Q, sent as it moves (at most 20 times a second)
-and at the release. Hand values stay inside 20 Hz to 20 kHz, plus or minus 12 dB and Q 0.1 to 10.
-The Correction pane, in the wide tier, says that on the computer nothing is fitted: every filter
-plays as written. Under the preamp it says `level held until the music pauses` while a preset
-loaded during playback plays at the earlier curve's lower level (see
-["Presets"](eq.md#presets) in the presets reference).
+the other dim, and with the keys on the row the label and the side in force boxed. The header says
+the computer's preset once (`Preset Bass`); the computer's preset list is titled `Presets ·
+computer`. Everything under the curve is the stage strip and its panel, described next.
 
 The Controls pane has the same switch, `Target ‹ NAME | Computer ›`, as a row of its own over the
 Volume row: `↑` from Volume reaches it, and `↓` from the row above lands on it first, a further `↓` going
@@ -1032,84 +1031,141 @@ down to 100 % on a step down and goes no higher), `␣`/`Enter` and `m` turn its
 daemon every one of these is a request to it; with no daemon the TUI reads and sets the sink itself,
 and runs the computer EQ's controller of its own.
 
-#### Loudness
+#### The computer's stages
 
-On the computer's side the tone screen has a Loudness section under the Points table, for [the
-computer's loudness](eq.md#loudness); the computer's sections follow the filter chain's order, EQ
-(the Response graph and the Points), Loudness, Crossfeed or Space. Folded it is two lines,
-`Loudness  ‹ on › ██████░░░░ 50 %` and a dim readout of what the stage plays at the volume it read
-(`ref 100 % · 35 %: bass +7.3 · mids −7.3 dB`, shortened to what fits; the treble joins when it
-unfolds); it unfolds
-while the keys are in it, with the Reference row under the strength row and the readout under that,
-and folds again when they leave (`Esc`, `Tab` on, a click elsewhere). `Tab` and `↑↓` visit the
-computer's stops in that order: the header, the Points, Loudness, Crossfeed (or Space).
+Under the Response graph the computer's side has a **strip** of one row and, under it, one **panel**
+in the place the Points pane has on a device. The strip names the four stages in the chain's order,
+`EQ`, `Loudness`, `Space` and `Bypass`, each with a `●` while it is on and a `○` while it is off and
+the level it has: the EQ's share of the preamp in dB, the loudness strength in percent, the space's
+mode (`crossfeed` or `speakers`) with its dB, and at the end the total, `all −14.8 dB`, which is the
+preamp sent plus the speakers' level (loudness is left out of it: it follows the volume). From 120
+columns the strip says dB after each level and ends on the daemon's own words for the chain (`plays
+−14.8 dB in all`, `pass-through −7.6 dB until the music pauses` for a cut that is held,
+`pass-through 0.0 dB`, `climbing to 0.0 dB`, `pass-through, untouched`). Below 120 columns the end
+is the short `all −14.8 dB` (`pass-through · all −7.6 dB` for a held cut), except that a chain that
+is untouched or climbing keeps the daemon's words, which are short enough. The stop whose panel is
+open is drawn in reverse video. A stage the controller does not serve has no stop. The DAC's side
+has no strip.
 
-- on the strength row `←→` (or `,` `.`) step the strength by 5 and `␣` or `Enter` turn loudness on
-  and off; on the Reference row `←→` step the reference by 1;
-- `r` on either row sets the reference to the computer's volume as the daemon last read it (a toast
-  says when it has not been read yet);
-- the mouse: a click on the `‹ on ›` word toggles it, a click on the bar sets the strength the
-  clicked cell stands for, the wheel steps the value under it, and `‹ ›` step the reference.
+The panel shows the open stage. Its border is heavy and drawn in the role of the frame the keys
+are in while they are in it, and thin while they are on the strip or the header; its bottom border
+lists its keys; the title carries what the stage says of itself (`EQ · 9 of 16 points · 1 more ↓`,
+the preamp on the right of the top border, `Space · crossfeed` with `plays 3.1 dB quieter`). The
+panel is 9 rows inside its border on a screen under 40 rows, 13 from 40 and 17 from 48, and the
+window's last row is always blank: the panel never touches it, the Response graph never loses a
+row to it (it keeps four data rows at 80×24), and a toast on this screen is one line on that row,
+never a box over the panel. On a screen of 80×24 with the EQ open:
 
-Every number, range and step comes from the daemon's view, so a TUI never shows a value the daemon
-would refuse. Off, the row is dim and the values stay editable; while loudness cannot follow the
-volume the row says why, and a change is still accepted and saved. A daemon that does not serve
-loudness has no section, and the key table and the `?` overlay list its keys only where the computer
-serves it.
+```
+ svolder    Target ‹ Gungnir 2 | Computer ›                             mouse:on
+─ Controls ──┤ EQ ├── Telemetry ── Devices ───────────────── ? help ─ esc back ─
+              Preset Bass                                    Mode ‹ Off | EQ ›
+┌ Response ────────────────────────────────────────── flat ─ presets ─ refresh ┐
+│ +6 │⠤⠔⠒⠒⠉⠁     •    ⠈⠑⠢⠤⣀⣀                                                   │
+│  0 │                 •    ⠉⠉⠒⠒•⠢⠤⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒•⠒⠒⠒⠒⠒⠒⠒⠒•⠒⠤⠤⠤•⡠⠤⠤⠒⠒⠒•⠒⠒•⠉⠉⠉⠉⠉⠉⠉│
+│ -6 │                                                                         │
+│-12 │                                                                         │
+│    └─────────────────────────────────────────────────────────────────────────│
+│    20        50     100    200       500    1k     2k        5k           20k│
+└──────────────────────────────────────────────────────────────────────────────┘
+ EQ ● −7.8 │ Loudness ● 60 % │ Space ● speakers −7.0 │ Bypass ○ │ all −14.8 dB
+┏ EQ · 9 of 16 points · 1 more ↓ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ preamp −7.8 dB ┓
+┃   #  Type  Freq        Gain       Q                                          ┃
+┃ ▶  1  PK     60.0 Hz   +7.50 dB    0.70                                      ┃
+┃    2  LSC     105 Hz    +2.0 dB    0.71                                      ┃
+┃    3  PK      250 Hz   -1.50 dB    1.00                                      ┃
+┃    4  PK     1000 Hz    +0.0 dB    1.00                                      ┃
+┃    5  PK     1000 Hz    +0.0 dB    1.00                                      ┃
+┃    6  PK     2515 Hz    +0.0 dB    4.30                                      ┃
+┃    7  PK     4000 Hz    -2.0 dB    2.00                                      ┃
+┃    8  HSC    8000 Hz    +1.0 dB    0.71                                      ┃
+┗ ↑↓ row · ←→ value · Enter type · a add · x remove · ␣ on/off · Esc strip ━━━━┛
+```
 
-#### Crossfeed
+The keys, from the header (Mode) down:
 
-On the computer's side the tone screen has a Crossfeed section under the Points table and the
-Loudness section, for [the computer's crossfeed](eq.md#crossfeed). Folded it is one line,
-`Crossfeed  on · Bauer · Chu Moy · 33 % · 700 Hz · 0.26 ms  (X)`; it unfolds when the keys enter it
-(`Tab`, `↑↓` onto it, `X` or a click) and folds again when they leave (`Tab` on, a click elsewhere,
-`Esc`). On the computer's side `Tab` has the stops of what is offered: the header, the points,
-Loudness and the Crossfeed section, in that order. `X` jumps to the section from anywhere on the
-screen and toggles it open or shut.
+- `Tab` and `⇧Tab` step to the next and the previous stage and open its panel, with the keys in it:
+  the header, the EQ, Loudness, Space and Bypass, round. `↓` from the header goes to the strip.
+- On the strip `←→` move between the stops, `↓` or `Enter` go into the open stop's panel, `␣` turns
+  the stop's stage on or off, `↑` goes back to the header and `Esc` leaves the screen.
+- In a panel `↑↓` move between rows (`↑` on the first goes to the strip, `↓` on the last stays),
+  `←→` change the row's value, `Enter` types a number (or applies the highlighted choice), `␣`
+  turns the stage on or off from any row and `Esc` goes up to the strip. `Esc` is therefore panel,
+  strip, leave; the menu is not in the way.
+- `f` is the **bypass** from anywhere on the computer's side, on the tone and the device screens
+  (the DAC's side keeps `f` for the flat mode): see "Bypass" below. `L` and `X` open the Loudness
+  and the Space panels from anywhere (pressed again in the panel they go back to the strip), `S`
+  opens the virtual speakers' set list and `p` the preset list.
+- A click on a stop opens its panel; a click on a row focuses it, on a `‹` or `›` steps it, and the
+  wheel over a value steps it.
+- `?` opens with a **This screen** group first: the keys that act where the keys are now.
 
-Unfolded, the section has a Model and Preset row, then Level, Crossover and Delay:
+**EQ.** The panel is the Points table, `#  Type  Freq  Gain  Q`, the type `PK`, `LSC` or `HSC`,
+every point up to the panel's height and then scrolled to keep the focused one in view, with `N more
+↓` and `N more ↑` in the top border, which also says the count (`9 of 16 points`, with the preset's
+name from 120 columns) and the preamp. The keys are the band keys' own on the focused point: `↑↓`
+move, `←→` step the gain by half a dB, `,` and `.` move the frequency a semitone, `[` and `]` the Q,
+`1`-`9` pick a point, `0` puts every point at 0 dB, `a` adds a peaking point at 1 kHz, `x` removes
+the focused one (the only point left is set to 0 dB and stays, with its frequency, type and Q), `y`
+cycles its type PK, LSC, HSC, `␣` turns the computer EQ on and off, and `Enter` (or a double-click
+on a value) opens the edit line: frequency, gain and Q typed as numbers, `Tab` between them, `Enter`
+writes the ones changed, each held to the hand range on its own, `Esc` cancels. The point keys do
+nothing in another stage's panel. A click on a Type cell cycles it. In the preset list on this side
+`n` saves the computer's points as a new preset (not the device's curve) and `u` does nothing. If
+the chain's state could not be looked at, the mode reads as the state file says with `not verified`
+after it. A drag on the curve moves a point as it does a band: left for the frequency and gain,
+right for the Q, sent as it moves (at most 20 times a second) and at the release. Hand values stay
+inside 20 Hz to 20 kHz, plus or minus 12 dB and Q 0.1 to 10. The Correction pane, in the wide tier,
+says that on the computer nothing is fitted: every filter plays as written. Under the preamp it says
+`level held until the music pauses` while a preset loaded during playback plays at the earlier
+curve's lower level, only for a chain svolder did not start (see ["Presets"](eq.md#presets) in the
+presets reference).
 
-- on the Model and Preset row `←→` pick the preset, `,` and `.` the model, and `␣` or `Enter` turn
-  crossfeed on and off; changing the model loads its default preset;
-- - on Level, Crossover and Delay `←→` and `,` `.` move the value by one step of the model (the
-  daemon rounds every value to the model's step, so nothing finer exists), `Enter` opens an edit
-  line for a typed number (`Enter` writes it, `Esc` cancels), and a click or the wheel on the value
-  or its `‹ ›` steps it; Delay says `none` for Mid/Side bass and `(own)` at the model's own lag;
-- a preset's numbers are kept until one is changed, and then the row says `Custom` and what it was
-  edited from. Every range, step and word comes from the daemon's view, so a TUI never shows a
-  value the daemon would refuse. A key sends each change on its own (the terminal sends no key
-  repeat), and the mouse wheel and `‹ ›` do the same.
+**Loudness**, for [the computer's loudness](eq.md#loudness): four rows. `Loudness ‹ on ›`,
+`Strength ‹ 60 % › ██████░░░░`, `Reference ‹ 97 % ›` with `the volume you mixed at · r: the volume
+now (42 %)` after it, and `Now`, a dim readout of what the stage plays at the volume it read
+(`at 42 %: bass +6.9 · mids −6.9 · treble +2.0 dB`, shortened to what fits). `←→` (or `,` `.`) set
+the on/off row off and on, step the strength by 5 and the reference by 1; `Enter` on the strength
+or the reference opens an edit line for a typed number (`Enter` writes it, `Esc` cancels), so a
+reference is typed and `Enter` never turns loudness off; `␣` turns the stage off and on; `r` sets
+the reference to the computer's volume as the daemon last read it (a toast says when it has not been
+read yet). The mouse: a click on the bar sets the strength the clicked cell stands for, the wheel
+steps the value under it, and `‹ ›` step it. Every number, range and step comes from the daemon's
+view, so a TUI never shows a value the daemon would refuse. Off, the rows stay and the readout says
+`off: the sound plays as the EQ made it`; while loudness cannot follow the volume the readout says
+why, and a change is still accepted and saved. A daemon that does not serve loudness has no stop,
+and the key table and the `?` overlay list its keys only where the computer serves it.
 
-From 120 columns the three value rows open in a block 40 columns wide beside the Points table with
-the two level curves of the section: the level the same ear hears and the level the other ear hears
-for each frequency, in dB. Below 120 columns they open under the folded line and take rows from the
-Response graph only while focused, so the graph keeps its height at rest; on a screen of 24 rows
-they may cost the graph three rows. When crossfeed turns itself off ([the four
-resets](eq.md#it-turns-itself-off)), a toast says why once: `crossfeed turned off: ...`. A daemon
-that does not serve crossfeed has no section and no `X` key; the key table and the `?` overlay list
-`X`, `␣`, `←→`, `, .` and `Enter` on Crossfeed only where the computer serves it.
+**Space**, for [the computer's crossfeed](eq.md#crossfeed) and [virtual
+speakers](eq.md#virtual-speakers). The first row is **Plays**: with virtual speakers served,
+`Plays ‹ Crossfeed › Off · Crossfeed · Virtual speakers`, where `←→` only move the highlight (the
+word in reverse video, with `Enter plays this` after the list) and **`Enter` applies it**, so that
+a stray arrow never rebuilds the chain; with no speakers it is crossfeed's own `Crossfeed ‹ on ›`
+row, whose `←→` set it off and on. Under it are the rows of what plays:
 
-#### Space and virtual speakers
+- **Crossfeed**: **Model** (`Bauer`, `Linkwitz`, `Meier`, `Mid/Side bass`), **Preset** (a model with
+  one preset reads `Default (the only one)`), **Level**, **Crossover**, **Delay** and a `Plays at`
+  line (`3.1 dB quieter`, from the chain's levels). `←→` on Model and Preset step round the ends,
+  loading the model's default preset with it; on Level, Crossover and Delay they move the value by
+  one step of the model (the daemon rounds every value to the model's step), `Enter` opens an edit
+  line for a typed number, and a click or the wheel on the value or its `‹ ›` steps it. Delay says
+  `none` for Mid/Side bass and `· the model's own` at the model's own lag. A preset's numbers are
+  kept until one is changed, and then the preset reads `your own` and what it was edited from.
+  `,` and `.` never change the model (they step a point's frequency in the EQ panel); only `←→` on the
+  Model row do.
+- **Virtual speakers**: the **Set** row (the set with its choice and term, `←→` step through the
+  fetched sets, which rebuilds the chain once while they play and leaves them on or off as they
+  were, `Enter` or `S` open the set list), then the facts read off the daemon's view: the angles
+  and the length of the responses, how much quieter than Off they play (`about 7.0 dB quieter than
+  Off`), the licence line (the licence, the credit words where it asks for them) and where the set
+  comes from. The facts are never typed into: the keys' two stops are the choice and the set.
 
-Where the computer serves [virtual speakers](eq.md#virtual-speakers) the Crossfeed section is the
-**Space** section. Folded it is one line that leads with what plays, `Space  Virtual speakers · No
-room · HRTF · SADIE II, D2 · −7 dB  (X)`, or `Crossfeed · Bauer · Chu Moy · ...`, or `off`
-(`unavailable: ...` with the reason when the daemon says they cannot be changed now). Unfolded, its
-first row is the choice (`Space  ‹ Virtual speakers ›  Off · Crossfeed · Virtual speakers`, the one
-that plays standing out), and the rows under it belong to the choice:
-
-- **Crossfeed**: the Preset row, then Level, Crossover and Delay, as above;
-- **Virtual speakers**: the **Set** row (the set with its choice and term, `←→` or `,` `.` step
-  through the fetched sets, which rebuilds the chain once while they play and leaves them on or off
-  as they were, `Enter` or `S` open the set list), then the facts read off the daemon's view: the
-  licence line (the licence, the credit words where it asks for them), where the speakers were
-  measured, how long the responses are, how much quieter than Off they play and where the set comes
-  from. From 120 columns two curves stand beside the facts (what the same ear and the other ear hear
-  of a speaker, in dB); below that they are two strips of level blocks under them, which fit 80x24.
-  The facts are never typed into: the keys' two stops are the choice and the set.
-
-`Tab` has the same stops as for crossfeed. When the speakers turn themselves off
-([why](eq.md#virtual-speakers-turn-themselves-off)) a toast says why once.
+From 120 columns the two curves of what plays stand in a side box on the right of the panel,
+`Same ear · other ear`: the level the same ear hears and the level the other ear hears for each
+frequency, in dB. Below 120 columns the speakers' curves are two strips of level blocks under the
+facts. When crossfeed turns itself off ([the four resets](eq.md#it-turns-itself-off)), or the
+speakers do ([why](eq.md#virtual-speakers-turn-themselves-off)), a toast says why once. A daemon
+that does not serve crossfeed has no Space stop and no `X` key.
 
 **`S` opens the set list** over the tone screen or the device screen, where the computer serves the
 speakers (the key table and `?` list it only there). It lists the catalogue's sets and your own,
@@ -1122,6 +1178,66 @@ imports, `Esc` goes back) and `Esc` or `S` closes the list. The daemon owns the 
 daemon the list shows the fetched sets and says `fetching needs svolderd`, and a fetch or an
 import is refused in words. Leaving the screen, or the program, cancels a fetch in flight. The
 mouse and the tooltips reach the same rows.
+
+**Bypass**, `f` anywhere on the computer's side: every stage the chain plays (the EQ, loudness,
+crossfeed or the speakers) goes off at once, as one change, and `f` again brings back exactly those,
+with their settings as they are now. The panel's rows are `Bypass ‹ on ›`, what it brings back
+(`EQ Bass · Loudness 60 % · Space virtual speakers`) while it is on or turns off while it is off,
+and what the chain plays at (`climbing to 0.0 dB`, the daemon's words as they are: only the
+daemon says untouched). `←→` set it off and on, `Enter` and `␣` turn it over. With nothing playing and nothing held the daemon refuses,
+and a toast says why in its words: `nothing plays on the computer to bypass`. Any stage turned on
+from anywhere (a switch, a preset, a scene) ends the bypass. The strip's Bypass stop is `●` while
+it holds. The bypass, the levels in the strip and the stage keys are the same on the daemon's
+controller and on the TUI's own, which carries the change to the controller it runs when no daemon
+does.
+
+The strip and the panels at 80×24, with the keys in Loudness, Space (crossfeed) and Bypass, from
+the strip's row down:
+
+```
+ EQ ● −7.8 │ Loudness ● 60 % │ Space ● speakers −7.0 │ Bypass ○ │ all −14.8 dB
+┏ Loudness ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ ▶ Loudness   ‹ on ›                                                          ┃
+┃   Strength   ‹ 60 % ›  ██████░░░░                                            ┃
+┃   Reference  ‹ 97 % ›  the volume you mixed at · r: the volume now (42 %)    ┃
+┃   Now        at 42 %: bass +6.0 · mids −6.0 · treble +1.7 dB                 ┃
+┃                                                                              ┃
+┃                                                                              ┃
+┃                                                                              ┃
+┃                                                                              ┃
+┃                                                                              ┃
+┗ ↑↓ row · ←→ change · Enter type · ␣ on/off · r volume now · Esc strip ━━━━━━━┛
+```
+
+```
+ EQ ● −7.8 │ Loudness ● 60 % │ Space ● crossfeed −3.1 │ Bypass ○ │ all −10.9 dB
+┏ Space · crossfeed ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ plays 3.1 dB quieter ┓
+┃ ▶ Plays      ‹ Crossfeed ›   Off · Crossfeed · Virtual speakers              ┃
+┃   Model      ‹ Mid/Side bass ›                                               ┃
+┃   Preset     Default (the only one)                                          ┃
+┃   Level      ‹ 50 % ›                                                        ┃
+┃   Crossover  ‹ 120 Hz ›                                                      ┃
+┃   Delay      none                                                            ┃
+┃   Plays at   3.1 dB quieter                                                  ┃
+┃                                                                              ┃
+┃                                                                              ┃
+┗ ↑↓ row · ←→ change · Enter apply or type · ␣ on/off · S sets · Esc strip ━━━━┛
+```
+
+```
+ EQ ○ │ Loudness ○ │ Space ○ │ Bypass ● │ climbing to 0.0 dB
+┏ Bypass ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ ▶ Bypass     ‹ on ›    f anywhere on the computer side                       ┃
+┃   Brings back  EQ Bass · Loudness 60 % · Space virtual speakers              ┃
+┃   Now        climbing to 0.0 dB                                              ┃
+┃                                                                              ┃
+┃                                                                              ┃
+┃                                                                              ┃
+┃                                                                              ┃
+┃                                                                              ┃
+┃                                                                              ┃
+┗ ␣ or f bypass on/off · Esc strip ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+```
 
 #### What the graph draws
 
@@ -1540,7 +1656,7 @@ since the device does not say which it holds. The box names its own keys, and ev
 dimmed as around the other list; an 80×24 terminal on a Loki Max whose bands read Bass Boost:
 
 ```
- svolder  Loki Max  ● connected                                        mouse:on 
+ svolder  Loki Max  ● connected                                       mouse:on  
 ─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─
 ┌ Controls ───────────────────────────────────────── mute ─ 0 centre ─ refresh ┐
 │ ▶ Input  —                                                                   │
@@ -1599,7 +1715,7 @@ and says so on the pane's right border: a dim `▲` beside the first row it show
 hidden above it, and a `▼` beside the last while readings are hidden below:
 
 ```
- svolder  Gungnir 2 · fw 3  ● connected                           mouse:on 14:02
+ svolder  Gungnir 2 · fw 3  ● connected                          mouse:on 14:02 
 ─ Controls ── EQ ──┤ Telemetry ├── Devices ───────────────── ? help ─ esc back ─
 ┌ Telemetry ──────────────────────────────────────────── refresh ─ 6 functions ┐
 │   ID       Type  Value       Label           History             Age  Rate   │
@@ -1654,7 +1770,7 @@ The configured devices, to switch between, add to, change and remove — always 
 device is configured or several (`↑↓ Enter n u b x r`):
 
 ```
- svolder  Gungnir 2  ● connected                                  mouse:on 14:02
+ svolder  Gungnir 2  ● connected                                 mouse:on 14:02 
 ─ Controls ── EQ ── Telemetry ──┤ Devices ├───────────────── ? help ─ esc back ─
 ┌ Devices ───────────────────── new ─ update ─ b identify ─ x remove ─ refresh ┐
 │ ▶ bifrost   Bifrost 3   connected                                            │
@@ -1806,7 +1922,7 @@ version, and three entries (four while the daemon keeps scenes, below):
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.39.0 │
+│                          v0.39.4 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -1826,7 +1942,7 @@ nothing in the menu there.
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.39.0 │
+│                          v0.39.4 │
 │                                  │
 │             Settings             │
 │             Scenes z             │
@@ -2651,7 +2767,7 @@ the rows of the Telemetry and Devices lists, and the header's connection words,
 The Telemetry tab's, on an 80×24 terminal:
 
 ```
- svolder  Gungnir 2  ● connected                                       mouse:on 
+ svolder  Gungnir 2  ● connected                                      mouse:on  
 ─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─
 ┌ Controls ─────────── m Telemetry · every reading · t ──────── flat ─ presets ┐
 │   Input        —                     ││   Mode      ‹ — ›                    │

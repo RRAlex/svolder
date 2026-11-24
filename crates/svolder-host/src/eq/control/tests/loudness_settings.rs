@@ -39,6 +39,7 @@ async fn over_file(dir: &Dir) -> (EqControl, FakeChain, FakeParams) {
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     };
     state.save(&dir.state()).unwrap();
     let chain = FakeChain::with_state(state);
@@ -75,7 +76,8 @@ fn a_view_without_loudness_parses_and_one_without_it_leaves_the_key_out() {
     let mut view = control.view();
     view.loudness = None;
     let text = serde_json::to_string(&view).unwrap();
-    assert!(!text.contains("loudness"), "{text}");
+    let keys: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert!(keys.get("loudness").is_none(), "{text}");
     let back: EqView = serde_json::from_str(&text).unwrap();
     assert_eq!(back.loudness, None);
 }

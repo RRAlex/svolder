@@ -477,6 +477,7 @@ impl EqControl {
     /// was.
     pub async fn loudness(&mut self, edit: LoudnessEdit) -> Result<(), EqFailure> {
         let result = self.loudness_inner(edit).await;
+        self.end_bypass_if_on();
         self.publish();
         result
     }
@@ -581,7 +582,8 @@ impl EqControl {
         if !self.runs || !self.flat || !self.live || self.keeps_chain() {
             return Ok(());
         }
-        self.ld.snap = true;
+        // A stream that plays keeps the chain as a pass-through and the stage glides to the
+        // identity on the ticks that follow; a chain nothing plays through is removed.
         if self.keep_passthrough().await? {
             return Ok(());
         }

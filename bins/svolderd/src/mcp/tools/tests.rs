@@ -22,6 +22,7 @@ use futures::StreamExt;
 use svolder_ipc::{CODE_LINK, CODE_TIMEOUT};
 use svolder_ipc::{Event, ValueObject};
 
+mod bypass;
 mod climb;
 mod crossfeed;
 mod describe;

@@ -628,6 +628,7 @@ fn save(dir: &Dir, on: bool) {
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     }
     .save(&dir.state())
     .expect("the state is saved");
@@ -871,6 +872,7 @@ fn save_crossfeed_on(dir: &Dir, flat: bool) -> HostEqState {
         speakers_loaded: None,
         crossfeed_loaded: None,
         loudness: None,
+        bypass: None,
     };
     state.save(&dir.state()).expect("the state is saved");
     state

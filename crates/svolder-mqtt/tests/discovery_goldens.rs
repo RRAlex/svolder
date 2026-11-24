@@ -223,3 +223,30 @@ fn the_device_goldens_are_unchanged() {
     );
     assert_golden(sorted_json(entries), "gungnir2-v2-commands.json");
 }
+
+/// The computer's bypass switch (a binary sensor alone with commands off) and its three level
+/// sensors, as a view that carries both announces them.
+#[test]
+fn the_computer_has_the_bypass_and_level_entities() {
+    let eq = svolder_host::eq::EqView {
+        bypass: Some(Default::default()),
+        levels: Some(Default::default()),
+        ..Default::default()
+    };
+    for (commands, golden) in [
+        (true, "computer-bypass-commands.json"),
+        (false, "computer-bypass-read-only.json"),
+    ] {
+        let entries: Vec<_> = svolder_mqtt::computer::entries_of(
+            &Computer::new("Reframe"),
+            "svolder",
+            "homeassistant",
+            commands,
+            &eq,
+        )
+        .into_iter()
+        .filter(|e| e.topic.contains("computer_bypass") || e.topic.contains("computer_level"))
+        .collect();
+        assert_golden(sorted_json(entries), golden);
+    }
+}

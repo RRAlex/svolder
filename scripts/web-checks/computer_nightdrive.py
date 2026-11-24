@@ -35,6 +35,10 @@ controls, on a fake host (`SVOLDER_HOST=fake`: its sink and EQ live in memory, n
                                         the EQ line under them; nothing meets
   the_phone_panel_starts_with_the_switch   the switch as a `DAC | PC` pill in the scene's top left corner (not the panel), the scene over 77 %, the figure in the scene
   a_finger_adds_drags_and_pinches       (Chromium, touch emulation) a tap adds, a finger drags, two fingers halve the Q
+  the_dash_bypass_key_and_the_eq_line_follow_the_daemon   a BYPASS key beside the EQ key posts on and off and is pressed;
+                                        the EQ line gains `SPACE ...` and the daemon's total; the driver's
+                                        `{computer: 'bypass'}` is the key; a guest's key is inert; a phone, upright and
+                                        sideways, keeps the key a 44 px target inside the dash
 Pictures of the computer side (desktop and phone, the sheet shut and open) are saved under target/web-shots/nightdrive/
 (Chromium run). Shared helpers: nightdrive_base.py.
 Usage: python3 computer_nightdrive.py chromium|firefox"""
@@ -1511,6 +1515,155 @@ def eq_key(b, d):
           b.page(f"{key}.getAttribute('aria-pressed')") == str(not flat).lower(), b.page(f"{key}.outerHTML"))
 
 
+def bypass_key(b, d):
+    start(b, d)
+    name = 'the_dash_bypass_key_and_the_eq_line_follow_the_daemon'
+    key = "document.getElementById('nd-bypass-key')"
+    flip(b, 'computer')
+    b.page('window.__driver = __core.theme.driver')
+    b.page("__core.actions.computer.setComputerLoudness({ on: true, strength_pct: 60 }).then(() => 1)")
+    if b.page(f'{COMPUTER}.eq.on') is not True:
+        tap(b, '#nd-eq-key')
+    poll(lambda: b.page(f'{COMPUTER}.eq.on === true && {COMPUTER}.eq.loudness?.on === true && !!{COMPUTER}.eq.levels'))
+    time.sleep(0.8)
+    line = lambda: b.page("document.querySelector('.nd-eq')?.innerText.replace(/\\s+/g, ' ').trim() ?? null")  # noqa: E731
+    total = lambda: b.page(f"{COMPUTER}.eq.levels.total_db.toFixed(1).replace('-', '\u2212')")  # noqa: E731
+    check(f'{name}: the EQ line ends in the daemon\'s total',
+          bool(line()) and line().lower().endswith(f'{total()} db'), [line(), total()])
+    check(f'{name}: the EQ line reads as the brief draws it, a dot before the stage words',
+          re.search(r'^(EQ|OFF)\b.* · .*\d', line() or '') is not None, line())
+    check(f'{name}: the BYPASS key sits right after the EQ key in the dash, off',
+          b.page("document.getElementById('nd-eq-key').nextElementSibling?.id") == 'nd-bypass-key'
+          and b.page(f"{key}.textContent") == 'BYPASS' and b.page(f"{key}.getAttribute('aria-pressed')") == 'false',
+          b.page('document.querySelector("#nd-dash .nd-keys").innerHTML'))
+    clear(b)
+    tap(b, '#nd-bypass-key')
+    got = poll(lambda: posts(b, 'api/v1/host/bypass'))
+    check(f'{name}: a press posts bypass on', bool(got) and got[0][1] == {'on': True}, got)
+    check(f'{name}: the key is lit and the EQ line reads OFF',
+          poll(lambda: b.page(f"{key}.getAttribute('aria-pressed') === 'true' && {COMPUTER}.eq.bypass.on === true"))
+          and poll(lambda: (line() or '').startswith('OFF')), [line(), b.page(f'{COMPUTER}.eq.bypass')])
+    clear(b)
+    tap(b, '#nd-bypass-key')
+    got = poll(lambda: posts(b, 'api/v1/host/bypass'))
+    check(f'{name}: a second press posts bypass off', bool(got) and got[0][1] == {'on': False}, got)
+    check(f'{name}: and the EQ comes back, the line with it',
+          poll(lambda: b.page(f"{key}.getAttribute('aria-pressed') === 'false' && {COMPUTER}.eq.on === true"))
+          and poll(lambda: (line() or '').startswith('EQ') or (line() or '').startswith('BASS')), line())
+    check(f'{name}: the driver reaches the bypass target and turns it on', b.page('__driver.reach({ computer: "bypass" })') is True)
+    b.page('__driver.operate({ computer: "bypass" }, { on: true })')
+    check(f'{name}: and the driver shows it pressed',
+          poll(lambda: b.page(f'{COMPUTER}.eq.bypass.on === true')) is True
+          and b.page('__driver.shown({ computer: "bypass" })') == 'on', b.page(f'{COMPUTER}.eq.bypass'))
+    b.page('__driver.operate({ computer: "bypass" }, { on: false })')
+    poll(lambda: b.page(f'{COMPUTER}.eq.bypass.on === false'))
+    check(f'{name}: and shows it off as off', poll(lambda: b.page('__driver.shown({ computer: "bypass" })') == 'off'))
+    # the line's stage words open the Sound popup at their tab (the line takes a tap on them only)
+    b.page("__core.actions.computer.setCrossfeed({ on: true }).then(() => 1)")
+    poll(lambda: b.page("!!document.querySelector('.nd-eq [data-stage=space]')"))
+    b.page("document.getElementById('nd-lw-space').focus()")
+    b.page("__core.actions.computer.setMode('off').then(() => 1)")
+    poll(lambda: (line() or '').startswith('OFF'))
+    check(f'{name}: the focus stays on a stage word of the line through a redraw',
+          poll(lambda: b.page('document.activeElement.id') == 'nd-lw-space'), b.page('document.activeElement.id'))
+    b.page("__core.actions.computer.setMode('eq').then(() => 1)")
+    poll(lambda: not (line() or '').startswith('OFF'))
+    for word, tabs in (('eq', (None, 'autoeq', 'upload', 'saved')), ('space', ('crossfeed',))):
+        check(f'{name}: the {word} word is on the line',
+              poll(lambda: b.page(f"!!document.querySelector('.nd-eq [data-stage={word}]')")) is True, b.page("document.querySelector('.nd-eq').innerHTML"))
+        tap(b, f'.nd-eq [data-stage="{word}"]')
+        poll(lambda: b.page('__core.router.state().popup') == 'sound')
+        state_ = b.page('__core.router.state()')
+        check(f'{name}: the {word} word opens the Sound popup at its tab',
+              state_.get('popup') == 'sound' and state_.get('page') in tabs, state_)
+        b.page("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+        poll(lambda: b.page('__core.router.state().popup') is None)
+    flip(b, 'dac')
+    check(f'{name}: the device side has no bypass key', b.page(f'!{key}') is True)
+
+
+def bypass_dim(b, d):
+    """Nothing plays: the key is dim, a writer's press still posts and the daemon's own words toast."""
+    start(b, d)
+    name = 'the_dash_bypass_key_and_the_eq_line_follow_the_daemon'
+    flip(b, 'computer')
+    if b.page(f'{COMPUTER}.eq.on') is True:
+        tap(b, '#nd-eq-key')
+    poll(lambda: b.page(f'{COMPUTER}.eq.on === false'))
+    key = poll(lambda: b.page("(() => { const k = document.getElementById('nd-bypass-key');"
+                              " return k && k.classList.contains('quiet') && [k.getAttribute('aria-disabled'), k.title]; })()"))
+    check(f'{name}: with nothing to bypass the key is dim, not disabled, with no copy of the refusal', key == [None, ''], key)
+    clear(b)
+    tap(b, '#nd-bypass-key')
+    got = poll(lambda: posts(b, 'api/v1/host/bypass'))
+    check(f'{name}: a writer\'s press posts', bool(got) and got[0][1] == {'on': True}, got)
+    toast = poll(lambda: b.page("[...document.querySelectorAll('#toasts .toast')].map((t) => t.textContent).join('|')"))
+    said = b.page("fetch('api/v1/host/bypass', { method: 'POST', headers: { 'content-type': 'application/json' },"
+                  " body: JSON.stringify({ on: true }) }).then((r) => r.json()).then((j) => j.error)")
+    check(f'{name}: and the words shown are the 409\'s own error text', bool(said) and (toast or '') == said, [toast, said])
+
+
+def bypass_guest(b, d):
+    start(b, d)
+    name = 'the_dash_bypass_key_and_the_eq_line_follow_the_daemon'
+    flip(b, 'computer')
+    key = poll(lambda: b.page("(() => { const k = document.getElementById('nd-bypass-key'); return k && [k.getAttribute('aria-disabled'), k.classList.contains('quiet')]; })()"))
+    check(f'{name}: a guest\'s key is inert', key == ['true', True], key)
+    check(f'{name}: and the EQ line\'s words are text, not buttons', b.page("!document.querySelector('.nd-eq [data-act=stage]')") is True)
+    clear(b)
+    tap(b, '#nd-bypass-key')
+    check(f'{name}: and a press writes nothing and says why',
+          poll(lambda: b.page("document.querySelectorAll('#toasts .toast').length") > 0)
+          and posts(b, 'api/v1/host/bypass') == [], posts(b, 'api/v1/host/bypass'))
+
+
+def stage_word_reach(d):
+    """A phone with a finger: the EQ line stays click-through (a bubble under it is the scene's to grab), so the point
+    under a stage word is the scene's, not the word's; a mouse press on a word opens its popup (bypass_key)."""
+    b = common.Chromium(size=(390, 844), dpr=2, touch=True)
+    b.preload(HOOK)
+    name = 'the_dash_bypass_key_and_the_eq_line_follow_the_daemon'
+    try:
+        start(b, d)
+        flip(b, 'computer')
+        b.page("__core.actions.computer.setCrossfeed({ on: true }).then(() => 1)")
+        poll(lambda: b.page("!!document.querySelector('.nd-eq [data-stage=space]')"))
+        geo = b.page("""(() => { const out = {}; for (const w of document.querySelectorAll('.nd-eq [data-act=stage]')) {
+          const r = w.getBoundingClientRect();
+          out[w.dataset.stage] = [getComputedStyle(w).pointerEvents,
+            document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2)?.closest('[data-act=stage]') === null]; } return out; })()""")
+        check(f'{name}: under a finger the EQ line\'s stage words are click-through, the scene\'s to touch',
+              set(geo) >= {'eq', 'space'} and all(v == ['none', True] for v in geo.values()), geo)
+        check(f'{name}: stage words, no page error', page_errors(b) == [], page_errors(b)[:3])
+    finally:
+        b.close()
+
+
+def bypass_phone(b, d):
+    name = 'the_dash_bypass_key_and_the_eq_line_follow_the_daemon'
+    for label, size in (('upright', (412, 915)), ('still size', (390, 844)), ('sideways', (915, 412)), ('small sideways', (844, 390))):
+        b.resize(*size)
+        start(b, d)
+        flip(b, 'computer')
+        poll(lambda: b.page(f'!!{COMPUTER}?.eq?.levels && !!document.getElementById("nd-bypass-key") && !!document.querySelector(".nd-eq")'))
+        geo = b.page("""(() => { const k = document.getElementById('nd-bypass-key'); if (!k) return null; const r = k.getBoundingClientRect();
+          const eqk = document.getElementById('nd-eq-key').getBoundingClientRect();
+          const cx = (r.left + r.right) / 2; const cy = (r.top + r.bottom) / 2;
+          const hit = (y) => document.elementFromPoint(cx, y)?.closest('#nd-bypass-key') !== null;
+          const eq = document.querySelector('.nd-eq').getBoundingClientRect(); const top = document.querySelector('.nd-top').getBoundingClientRect();
+          return { reach: [hit(cy - 21), hit(cy + 21)], w: r.width, left: r.left, right: r.right, row: r.top >= eqk.bottom - 1 ? 'second' : 'first',
+            over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+            eq: [eq.left, eq.right, eq.top, eq.bottom], clear: eq.top >= top.bottom - 1 || eq.left >= top.right - 1 || eq.right <= top.left + 1 }; })()""")
+        check(f'{name}: {label}, the key is a 44 px target inside the screen',
+              bool(geo) and geo['w'] >= 43.5 and geo['reach'] == [True, True] and geo['right'] <= size[0] and geo['left'] >= 0 and geo['over'] is False, geo)
+        check(f'{name}: {label}, the EQ line stays inside both edges and clear of the top line',
+              bool(geo) and geo['eq'][0] >= 0 and geo['eq'][1] <= size[0] + 1 and geo['clear'] is True, geo)
+        if size[0] < 720 and size[1] > 500:
+            # an upright phone: the key lands on the dash's second row, after the track (known-issues-owed)
+            check(f'{name}: {label}, the key is on the second row of the dash', geo['row'] == 'second', geo)
+    b.resize(1280, 900)
+
+
 def one(name, fn, size=(1280, 900), fleet=(), web='auth = "none"'):
     d = common.Daemon('gungnir2-v2', host='fake', fleet=fleet, env={}, web=web)
     b = open_page(d, size)
@@ -1531,6 +1684,16 @@ one('a_tap_on_a_full_table_says_so', full_table)
 one('the_points_are_listed_by_frequency', sorted_points)
 one('the_mode_the_type_a_typed_value_and_the_presets_write', controls, size=(1280, 900))
 one('the_dash_eq_key_turns_the_eq_off_and_on_on_both_sides', eq_key)
+one('the_dash_bypass_key_and_the_eq_line_follow_the_daemon', bypass_key)
+one('a_dim_bypass_key_still_asks_the_daemon', bypass_dim)
+one('a_guests_bypass_key_is_inert', bypass_guest, web='guest = "read"')
+one('the_bypass_key_on_a_phone', bypass_phone)
+if browser == 'chromium':
+    _d = common.Daemon('gungnir2-v2', host='fake', env={})
+    try:
+        stage_word_reach(_d)
+    finally:
+        _d.stop()
 one('an_untouched_cell_writes_nothing', untouched)
 one('the_wheel_sets_the_q', wheel_q)
 one('the_mouse_hover_band_is_the_curves_window_and_a_hands_reach', mouse_band)

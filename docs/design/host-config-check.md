@@ -38,6 +38,13 @@ untouched, as seven pass, fail or unknown lines. Both are pure functions of one 
 `svolder-ipc` (`host/path.rs` and `host/setup.rs`), and every front end shows the words it is
 given and judges nothing: `computer_line` and `path_line` word the path, `setup_check` the config.
 
+Beside the lines, `setup_check` carries two more lines of words (`io`, from `host/io.rs`, additive:
+`from_player`, `to_dac`): the player stream's rate, format and channels as PipeWire negotiated them,
+and what the card is open at from its `hw_params` (`44.1 kHz · 32-bit (S32_LE) · stereo · hw:2`;
+`not open` for a closed card, `not read` for none). The GNOME DAC segment ends its hover words with
+the same line without the format's name and the card, or with `not open` for a closed card. A
+stream's channels are read from its `Format` parameter.
+
 The seven lines, in their fixed order (the JSON key first, then the name the lists show):
 
 | Key | Name | Fails when |
@@ -99,22 +106,35 @@ connected since svolderd started is not recognised as the sink's DAC until it do
 surfaces judge nothing meanwhile, never a false pass.
 
 **The Path row's label.** One model, `svolder_ipc::host::path_row`, builds the row from the path
-line and the config check of its sink, and every front end draws it as it is: none re-judges,
-diffs two texts or picks a colour. The label is green (`good`) only when `end_to_end` is
-`untouched` and the config check does not fail, yellow (`warn`) when `end_to_end` is `changed` or
-the check fails, and plain for what could not be read, another sink and another input. A failing
-check outranks a path that could not be read (the label is yellow), and a known change at the
-DAC outranks something not read (`end_to_end` reads `changed`). Yellow words come from the judge's
-change list, never from comparing two texts: `S16LE` into `S32LE` stays plain. The values line
-says a resample as `player rate → sink rate` (`44.1 → 48 kHz`), and the forced rate only when the
-sink still reads the stream's rate. A mute counts as a change at every hop (the player's, the
-computer's and the DAC's own), so a muted DAC turns the label yellow in every front end. A row
-with no hops joins the words of a port mismatch with `; ` in its label's words. The row serializes as `{label: {tone, words}, hops: [{label, words:
-[{text, tone}]}], values: [{text, tone}], words}`, a tone being `plain`, `dim`, `good` or `warn`
-and `words` the one plain line of a row with no hops. `verdict` keeps its meaning on every JSON
-surface; `end_to_end` is beside it in the web page's model (`playing.path`, with the row as
-`playing.path.row`), MCP `get_host.path` and `svolder host check --json`. Home Assistant has no
-`end_to_end` in 0.38.1.
+line and the config check of its sink, and every front end draws it as it is: none re-judges, diffs
+two texts or picks a colour. The label is green (`good`) only when `end_to_end` is `untouched` and
+the config check does not fail, yellow (`warn`) when `end_to_end` is `changed` or the check fails,
+and plain for what could not be read, another sink and another input. A failing check outranks a
+path that could not be read (the label is yellow), and a known change at the DAC outranks something
+not read (`end_to_end` reads `changed`). Yellow words come from the judge's change list, never from
+comparing two texts: `S16LE` into `S32LE` stays plain. The values line says a resample as `player
+rate → sink rate` (`44.1 → 48 kHz`), and the forced rate only when the sink still reads the stream's
+rate. A mute counts as a change at every hop (the player's, the computer's and the DAC's own), so a
+muted DAC turns the label yellow in every front end. A row with no hops joins the words of a port
+mismatch with `; ` in its label's words. The row serializes as `{label: {tone, words}, hops: [{key,
+label, words: [{text, tone}]}], values: [{text, tone}], words, changes?: [{key, label, words}]}`, a
+tone being `plain`, `dim`, `good` or `warn` and `words` the one plain line of a row with no hops.
+`verdict` keeps its meaning on every JSON surface; `end_to_end` is beside it in the web page's model
+(`playing.path`, with the row as `playing.path.row`), MCP `get_host.path` and `svolder host check
+--json`. Home Assistant has no `end_to_end`.
+
+**What changes the sound.** The config box (TUI `k`) and the web popup judge only the computer's
+PipeWire config, so under a green summary a yellow Path row would look contradicted. The row model
+therefore carries `changes` (a list of `RowHop`, in path order: one entry per hop with a Warn word,
+each its `key` (`player`, `computer` or `dac`, which the web hooks as `data-hop`), its row label and
+exactly the Warn words the row draws for it; for the DAC its judged changes, then a lowered volume,
+tone control, balance, mute, phase and NOS filter). The union of the words is the row's Warn words
+(hops and values line) less `config N`. `path_row` fills it only when `end_to_end` is `changed`, so
+a failing config alone gives none: the box's own lines say it. It is absent from the JSON when
+empty, and for an untouched path, an unknown, another sink or another input. The box and the popup
+draw it as a `What changes the sound` section, one row per hop, `<hop label>  <words>`, and neither
+re-judges. It appears on one JSON surface: the web page's model, as `playing.path.row.changes`;
+MCP, `svolder host check --json`, Home Assistant and the GNOME panel do not carry the row.
 
 **One rule for the path verdict of a sink that is not a DAC.** The CLI (`host check`) and MCP
 judge the computer's side for any sink: `path.dac` is null and the verdict may read `untouched`

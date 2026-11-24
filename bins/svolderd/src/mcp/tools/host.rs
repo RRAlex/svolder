@@ -3,7 +3,7 @@
 
 //! The computer's tools: `get_host` reads its volume, EQ, crossfeed, virtual speakers and player;
 //! `set_host_volume`, `host_mute`, `set_host_eq`, `set_host_crossfeed`, `set_host_speakers` and
-//! `set_host_loudness` change them.
+//! `set_host_loudness` and `set_host_bypass` change them.
 //!
 //! The volume follows the rules the device's tools follow. It never goes above 100 %. A rise of
 //! more than [`MAX_RISE_DB`] over its lowest level of the last minute asks first, the level in
@@ -290,6 +290,26 @@ impl Tools {
         Ok(json!({ "loudness": loudness_of(&view) }))
     }
 
+    /// Turn the bypass on or off: one [`HostEqOp::Bypass`]. It never asks: the preamp falls first
+    /// and a rise climbs, so it cannot make the output suddenly louder. The controller words every
+    /// refusal.
+    pub(super) async fn set_host_bypass(&self, request: &CallToolRequestParams) -> Done {
+        let args = Args::new(request, &["on"])?;
+        let Some(on) = args.flag("on")? else {
+            return Err(
+                "give \"on\": true to bypass the computer's stages, false to bring them back"
+                    .to_string()
+                    .into(),
+            );
+        };
+        self.host_send(Request::HostEq {
+            op: HostEqOp::Bypass { on },
+        })
+        .await?;
+        let view = self.host_view().await?;
+        Ok(json!({ "bypass": bypass_of(&view), "levels": levels_of(&view) }))
+    }
+
     /// Change the crossfeed. Turning it on never asks: the preamp rule lowers the level first, so
     /// it cannot make the output louder.
     pub(super) async fn set_host_crossfeed(&self, request: &CallToolRequestParams) -> Done {
@@ -437,6 +457,70 @@ fn eq_json(eq: &svolder_host::eq::EqView) -> Value {
         out["unverified"] = json!(true);
     }
     out
+}
+
+/// The bypass of `view`, null when the EQ is unavailable or the daemon has none.
+fn bypass_of(view: &HostView) -> Value {
+    view.eq
+        .as_ref()
+        .filter(|eq| eq.unavailable.is_none())
+        .and_then(|eq| eq.bypass.as_ref())
+        .map_or(Value::Null, |bypass| {
+            json!({
+                "on": bypass.on,
+                "held": {
+                    "eq": bypass.held.eq,
+                    "loudness": bypass.held.loudness,
+                    "crossfeed": bypass.held.crossfeed,
+                    "speakers": bypass.held.speakers,
+                },
+            })
+        })
+}
+
+/// The levels of `view` (what the chain plays at, in dB, and its words), null when the EQ is
+/// unavailable or the daemon has none.
+fn levels_of(view: &HostView) -> Value {
+    view.eq
+        .as_ref()
+        .filter(|eq| eq.unavailable.is_none())
+        .and_then(|eq| eq.levels.as_ref())
+        .map_or(Value::Null, |levels| {
+            json!({
+                "eq_db": levels.eq_db,
+                "space_db": levels.space_db,
+                "total_db": levels.total_db,
+                "climb_to_db": levels.climb_to_db,
+                "passthrough": levels.passthrough,
+                "untouched": levels.untouched,
+                "words": levels.words,
+            })
+        })
+}
+
+/// The definition of `set_host_bypass`.
+pub(super) fn bypass_definition() -> Tool {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "on": {
+                "type": "boolean",
+                "description": "true to turn off every stage that plays (EQ, loudness, crossfeed, speakers) and hold them, false to bring back exactly those"
+            }
+        },
+        "required": ["on"],
+        "additionalProperties": false
+    });
+    let Value::Object(schema) = schema else {
+        unreachable!("an object literal");
+    };
+    let mut tool = Tool::new(
+        "set_host_bypass",
+        "Bypass the computer's stages: on turns off every stage that plays and remembers which, off brings back exactly those as they are now; it never asks, because the level falls first and a rise climbs. Answers with {bypass, levels} as they are after the change; get_host carries both.",
+        Arc::new(schema),
+    );
+    tool.annotations = Some(ToolAnnotations::new().read_only(false));
+    tool
 }
 
 /// The arguments of `set_host_loudness`.
@@ -616,7 +700,7 @@ pub(super) fn room_words() -> String {
 /// The description of `get_host`.
 pub(super) fn get_host_description() -> String {
     format!(
-        "Read the computer's volume (percent, muted, the sink), its EQ (on or off, the preset it came from or custom, the preamp in dB and each point's type, frequency, gain and Q), its crossfeed (on or off, model, preset or custom, amount in percent, feed level, crossover, delay and its floor, the output, a note when it turned itself off), its loudness (on or off, strength and reference in percent with their ranges, the volume, the depth, `lift_db` (the bass over the mids), `mids_db` (the mids' cut) and `treble_db` (the top over the mids) in dB, whether it follows the volume now, a note), its virtual speakers (on or off, the chosen set and its room as {}, its label and licence, the set's level change, a note when they turned themselves off, and the fetched sets a call can choose from; the set fields are null while no set is chosen) and the player (title, artist, album, status), the path of the sound (`path`: the verdict, its words (a list, one per change or thing not read), the sentence behind them when there is one, and `dac`, the name of the DAC it was judged with; the verdict is `untouched`, `changed`, `not_this_dac` (the sound goes to another sink), `other_input` (the DAC listens to an input the computer does not feed) or `unknown`; `end_to_end` has the same keys and adds the DAC's own volume, tone control and the rest to the verdict; when the computer's sink is one of the configured DACs the path is judged to that DAC and `dac` names it, else the computer's side alone is judged and `dac` is null) and the PipeWire config (`config`: the `sink` it judged, its `outcome` (`untouched`, `changes`, `unread`, `not_read` or `other_version`), summary, the `limit` of what it can judge and seven lines, each with a `key`, an `outcome` of `pass`, `fail` or `unknown`, and the `words` of what was found); each is null while it is not available, `path` and `config` while no route is read, and `unavailable` says why.",
+        "Read the computer's volume (percent, muted, the sink), its EQ (on or off, the preset it came from or custom, the preamp in dB and each point's type, frequency, gain and Q), its crossfeed (on or off, model, preset or custom, amount in percent, feed level, crossover, delay and its floor, the output, a note when it turned itself off), its loudness (on or off, strength and reference in percent with their ranges, the volume, the depth, `lift_db` (the bass over the mids), `mids_db` (the mids' cut) and `treble_db` (the top over the mids) in dB, whether it follows the volume now, a note), its virtual speakers (on or off, the chosen set and its room as {}, its label and licence, the set's level change, a note when they turned themselves off, and the fetched sets a call can choose from; the set fields are null while no set is chosen) and the player (title, artist, album, status), `bypass` (`on`, and `held`: which of eq, loudness, crossfeed and speakers it brings back) and `levels` (`eq_db`, `space_db`, `total_db`, `climb_to_db`, `passthrough`, `untouched` and the `words` for what the chain plays at; both null with no chain or from an older daemon), the path of the sound (`path`: the verdict, its words (a list, one per change or thing not read), the sentence behind them when there is one, and `dac`, the name of the DAC it was judged with; the verdict is `untouched`, `changed`, `not_this_dac` (the sound goes to another sink), `other_input` (the DAC listens to an input the computer does not feed) or `unknown`; `end_to_end` has the same keys and adds the DAC's own volume, tone control and the rest to the verdict; when the computer's sink is one of the configured DACs the path is judged to that DAC and `dac` names it, else the computer's side alone is judged and `dac` is null) and the PipeWire config (`config`: the `sink` it judged, its `outcome` (`untouched`, `changes`, `unread`, `not_read` or `other_version`), summary, the `limit` of what it can judge and seven lines, each with a `key`, an `outcome` of `pass`, `fail` or `unknown`, and the `words` of what was found); each is null while it is not available, `path` and `config` while no route is read, and `unavailable` says why.",
         room_words()
     )
 }
@@ -755,7 +839,8 @@ fn path_of(view: &HostView, dacs: &[DacFacts]) -> Value {
     })
 }
 
-/// The config check of `view`'s route: its sink, summary and the seven lines; null with no route.
+/// The config check of `view`'s route: its sink, summary, `from_player`, `to_dac` and the seven
+/// lines; null with no route.
 fn config_of(view: &HostView) -> Value {
     let Some(route) = &view.route else {
         return Value::Null;
@@ -770,6 +855,8 @@ fn config_of(view: &HostView) -> Value {
         "sink": check.sink,
         "outcome": check.summary.key(),
         "summary": check.summary_words(),
+        "from_player": check.io.from_player,
+        "to_dac": check.io.to_dac,
         "limit": SETUP_LIMIT,
         "lines": lines,
     })
@@ -791,6 +878,8 @@ fn host_json(view: &HostView, dacs: &[DacFacts]) -> Value {
         "crossfeed": crossfeed_of(view),
         "speakers": speakers_of(view),
         "loudness": loudness_of(view),
+        "bypass": bypass_of(view),
+        "levels": levels_of(view),
         "player": player,
         "path": path_of(view, dacs),
         "config": config_of(view),

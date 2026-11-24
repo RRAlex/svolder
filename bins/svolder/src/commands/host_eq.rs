@@ -22,8 +22,8 @@ use crate::which;
 
 mod verbs;
 
-pub(super) use verbs::move_to_dac;
 use verbs::{host_apply, host_mode, host_preset, host_remove, host_status};
+pub(super) use verbs::{move_to_dac, serving_daemon};
 
 /// Carry out one of the `host` sub-commands.
 pub(crate) async fn run(g: &Globals<'_>, command: HostCommand) -> ExitCode {
@@ -53,6 +53,7 @@ pub(crate) async fn run(g: &Globals<'_>, command: HostCommand) -> ExitCode {
         HostCommand::Loudness { json, command } => {
             super::host_loudness::run(g, json, command).await
         }
+        HostCommand::Bypass { json, command } => super::host_bypass::run(g, json, command).await,
         HostCommand::Speakers { json, command } => {
             super::host_speakers::run(g, json, command).await
         }

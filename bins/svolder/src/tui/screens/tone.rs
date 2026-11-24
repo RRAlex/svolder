@@ -24,8 +24,9 @@
 //! boosts, it says there how far down the volume has to stay to keep clear of clipping.
 //!
 //! - [`fit`]: what the screen adds for an imported preset: the target curve and a side pane.
-//! - [`mod@points`]: the computer's side: its curve and the Points table.
-//! - [`computer_loudness`]: the computer's Loudness section under the table.
+//! - [`mod@points`]: the computer's side: its curve and the Points table's rows.
+//! - [`stages`]: the computer's strip and the panel under it.
+//! - [`computer_loudness`]: the computer's Loudness row the device pane shares.
 
 use std::sync::Arc;
 
@@ -62,11 +63,6 @@ const GAIN_LABEL_WIDTH: u16 = 4;
 /// Rows the Bands block takes beyond one per band: two borders and the column titles. The
 /// tall tier's blank top row comes on top of these, added where the block is laid out.
 const BANDS_CHROME: u16 = 3;
-/// Rows the Response block keeps while the virtual speakers' block is unfolded: two borders, a
-/// data row and the axis' two.
-const MIN_GRAPH: u16 = 5;
-/// Rows the Points table keeps then: two borders, its titles and two points.
-const MIN_TABLE: u16 = 5;
 /// The lowest gain the curve is drawn over, in dB.
 pub(crate) const GAIN_FLOOR_DB: f64 = -12.0;
 /// The highest.
@@ -144,9 +140,9 @@ pub fn draw(
     let Some(eq) = app.profile.eq.as_ref() else {
         return Vec::new();
     };
-    let xf = crossfeed::layout(app, area);
-    let (tier, [header, response, bands, xf_area]) =
-        rows(area, table_rows(app, eq), split_of(app, area), xf);
+    let stages = app.stages_shown();
+    let (tier, [header, response, bands]) =
+        rows(area, table_rows(app, eq), split_of(app, area), stages);
     let standing = match app.on_computer() {
         true => computer_standing(app),
         false => presets::standing(app),
@@ -255,7 +251,13 @@ pub fn draw(
     draw_response(
         frame,
         chart,
-        curve_area_in(area, table_rows(app, eq), has_side, split_of(app, area), xf),
+        curve_area_in(
+            area,
+            table_rows(app, eq),
+            has_side,
+            split_of(app, area),
+            stages,
+        ),
         app,
         eq,
         (theme, tier, target.as_deref()),
@@ -266,52 +268,29 @@ pub fn draw(
         (Some(side), Some(view)) => fit::draw_side(frame, side, view, app, theme),
         _ => {}
     }
-    if computer {
-        let (table, beside) = match xf.beside {
-            true => {
-                let [table, beside] = Layout::horizontal([
-                    Constraint::Min(0),
-                    Constraint::Length(crossfeed::BESIDE_WIDTH),
-                ])
-                .spacing(tier.gap())
-                .areas(bands);
-                (table, Some(beside))
-            }
-            false => (bands, None),
+    if app.stages_shown() {
+        // The strip is the row over the panel; the window's last row stays blank under it.
+        let strip = Rect {
+            y: bands.y.saturating_sub(1),
+            height: 1,
+            ..bands
         };
-        points::draw_points(frame, table, app, (theme, tier), hits);
-        if let (Some(block), true) = (beside, app.ld_unfolded()) {
-            computer_loudness::draw_block(frame, block, app, (theme, tier));
-        }
-        if xf.ld > 0 {
-            let ld_area = Rect {
-                height: xf.ld.min(xf_area.height),
-                ..xf_area
-            };
-            computer_loudness::draw(frame, ld_area, app, theme, hits);
-        }
-        if xf.line > 0 {
-            let rest = Rect {
-                y: xf_area.y + xf.ld,
-                height: xf_area.height.saturating_sub(xf.ld),
-                ..xf_area
-            };
-            let beside = beside.filter(|_| !app.ld_unfolded());
-            crossfeed::draw(frame, rest, beside, app, (theme, tier), hits);
-        }
+        stages::draw_strip(frame, strip, app, theme, hits);
+        stages::draw_panel(frame, bands, app, (theme, tier), hits);
+        return header_rows;
+    }
+    if computer {
+        // The computer's view is not there: no strip and no panel, and no band table either.
         return header_rows;
     }
     header_rows.extend(draw_bands(frame, bands, app, eq, (theme, tier), hits));
     header_rows
 }
 
-/// How many rows the table under the curve has: a row per band, or the computer's fixed
-/// height, so a point added never moves the curve.
-fn table_rows(app: &App, eq: &EqSpec) -> usize {
-    match app.on_computer() {
-        true => points::POINT_ROWS,
-        false => eq.bands.len(),
-    }
+/// How many rows the table under the curve has: a row per band. The computer's panel has a
+/// height of its own ([`stages::panel_height`]), so a point added never moves the curve.
+fn table_rows(_app: &App, eq: &EqSpec) -> usize {
+    eq.bands.len()
 }
 
 /// What the header says of the preset on the computer: the one its points came from, `custom`
@@ -348,11 +327,14 @@ fn split_response(response: Rect, tier: Tier, side: bool) -> (Rect, Option<Rect>
 }
 
 /// The tiers `area` falls in, and the rows the header, the Response block and the Bands block
-/// take — the two blocks a row apart in the tall tier.
+/// take — the two blocks a row apart in the tall tier. With the computer's `stages` the third is
+/// the panel and the strip is the row above it: the panel keeps the height
+/// [`stages::panel_height`] gives it, the window's last row stays blank, and the Response block
+/// takes what is left, so the graph never loses a row to the panel.
 ///
 /// The Response block takes what the others leave, so a taller terminal draws a taller curve
 /// and a device with fewer bands a longer one.
-fn rows(area: Rect, bands: usize, split: bool, xf: crossfeed::Layout) -> (Tier, [Rect; 4]) {
+fn rows(area: Rect, bands: usize, split: bool, stages: bool) -> (Tier, [Rect; 3]) {
     let (tier, [header, body]) = layout_tier::split(area);
     // The mode's row under the header's rule, where the switch has the header's own.
     let body = match split {
@@ -363,32 +345,27 @@ fn rows(area: Rect, bands: usize, split: bool, xf: crossfeed::Layout) -> (Tier, 
         },
         false => body,
     };
-    let mut table = u16::try_from(bands)
+    if stages {
+        let panel = stages::panel_height(area.height);
+        let [response, _strip, panel, _blank] = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(panel),
+            Constraint::Length(1),
+        ])
+        .areas(body);
+        return (tier, [header, response, panel]);
+    }
+    let table = u16::try_from(bands)
         .unwrap_or(0)
         .saturating_add(BANDS_CHROME + tier.top());
-    // The virtual speakers' block gives the graph its rows back out of the table's (which
-    // scrolls): the graph keeps room for a data row, its axis and its borders.
-    // The Loudness rows come out of the table's empty rows, not the graph's.
-    if xf.ld > 0 {
-        table = table.saturating_sub(xf.ld).max(MIN_TABLE);
-    }
-    if xf.boxed {
-        let spare = body
-            .height
-            .saturating_sub(xf.height() + tier.row_gap() + MIN_GRAPH);
-        table = table.min(spare.max(MIN_TABLE));
-    }
-    // The chain's order, top to bottom: the EQ (the graph and the Points table), then the
-    // Loudness rows and the Crossfeed section's line with the rows it unfolds into under it in
-    // the narrow tiers.
-    let [response, _, bands, xf_area] = Layout::vertical([
+    let [response, _, bands] = Layout::vertical([
         Constraint::Min(0),
         Constraint::Length(tier.row_gap()),
         Constraint::Length(table),
-        Constraint::Length(xf.height()),
     ])
     .areas(body);
-    (tier, [header, response, bands, xf_area])
+    (tier, [header, response, bands])
 }
 
 /// The bordered blocks this screen draws over `area`: the Response block with the curve in
@@ -398,8 +375,12 @@ pub(crate) fn frames_of(area: Rect, app: &App) -> Vec<(FrameId, Rect)> {
     let Some(eq) = app.profile.eq.as_ref() else {
         return Vec::new();
     };
-    let xf = crossfeed::layout(app, area);
-    let (tier, [_, response, bands, _]) = rows(area, table_rows(app, eq), split_of(app, area), xf);
+    let (tier, [_, response, bands]) = rows(
+        area,
+        table_rows(app, eq),
+        split_of(app, area),
+        app.stages_shown(),
+    );
     let (chart, _) = split_response(response, tier, app.tone.target_cache.target());
     vec![(FrameId::Response, chart), (FrameId::Bands, bands)]
 }
@@ -419,7 +400,7 @@ pub(crate) fn curve_of(area: Rect, app: &App) -> Option<Rect> {
             table_rows(app, eq),
             app.tone.target_cache.target(),
             split_of(app, area),
-            crossfeed::layout(app, area),
+            app.stages_shown(),
         )
     })
 }
@@ -442,25 +423,19 @@ pub(crate) fn curve_muted(app: &App) -> bool {
 /// with one has fewer columns ([`curve_of`]).
 #[cfg(test)]
 pub(crate) fn curve_area(area: Rect, bands: usize) -> Rect {
-    curve_area_in(area, bands, false, false, crossfeed::Layout::NONE)
+    curve_area_in(area, bands, false, false, false)
 }
 
 /// The cells the computer side's curve is drawn in over `area`.
 #[cfg(test)]
 pub(crate) fn computer_curve_area(area: Rect) -> Rect {
-    curve_area_in(
-        area,
-        points::POINT_ROWS,
-        true,
-        true,
-        crossfeed::Layout::NONE,
-    )
+    curve_area_in(area, 0, true, true, true)
 }
 
 /// The cells the response curve is drawn in, for a frame that does, or does not, have the side
 /// pane beside the chart ([`split_response`]).
-fn curve_area_in(area: Rect, bands: usize, side: bool, split: bool, xf: crossfeed::Layout) -> Rect {
-    let (tier, [_, response, _, _]) = rows(area, bands, split, xf);
+fn curve_area_in(area: Rect, bands: usize, side: bool, split: bool, stages: bool) -> Rect {
+    let (tier, [_, response, _]) = rows(area, bands, split, stages);
     let (chart, _) = split_response(response, tier, side);
     let inner = response_block(tier).inner(chart);
     let left = GAIN_LABEL_WIDTH + 1;
@@ -479,7 +454,7 @@ mod fit;
 mod header;
 mod points;
 mod response;
-mod speakers;
+mod stages;
 
 #[cfg(test)]
 mod tests;

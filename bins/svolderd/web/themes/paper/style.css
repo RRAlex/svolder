@@ -270,6 +270,20 @@
   text-transform: none; letter-spacing: 0; font: italic 400 16px/1 var(--paper-serif);
   color: var(--paper-print); overflow-wrap: anywhere; text-align: left;
 }
+#p-tone .p-chain { margin: 6px 0 4px; line-height: 2.2; overflow-wrap: normal; }
+#p-tone .p-chain .p-it { white-space: nowrap; }
+#p-tone .p-chain .p-w { white-space: nowrap; padding: 2px 3px; }
+#p-tone .p-chain .p-w.quiet, #p-tone .p-chain .p-stage { color: var(--paper-print-dim); }
+#p-tone .p-chain .p-stage.on { color: var(--paper-print); }
+#p-tone .p-chain .p-w.idle { color: var(--paper-print-dim); text-decoration-color: var(--paper-print-dim); }
+#p-tone .p-chain-head { font: inherit; }
+.p-chain-total {
+  text-transform: none; letter-spacing: 0; font: italic 400 16px/1 var(--paper-serif);
+  color: var(--paper-print-dim); white-space: nowrap;
+}
+@media (pointer: coarse), (max-width: 719px) {
+  #p-tone .p-chain .p-w { display: inline-flex; align-items: center; min-height: 44px; }
+}
 .p-strength { margin-top: 6px; font: italic 400 15px/1.6 var(--paper-serif); color: var(--paper-print-dim); }
 .p-strength .p-val { color: var(--paper-print); font-style: normal; margin: 0 4px; }
 .p-graph {

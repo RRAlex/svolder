@@ -15,7 +15,7 @@
 import * as effects from './effects.js';
 import { PARTS } from './draw/parts.js';
 import { screen as drawScreen } from './draw/screen.js';
-import { effective } from './draw/computer.js';
+import { drawnOf, effective, withStages } from './draw/computer.js';
 import {
   clear, drawNewest, holds, refocus, release, remember, requested,
 } from './keep.js';
@@ -92,7 +92,7 @@ function partsHtml(core, names, given = {}) {
   const page = core.model.page();
   if (!page.device) return '';
   const device = { ...page.device, ...given };
-  const computer = core.computer.view();
+  const computer = withStages(core, core.computer.view());
   return names
     .filter((name) => document.getElementById(idOf(name)))
     .map((name) => PARTS[idOf(name).slice(5)]?.(device, page, { oob: true, computer }) ?? '')
@@ -153,7 +153,7 @@ export function installLive(core, hooks, signal) {
     hooks.beforeScreen();
     const lost = lostLink();
     const page = store.page();
-    const view = core.computer.view();
+    const view = withStages(core, core.computer.view());
     htmx().swap(screenEl(), drawScreen(page, orderOf(effective(page.device, view)), view),
       { swapStyle: 'innerHTML' });
     // The link and the switch live in the header, outside the screen: they are drawn again with it.
@@ -198,9 +198,8 @@ export function installLive(core, hooks, signal) {
   /** What the computer's parts said when they were last drawn. */
   let drawnComputer = '';
   const computerState = () => {
-    const view = core.computer.view();
-    return stable(view ? { sw: view.sw, tone: view.tone, picked: view.picked, writes: view.writes }
-      : null);
+    const view = withStages(core, core.computer.view());
+    return stable(drawnOf(view));
   };
   const noteComputer = () => {
     drawnComputer = computerState();
@@ -210,7 +209,7 @@ export function installLive(core, hooks, signal) {
    * drawn anew where the side changed, else the knob reads the volume and the parts that say
    * something else are drawn again. */
   function computerChanged() {
-    const view = core.computer.view();
+    const view = withStages(core, core.computer.view());
     const shownView = document.querySelector('#screen .view');
     if (!shownView || !store.page().device) return;
     if ((shownView.dataset.side === 'computer') !== (view?.side === 'computer')) {

@@ -76,11 +76,15 @@ async fn announced(host: &Host, commands: bool) -> Vec<(String, String)> {
     task.config.commands = commands;
     let mut view = both_computer_view(false, false, Some("a"));
     view.eq.as_mut().unwrap().loudness = loudness_computer_view(false, 40.0).eq.unwrap().loudness;
+    let carried = bypass_computer_view(false, -14.8).eq.unwrap();
+    view.eq.as_mut().unwrap().bypass = carried.bypass;
+    view.eq.as_mut().unwrap().levels = carried.levels;
     let (_view_tx, view_rx) = watch::channel(view);
     task.follow_computer(ComputerLink {
         view: view_rx,
         switch: Arc::new(RecordingSwitch {
             loudnesses: Default::default(),
+            bypasses: Default::default(),
             calls: Default::default(),
             crossfeeds: Default::default(),
             speakers: Default::default(),

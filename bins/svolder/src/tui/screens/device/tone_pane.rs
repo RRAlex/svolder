@@ -62,6 +62,10 @@ pub(super) struct TonePane {
     pub(super) loudness: Option<LoudnessRow>,
 }
 
+/// A line under the Crossfeed row, and which Model or Preset row it is with where its `‹` and `›`
+/// sit, where it is one.
+type Detail = (Line<'static>, Option<(Xf, (usize, usize))>);
+
 /// Where the Loudness row sits in the Tone pane.
 pub(super) struct LoudnessRow {
     /// The interior line it landed on.
@@ -79,6 +83,9 @@ pub(super) struct CrossfeedRow {
     pub(super) line: u16,
     /// Where its `‹` and `›` sit in the line, cursor included.
     pub(super) arrows: (usize, usize),
+    /// The Model and Preset rows under it while crossfeed plays, and where their `‹` and `›`
+    /// sit: the lines right under `line`, in order.
+    pub(super) picks: Vec<(Xf, (usize, usize))>,
 }
 
 /// The Tone pane: the mode the tone control is in, how strong its loudness curve is, and then a
@@ -202,10 +209,13 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
     let head = lines.len();
     // The numbers under the row: the crossfeed's one line, or the two lines of the space choice
     // (what it is and how it sounds).
-    let details = match (xf, app.space_shown()) {
-        (Some(_), true) => space_details(app, theme, max_width),
-        (Some(view), false) => vec![summary_line(view, theme)],
-        (None, _) => Vec::new(),
+    let details: Vec<Detail> = match (xf, app.space_now()) {
+        (None, _) | (Some(_), Space::Off) => Vec::new(),
+        (Some(view), Space::Crossfeed) => xf_pick_lines(app, view, theme, max_width),
+        (Some(_), Space::Speakers) => space_details(app, theme, max_width)
+            .into_iter()
+            .map(|line| (line, None))
+            .collect(),
     };
     // The Loudness row sits over the Crossfeed row (the chain's order: the points, loudness,
     // crossfeed), with its dim readout under it where the pane has the room.
@@ -292,8 +302,7 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
         lines.push(row.line);
         let mut under = 0;
         if ld_dim {
-            lines
-                .push(ld_tone::readout_row(app, view, theme, max_width, ld_tone::Under::Pane).line);
+            lines.push(ld_tone::readout_row(app, view, theme, max_width).line);
             under += 1;
         }
         if ld_hint {
@@ -313,8 +322,16 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
         };
         let at = u16::try_from(lines.len()).unwrap_or(u16::MAX);
         lines.push(line);
-        lines.extend(details.into_iter().take(shown));
-        CrossfeedRow { line: at, arrows }
+        let mut picks = Vec::new();
+        for (line, pick) in details.into_iter().take(shown) {
+            lines.push(line);
+            picks.extend(pick);
+        }
+        CrossfeedRow {
+            line: at,
+            arrows,
+            picks,
+        }
     });
     TonePane {
         lines,
@@ -336,22 +353,16 @@ fn crossfeed_line(
     theme: &Theme,
     max_width: usize,
 ) -> (Line<'static>, (usize, usize)) {
-    let focused = app.tone.row == ToneRow::Crossfeed(Xf::Preset);
+    let focused = app.tone.row == ToneRow::Crossfeed(Xf::Space);
     let (head, lit, other) = switch::styles(theme, Style::default(), focused);
     let arrow = theme.style(Role::ModeArrow);
     let word = if view.on { "on" } else { "off" };
-    let room = max_width.saturating_sub(CURSOR_WIDTH + TONE_FIELD + 2 + word.len() + 2 + 1);
     let spans = vec![
         Span::styled("Crossfeed", head),
         Span::raw(" ".repeat(TONE_FIELD - "Crossfeed".len())),
         Span::styled("\u{2039} ", arrow),
         Span::styled(word, if view.on || focused { lit } else { other }),
         Span::styled(" \u{203a}", arrow),
-        Span::raw(" "),
-        Span::raw(widgets::text::cut_to_cells(
-            &crossfeed::words_of(view),
-            room,
-        )),
     ];
     let arrows = (
         CURSOR_WIDTH + TONE_FIELD,
@@ -368,14 +379,22 @@ fn space_line(app: &App, theme: &Theme, max_width: usize) -> (Line<'static>, (us
     let focused = app.tone.row == ToneRow::Crossfeed(Xf::Space);
     let (head, lit, _) = switch::styles(theme, Style::default(), focused);
     let arrow = theme.style(Role::ModeArrow);
-    let word = app.space_now().word();
-    let spans = vec![
+    // The arrows move a highlight that `Enter` plays; what plays stays the word until then.
+    let shown = match focused {
+        true => app.plays_highlight(),
+        false => app.space_now(),
+    };
+    let word = shown.word();
+    let mut spans = vec![
         Span::styled("Space", head),
         Span::raw(" ".repeat(TONE_FIELD - "Space".len())),
         Span::styled("\u{2039} ", arrow),
         Span::styled(word, lit),
         Span::styled(" \u{203a}", arrow),
     ];
+    if shown != app.space_now() {
+        spans.push(Span::styled(" Enter plays", theme.style(Role::Dim)));
+    }
     let arrows = (
         CURSOR_WIDTH + TONE_FIELD,
         CURSOR_WIDTH + TONE_FIELD + 2 + widgets::text::cells(word) + 1,
@@ -416,16 +435,53 @@ fn space_details(app: &App, theme: &Theme, max_width: usize) -> Vec<Line<'static
     }
 }
 
-/// The dim line under the Crossfeed row: its numbers.
-fn summary_line(view: &svolder_host::eq::crossfeed::CrossfeedView, theme: &Theme) -> Line<'static> {
-    Line::from(Span::styled(
-        format!(
-            "{}{}",
-            " ".repeat(CURSOR_WIDTH),
-            crossfeed::summary_text(view)
-        ),
-        theme.style(Role::Dim),
-    ))
+/// The Model and Preset rows under the Crossfeed row while crossfeed plays: `Model      ‹ Bauer
+/// ›`, `Preset     ‹ Chu Moy ›`, each with where its `‹` and `›` sit.
+fn xf_pick_lines(
+    app: &App,
+    view: &svolder_host::eq::crossfeed::CrossfeedView,
+    theme: &Theme,
+    max_width: usize,
+) -> Vec<Detail> {
+    let model = view
+        .models
+        .iter()
+        .find(|m| m.word == view.model)
+        .map_or(view.model.as_str(), |m| m.name.as_str());
+    let preset = view.preset.as_deref().unwrap_or("your own");
+    // A model with the one preset says so, as the panel does.
+    let preset = match (
+        view.preset.is_some(),
+        app.xf_model().map_or(0, |m| m.presets.len()),
+    ) {
+        (true, 1) => format!("{preset} (the only one)"),
+        _ => preset.to_string(),
+    };
+    [(Xf::Model, model.to_string()), (Xf::Preset, preset)]
+        .into_iter()
+        .map(|(row, value)| {
+            let focused = app.tone.row == ToneRow::Crossfeed(row);
+            let (head, lit, _) = switch::styles(theme, Style::default(), focused);
+            let arrow = theme.style(Role::ModeArrow);
+            let room = max_width.saturating_sub(CURSOR_WIDTH + TONE_FIELD + 4);
+            let value = widgets::text::cut_to_cells(&value, room);
+            let width = widgets::text::cells(&value);
+            let spans = vec![
+                Span::styled(row.label(), head),
+                Span::raw(" ".repeat(TONE_FIELD - row.label().len())),
+                Span::styled("\u{2039} ", arrow),
+                Span::styled(value, if focused { lit } else { Style::default() }),
+                Span::styled(" \u{203a}", arrow),
+            ];
+            let arrows = (
+                CURSOR_WIDTH + TONE_FIELD,
+                CURSOR_WIDTH + TONE_FIELD + 2 + width + 1,
+            );
+            let line = widgets::rows::with_cursor(Line::from(spans), focused, theme);
+            let line = row_style(line, false, !app.session.connected, theme, max_width);
+            (line, Some((row, arrows)))
+        })
+        .collect()
 }
 
 /// The mode's label.

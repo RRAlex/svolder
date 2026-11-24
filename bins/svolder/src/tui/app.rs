@@ -87,6 +87,7 @@ mod session;
 mod setup;
 mod side;
 pub(crate) mod speakers;
+mod stages;
 mod tone;
 mod tone_state;
 
@@ -106,6 +107,7 @@ pub(crate) use readings::Readings;
 pub(crate) use session::Session;
 pub(crate) use side::SWITCH_ROW;
 pub use speakers::Space;
+pub use stages::Stage;
 /// What the computer's edit line calls its fields.
 pub(crate) fn point_line_names() -> [(&'static str, &'static str); 3] {
     point_line::NAMES
@@ -623,6 +625,8 @@ impl App {
                 xf_note: None,
                 sp_note: None,
                 header_loudness: false,
+                stage: std::cell::Cell::new(Stage::Eq),
+                plays: None,
                 mode_before_flat: None,
                 mode_before_loudness: None,
                 edit_line: None,

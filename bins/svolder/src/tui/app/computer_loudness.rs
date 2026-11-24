@@ -8,11 +8,12 @@
 //! show (strength, reference, volume, depth, the shelf gains, the ranges and steps) comes from the
 //! view, so nothing here works one out. The section is absent while the view is.
 //!
-//! The device screen's Tone pane has the one [`Ld::Strength`] row. The tone screen folds the
-//! section to that row and its dim line, and unfolds it exactly while [`ToneRow::Ld`] is the
-//! focused row: the [`Ld::Reference`] row and the readout come under the strength row. A key
-//! that changes a value sends the value that step stands for, held to the view's range and
-//! rounded to its step, and sends nothing at the end of the range.
+//! The device screen's Tone pane has the one [`Ld::Strength`] row, which is the on/off word and
+//! the strength bar together. The tone screen's Loudness panel has a row each: [`Ld::On`],
+//! [`Ld::Strength`] and [`Ld::Reference`], with the readout under them, and its keys are the
+//! stage keys of [`stages`](super::stages). A key that changes a value sends the value that step
+//! stands for, held to the view's range and rounded to its step, and sends nothing at the end of
+//! the range.
 
 use crossterm::event::KeyCode;
 use svolder_host::eq::loudness::LoudnessView;
@@ -24,7 +25,9 @@ use super::{App, Intent, Screen, ToneRow};
 /// One row of the Loudness section, top to bottom.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ld {
-    /// On or off with the strength: `Loudness ‹ on › ████░░ 50 %`.
+    /// Whether it is on: the panel's first row.
+    On,
+    /// The strength. On the device pane it is also the on/off word: `Loudness ‹ on › ████░░ 50 %`.
     Strength,
     /// The volume at and above which the stage is flat.
     Reference,
@@ -32,12 +35,13 @@ pub enum Ld {
 
 impl Ld {
     /// The rows of the unfolded section, in the order it draws them.
-    pub const ALL: [Ld; 2] = [Ld::Strength, Ld::Reference];
+    pub const ALL: [Ld; 3] = [Ld::On, Ld::Strength, Ld::Reference];
 
     /// The row's label.
     pub fn label(self) -> &'static str {
         match self {
-            Ld::Strength => "Loudness",
+            Ld::On => "Loudness",
+            Ld::Strength => "Strength",
             Ld::Reference => "Reference",
         }
     }
@@ -61,11 +65,6 @@ pub(crate) fn strength_text(view: &LoudnessView) -> String {
     format!("{:.0} %", view.strength_pct)
 }
 
-/// The reference as a number: `100 %`.
-pub(crate) fn reference_text(view: &LoudnessView) -> String {
-    format!("{:.0} %", view.reference_pct)
-}
-
 /// The numbers of the readout, as the view's shelf gains say them: `bass +7.3 · mids −7.3 ·
 /// treble +2.1 dB`.
 pub(crate) fn gains_text(view: &LoudnessView) -> String {
@@ -82,9 +81,9 @@ pub(crate) const DAC_HINT: &str = "the DAC's loudness is on too";
 
 /// The readout that fits in `room` cells, the longest form first: what the stage does at the
 /// volume the view read, or why it does nothing. Every number is the view's. The forms are
-/// `ref 100 % · 35 %: bass +7.3 · mids −7.3 dB`, `35 %: bass … · mids … dB` and `bass … · mids …
-/// dB`; `treble` puts the treble gain after the mids in the longest ones, and `dac_on` a first
-/// form that ends with [`DAC_HINT`].
+/// `at 42 %: bass +6.9 · mids −6.9 · treble +2.0 dB`, `at 42 %: bass … · mids … dB` and `bass …
+/// · mids … dB`; `treble` asks for the first, and `dac_on` puts a form that ends with
+/// [`DAC_HINT`] before the others.
 pub(crate) fn readout(view: &LoudnessView, dac_on: bool, treble: bool, room: usize) -> String {
     let cells = crate::tui::widgets::text::cells;
     let mut options: Vec<String> = Vec::new();
@@ -107,9 +106,8 @@ pub(crate) fn readout(view: &LoudnessView, dac_on: bool, treble: bool, room: usi
         (None, true) => {
             let volume = view
                 .volume_pct
-                .map(|v| format!("{v:.0} %"))
-                .unwrap_or_else(|| "\u{2014}".to_string());
-            let reference = format!("ref {:.0} %", view.reference_pct);
+                .map(|v| format!("at {v:.0} %: "))
+                .unwrap_or_default();
             let flat = view.depth_db <= 0.0;
             let gains = |with_treble: bool| match (flat, with_treble) {
                 (true, _) => "flat".to_string(),
@@ -120,18 +118,18 @@ pub(crate) fn readout(view: &LoudnessView, dac_on: bool, treble: bool, room: usi
                 ),
                 (false, true) => gains_text(view),
             };
-            let full = format!("{reference} \u{b7} {volume}: {}", gains(false));
             if treble {
-                let long = format!("{reference} \u{b7} {volume}: {}", gains(true));
+                let long = format!("{volume}{}", gains(true));
                 if dac_on {
                     options.push(format!("{long} \u{b7} {DAC_HINT}"));
                 }
                 options.push(long);
             }
+            let full = format!("{volume}{}", gains(false));
             if dac_on {
                 options.push(format!("{full} \u{b7} {DAC_HINT}"));
             }
-            options.extend([full, format!("{volume}: {}", gains(false)), gains(false)]);
+            options.extend([full, gains(false)]);
         }
     }
     options
@@ -180,11 +178,6 @@ impl App {
         here.filter(|_| self.ld_shown())
     }
 
-    /// Whether the section is unfolded: the keys are in it, on the tone screen.
-    pub(crate) fn ld_unfolded(&self) -> bool {
-        self.screen == Screen::Tone && self.ld_row().is_some()
-    }
-
     /// Put the keys on `row` of the section, the way a click on it does.
     pub(crate) fn focus_ld(&mut self, row: Ld) {
         if !self.ld_shown() {
@@ -196,6 +189,7 @@ impl App {
             self.pane = super::Pane::Tone;
         }
         self.tone.xf_line = None;
+        self.tone.plays = None;
         self.tone.row = ToneRow::Ld(row);
         self.cursor_moved(from);
     }
@@ -279,6 +273,7 @@ impl App {
             return Vec::new();
         };
         let (range, now) = match row {
+            Ld::On => return Vec::new(),
             Ld::Strength => (view.ranges.strength_pct, view.strength_pct),
             Ld::Reference => (view.ranges.reference_pct, view.reference_pct),
         };
@@ -286,9 +281,29 @@ impl App {
         if (next - now).abs() < range.step / 2.0 {
             return Vec::new();
         }
+        self.ld_set(row, next)
+    }
+
+    /// The range of a value row and the number it stands at, from the view.
+    pub(crate) fn ld_range(&self, row: Ld) -> Option<(svolder_host::eq::crossfeed::Range, f64)> {
+        let view = self.loudness_view()?;
         match row {
-            Ld::Strength => self.ld_send(Self::ld_op(None, Some(next), None, false)),
-            Ld::Reference => self.ld_send(Self::ld_op(None, None, Some(next), false)),
+            Ld::On => None,
+            Ld::Strength => Some((view.ranges.strength_pct, view.strength_pct)),
+            Ld::Reference => Some((view.ranges.reference_pct, view.reference_pct)),
+        }
+    }
+
+    /// The write that sets value row `row` to `value`, held to the view's range.
+    pub(crate) fn ld_set(&mut self, row: Ld, value: f64) -> Vec<Intent> {
+        let Some((range, _)) = self.ld_range(row) else {
+            return Vec::new();
+        };
+        let value = range.snap(value);
+        match row {
+            Ld::On => Vec::new(),
+            Ld::Strength => self.ld_send(Self::ld_op(None, Some(value), None, false)),
+            Ld::Reference => self.ld_send(Self::ld_op(None, None, Some(value), false)),
         }
     }
 
@@ -306,30 +321,26 @@ impl App {
 
     /// What the arrows do on `row`: step its value.
     pub(crate) fn ld_arrow(&mut self, row: Ld, dir: i64) -> Vec<Intent> {
-        self.ld_value_step(row, dir)
+        match row {
+            Ld::On => self.ld_toggle(Some(dir > 0)),
+            row => self.ld_value_step(row, dir),
+        }
     }
 
-    /// The keys of the section while they are in it. `None` for any other key.
+    /// The keys of the device pane's Loudness row while the keys are in it. `None` for any other
+    /// key; the tone screen's panel has its own ([`stages`](super::stages)).
     pub(crate) fn ld_key(&mut self, code: KeyCode) -> Option<Vec<Intent>> {
         let row = self.ld_row()?;
-        let tone = self.screen == Screen::Tone;
+        if self.screen == Screen::Tone {
+            return None;
+        }
         Some(match code {
             KeyCode::Left | KeyCode::Char(',') => self.ld_arrow(row, -1),
             KeyCode::Right | KeyCode::Char('.') => self.ld_arrow(row, 1),
             KeyCode::Char(' ') | KeyCode::Enter => self.ld_toggle(None),
             KeyCode::Char('r') => self.ld_reference_now(),
-            KeyCode::Esc if tone => {
-                self.leave_ld();
-                Vec::new()
-            }
             _ => return None,
         })
-    }
-
-    /// Fold the section: the keys go back to the Mode row.
-    pub(crate) fn leave_ld(&mut self) {
-        self.tone.row = ToneRow::Mode;
-        self.frame_flags.pane_changed = true;
     }
 
     /// The rows the Tone pane and the tone screen move through on the computer side, in order.

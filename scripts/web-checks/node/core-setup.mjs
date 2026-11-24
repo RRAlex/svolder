@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs';
 import { page } from './dom.mjs';
 import { createCore } from '../../../bins/svolderd/web/core/core.js';
 import { HELP, POPUPS, SETUP, rowId } from '../../../bins/svolderd/web/core/popups/listed.js';
-import { WORDS, pageHtml, setupOf } from '../../../bins/svolderd/web/core/popups/setup/draw.js';
+import { WORDS, pageHtml, changesOf, setupOf } from '../../../bins/svolderd/web/core/popups/setup/draw.js';
 import { PARTS } from '../../../bins/svolderd/web/themes/ember/draw/parts.js';
 import { notes as drawNotes } from '../../../bins/svolderd/web/themes/paper/draw/notes.js';
 import { notesOf } from '../../../bins/svolderd/web/themes/paper/notes.js';
@@ -42,6 +42,7 @@ const lines = (over = {}) => KEYS.map(([key, words]) => ({
 const PASS = {
   outcome: 'untouched', chip: 'config ✓', limit: LIMIT, summary: 'PipeWire config lets it through untouched',
   sink: 'Bifrost 3 Analog Stereo', lines: lines(),
+  from_player: '44.1 kHz · S16LE · stereo', to_dac: '44.1 kHz · 32-bit (S32_LE) · stereo · hw:2',
 };
 const TWO = {
   outcome: 'changes', chip: 'config 2', limit: LIMIT, summary: 'PipeWire config changes the sound: 2',
@@ -58,8 +59,8 @@ const HOSTILE = '<img src=x onerror=alert(1)> "Q" & \'co\'';
 const rowWith = (setup) => ({
   label: { tone: setup?.outcome === 'changes' ? 'warn' : 'good', words: 'Path: untouched end to end' },
   hops: [
-    { label: 'player', words: [] }, { label: 'computer', words: [] },
-    { label: 'DAC USB 1', words: [] },
+    { key: 'player', label: 'player', words: [] }, { key: 'computer', label: 'computer', words: [] },
+    { key: 'dac', label: 'DAC USB 1', words: [] },
   ],
   values: [
     { text: '44.1 kHz', tone: 'dim' }, { text: 'volume 0 dB', tone: 'dim' },
@@ -96,7 +97,7 @@ await ok('the_page_lists_the_sink_first_the_summary_the_seven_lines_and_the_limi
   for (const setup of [PASS, TWO, UNREAD]) {
     const html = pageHtml({ setup });
     assert.ok(html.indexOf(setup.sink) < html.indexOf(setup.summary), 'the sink, then the summary');
-    assert.equal(countOf(html, 'class="fp-row"'), 7, 'every line, always');
+    assert.equal(countOf(html, 'data-key='), 7, 'every line, always');
     assert.ok(html.indexOf(setup.summary) < html.indexOf('data-key="rates"'));
     assert.ok(html.indexOf('data-key="no filter in the sink"') < html.indexOf(LIMIT.slice(0, 30)));
     for (const line of setup.lines) assert.ok(html.includes(line.words), line.words);
@@ -105,6 +106,25 @@ await ok('the_page_lists_the_sink_first_the_summary_the_seven_lines_and_the_limi
   assert.equal(countOf(unread, 'fp-tag'), 0, 'nothing fails when nothing was read');
   assert.equal(countOf(unread, 'data-outcome="unknown"'), 7);
   assert.equal(countOf(unread, 'aria-label="not read"'), 0, '`not read` is read out once, in the words');
+});
+
+await ok('the_two_io_lines_sit_under_the_sink_in_the_daemons_words', () => {
+  const html = pageHtml({ setup: PASS });
+  const at = (text) => html.indexOf(text);
+  assert.ok(at(PASS.sink) < at('data-io="from_player"') && at('data-io="from_player"') < at('data-io="to_dac"'));
+  assert.ok(at('data-io="to_dac"') < at(PASS.summary), 'both before the summary');
+  assert.ok(html.includes(`>${WORDS.fromPlayer}</span>`) && html.includes(`>${WORDS.toDac}</span>`));
+  assert.equal(WORDS.fromPlayer, 'From player');
+  assert.equal(WORDS.toDac, 'To DAC');
+  assert.ok(html.includes(PASS.from_player) && html.includes(PASS.to_dac));
+  const hostile = pageHtml({ setup: { ...PASS, from_player: HOSTILE, to_dac: HOSTILE } });
+  assert.ok(!hostile.includes('<img'), 'escaped');
+  // an older daemon sends neither: the rows are left out and nothing is invented
+  const older = pageHtml({ setup: { ...PASS, from_player: undefined, to_dac: undefined } });
+  assert.equal(countOf(older, 'data-io='), 0);
+  assert.equal(countOf(older, 'data-key='), 7);
+  // an empty word is left out too
+  assert.equal(countOf(pageHtml({ setup: { ...PASS, to_dac: '' } }), 'data-io='), 1);
 });
 
 await ok('a_failing_line_is_tagged_and_in_its_own_class', () => {
@@ -152,6 +172,47 @@ await ok('setup_is_read_from_the_shown_devices_path_and_nowhere_else', () => {
   assert.equal(setupOf({ device: null, host: { path: { config: PASS } } }), null,
     'the daemon never sends a config on the host\'s path');
   assert.equal(setupOf(undefined), null);
+});
+
+const CHANGES = [
+  { key: 'player', label: 'player', words: [{ text: 'volume 50 %', tone: 'warn' }] },
+  { key: 'computer', label: 'computer', words: [{ text: 'resampled', tone: 'warn' }, { text: '1 other sound mixing', tone: 'warn' }] },
+  { key: 'dac', label: 'DAC USB 1', words: [{ text: 'volume -6.0 dB', tone: 'warn' }, { text: 'tone control', tone: 'warn' }] },
+];
+
+await ok('the_popup_names_every_hop_that_changes_the_sound_under_the_lines_and_before_the_limit', () => {
+  const html = pageHtml({ setup: PASS, changes: CHANGES });
+  assert.equal(countOf(html, 'data-changes'), 1);
+  assert.ok(html.includes('<h3 class="fp-heading">What changes the sound</h3>'), html);
+  for (const hop of ['player', 'computer', 'dac']) assert.equal(countOf(html, `data-hop="${hop}"`), 1, hop);
+  assert.ok(html.indexOf('data-hop="player"') < html.indexOf('data-hop="computer"'));
+  assert.ok(html.indexOf('data-hop="computer"') < html.indexOf('data-hop="dac"'));
+  assert.ok(html.includes('<span class="fpk-lab">DAC USB 1</span>'), html);
+  assert.ok(html.includes('<span class="fpk-fail">volume -6.0 dB</span><span class="fpk-dim"> · </span><span class="fpk-fail">tone control</span>'), html);
+  assert.ok(!html.includes('changes the sound</dd>'), 'no trailing verb: the heading says it');
+  const mixed = pageHtml({ setup: PASS, changes: [{ key: 'dac', label: 'DAC', words: [{ text: 'a', tone: 'warn' }, { text: '?', tone: 'dim' }] }] });
+  assert.ok(mixed.includes('<span class="fpk-fail">a</span><span class="fpk-dim"> · </span><span class="fpk-dim">?</span></dd>'), 'warn yellow, dim dimmed');
+  assert.ok(html.indexOf('data-outcome="untouched"') < html.indexOf('data-key="rates"'));
+  assert.ok(html.indexOf('data-key="no filter in the sink"') < html.indexOf('data-changes'));
+  assert.ok(html.indexOf('data-changes') < html.indexOf(LIMIT.slice(0, 30)));
+  assert.equal(countOf(html, 'class="fp-row"'), 12, 'the seven lines, the two io rows and the three hops');
+  for (const none of [[], null, undefined]) {
+    const bare = pageHtml({ setup: PASS, changes: none });
+    assert.ok(!bare.includes('data-changes') && !bare.includes(WORDS.changes), 'untouched: no heading');
+  }
+  assert.ok(!pageHtml({ setup: null, changes: CHANGES }).includes('data-changes'), 'nothing without a check');
+  const hostile = pageHtml({ setup: PASS, changes: [{ key: 'dac', label: HOSTILE, words: [{ text: HOSTILE, tone: 'warn' }] }] });
+  assert.ok(!hostile.includes('<img'), hostile);
+  assert.ok(hostile.includes('data-hop="dac"'), 'the hook is the model\'s key, not the label');
+});
+
+await ok('changes_are_read_from_the_path_rows_changes_and_nowhere_else', () => {
+  const model = MODEL(PASS);
+  assert.deepEqual(changesOf(model), [], 'a row without any');
+  model.device.playing.path.row.changes = CHANGES;
+  assert.equal(changesOf(model), CHANGES);
+  assert.deepEqual(changesOf({ device: null, host: { path: { row: { changes: CHANGES } } } }), []);
+  assert.deepEqual(changesOf(undefined), []);
 });
 
 await ok('the_popup_is_listed_before_help_with_a_plain_row_for_everyone', () => {

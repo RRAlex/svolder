@@ -21,6 +21,7 @@
 //! the rates, the volumes, the mixing and the EQ show.
 
 mod eq_op;
+mod io;
 mod path;
 mod row;
 mod sample;
@@ -28,9 +29,12 @@ mod setup;
 mod views;
 
 pub use eq_op::run_eq_op;
+pub use io::{IoLines, io_lines};
+pub(crate) use path::NO_MPRIS_HOP;
 pub use path::{
-    Change, DacFacts, DacStage, Hop, PathLine, ROUTE_NOT_READ, SCHIIT_VENDOR_ID, Verdict,
-    computer_line, path_line, rate_hz, sink_is_dac,
+    Change, DacFacts, DacStage, Hop, NO_MPRIS_PLAYER, NOTHING_PLAYING, PathLine, ROUTE_NOT_READ,
+    SCHIIT_VENDOR_ID, Verdict, computer_line, path_line, plays_without_player, rate_hz,
+    sink_is_dac,
 };
 pub use row::{EndToEnd, PathRow, RowHop, RowLabel, RowWord, Tone, path_row};
 pub(crate) use sample::khz;

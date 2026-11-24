@@ -71,6 +71,9 @@ export function createLive({ core, root, signal, view }) {
   const gesturing = new Set();
   /** The device the sheet showed when it last looked: a change of it is a switch. */
   let seen = store.shown();
+  /** What the tone section's element was last drawn with, by element: a host reading that changes
+   * nothing the section draws (a climb's tick moves the levels, not the words) draws nothing. */
+  const toneDrawn = new WeakMap();
 
   /** Draw the section `name` from the model as it is; nothing while it is held (it is drawn when
    * the hold ends). Says whether it was drawn. */
@@ -92,7 +95,12 @@ export function createLive({ core, root, signal, view }) {
     const focused = focusOf(box);
     // the computer's table keeps its place in the list when it is drawn again
     const scrolled = box.querySelector('#p-ptsbox')?.scrollTop ?? 0;
-    box.innerHTML = SECTIONS[name]?.(store.page(), store.device(), view) ?? '';
+    const html = SECTIONS[name]?.(store.page(), store.device(), view) ?? '';
+    if (name === 'tone') {
+      if (toneDrawn.get(box) === html) return false;
+      toneDrawn.set(box, html);
+    }
+    box.innerHTML = html;
     const scroller = box.querySelector('#p-ptsbox');
     if (scroller && scrolled > 0) scroller.scrollTop = scrolled;
     if (focused) box.querySelector(focused)?.focus();
@@ -229,6 +237,8 @@ export function createLive({ core, root, signal, view }) {
      * `gesture` says a gesture is part of the hold (not only an open list or form). */
     freeze(name, on, gesture = true) {
       if (on) {
+        // What the hand does to the section's elements is not what was drawn.
+        if (name === 'tone') toneDrawn.delete(root.querySelector('#p-tone'));
         holding.add(name);
         if (gesture) gesturing.add(name);
         else gesturing.delete(name);

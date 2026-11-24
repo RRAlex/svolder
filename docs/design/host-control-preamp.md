@@ -62,14 +62,65 @@ runs at.
 If the chain cannot be taken out, the note says so, nothing is sent, and the chain is looked at
 again: it plays on again once the sink's rate plays the curve, or goes off once it can be removed.
 
+## A chain started from an identity config
+
+Every chain svolder starts is written from an IDENTITY config: all sixteen slots flat, no crossfeed
+or speakers stage, and the preamp the first live line carries (the curve's cut and the stage's
+cost). The curve, the stages and the loudness reach it live, as soon as its graph runs (a graph that
+has not run drops lines, so the first look at it run sends them). A rebuild of the graph (a
+sample-rate change) then puts back a flat chain under the last preamp sent, which is never over
+unity whatever plays: the slots are flat and the preamp only ever fell or climbed. This is option D,
+proved on a private PipeWire (`HOST_E2E_ONLY=P0`,
+[host-e2e.md](host-e2e.md#phase-p0-an-identity-config-with-the-curve-live)): a chain started from an
+identity config, sent a +6 dB curve live under its cut, the preamp climbed to 0 dB with the slots
+flat and the sink changed from 44.1 to 48 kHz, never plays over unity at any sample around the
+rebuilds and reads back flat; the same chain with the curve IN its config plays +6.0 dB over unity
+at the rebuild.
+
+So the ceiling of every preamp is `climb_ceiling` (one function, read by every path that raises the
+level): 0 dB on an identity config, and `cap_at`, the loaded curve's own preamp, on a PipeWire that
+takes no live changes (the read-back misses, [host-control.md](host-control.md)), whose config holds
+the curve and the stage as before. A chain whose live changes are given up on after it started from
+an identity config is applied again with the curve in its config. A node that started again between
+the apply and the first look reads the config on disk (which holds the curve); its slots tell it,
+and the loaded curve becomes the kept one. A chain this controller did not start, one the command
+line applied, and one it adopted at start keep the loaded curve as their ceiling, so a held level,
+`lift` and `stage_hold` below still apply to them.
+
+## The climb
+
+A change that raises the level the chain plays at does not raise the sound at once. The level is the
+preamp sent plus the speakers' level while their mixers play the convolved sound
+(`levels.total_db`). On crossfeed off, the speakers off, the EQ off into a pass-through, the bypass
+on, and on a rise of the curve's preamp that a rate change brings, the first line carries the preamp
+at the level heard before less what the stages add now: the falling preamp goes before the stage's
+ports in the same line (a preamp that does not rise goes first), so the sound stays where it was.
+Then every 50 ms tick raises it by `LEVEL_CLIMB_DB_PER_TICK`, 0.32 dB
+(`svolder_profiles::safety::CLIMB_PER_SEC` x a 64 dB range x 0.05 s: 6.4 dB a second, the pace the
+DAC's volume rule allows for a 0..63 one-dB volume), up to `min(target, climb_ceiling)`; the line
+that ends it carries the target itself, so the last preamp is exactly 0 dB when the target is. A
+lower target ends the climb at once (the preamp is the lower of the climb's level and the target), a
+rate change reads the ceiling again, and the climb waits while a line is not sent or the graph has
+not run. Hand edits, preset loads, scene recalls and turning a stage or the EQ on are not climbs.
+While it runs `levels.climb_to_db` holds its end and the words say `climbing to 0.0 dB`.
+
+`levels.untouched` is true only for a pass-through (EQ and every stage off), after the climb ended
+at exactly 0 dB, on a chain started from an identity config that holds no stage and no speakers,
+with the loudness stage at the identity, and when the last look after the last line read every port
+(the 16 slots, the preamp, the crossfeed stage, the speakers' mixers, the loudness sections) at its
+identity value as an f32. The Path then tells no stage word for the chain, so its computer hop is
+green; `make host-e2e` proves that state exact (phase P2).
+
 ## What a rate change does to the level
 
-A rate change rebuilds the graph: the slots go back to the coefficients of the curve the chain was
-applied with, but the preamp keeps the value last sent (measured on a private PipeWire: a +6 dB
-peak on the tone, applied and then dragged to 0 dB live, played +5.8 dB over unity for 0.1 to
-0.2 s at each change while the preamp had risen to 0). So no preamp is ever sent above the one the
-applied curve needs, at the running rate; the controller also keeps the loaded curve apart from
-the state it saves. The sound after a rate change is shifted for up to about 2 s, never over unity.
+This section is what a chain whose config holds the curve does (see the section above for the chain
+svolder starts). A rate change rebuilds the graph: the slots go back to the coefficients of the
+curve the chain was applied with, but the preamp keeps the value last sent (measured on a private
+PipeWire: a +6 dB peak on the tone, applied and then dragged to 0 dB live, played +5.8 dB over unity
+for 0.1 to 0.2 s at each change while the preamp had risen to 0). So no preamp is ever sent above
+the one the applied curve needs, at the running rate; the controller also keeps the loaded curve
+apart from the state it saves. The sound after a rate change is shifted for up to about 2 s, never
+over unity.
 
 Three more rules keep that true when something else changes the chain:
 
@@ -114,13 +165,17 @@ the daemon's reload plays quieter than the points need, until the next apply.
 
 ## A softer preset while a stream plays
 
+This is what a chain whose config holds the curve does: a chain the command line applied and the
+daemon adopted, or a PipeWire that takes no live changes. A chain svolder started from an identity
+config has nothing to hold (a softer preset plays at its own level at once).
+
 An apply restarts the chain: its sink is removed and made again, and a player that follows the sink
 (a pulse client such as a desktop music player) may pause on the removal. So a preset that needs
 more preamp than the cap allows, loaded while a stream plays through the chain, is not applied: it
 goes live like a drag, the curve changes at once and the preamp stays at the cap (a flat preset
 after one that needed -6.2 dB plays 6.2 dB quieter than it should, never over unity). The view's
 note says `level held until the music pauses`. The state file and the config on disk keep the curve
-with its own preamp. Once nothing has played through the chain for the idle time (30 s, the
+with its own preamp. Once nothing has played through the chain for the idle time (3 s, the
 pass-through's), the chain is applied again with the points as they stand, and the cap lifts; a
 stream that plays at that check keeps the level held another period. With nothing playing the preset
 applies at once, as before. A preset that needs less preamp than the cap goes live and holds nothing
@@ -292,6 +347,18 @@ boundary for every profile, and the whole rule at the end of every landed line; 
 (`Outbox::line`, sent after a `pw-cli` died with a line unseen) carries every port in the caller's
 order and the rest after, so its preamp placement is not the controller's and the check skips it by
 name (`repair_owed`; `SVOLDER_LAB_REPAIR_LINES=1` makes the check see it).
+
+The seventh, the climb profile (`generate_climb`, its own stream, so no older profile's seeds move),
+keeps a stream playing and turns the stages, the EQ and the bypass off and on over it, with rate
+changes up to 768 kHz, rebuilds at the same rate, node restarts and `pw-cli` deaths among them. A
+rule asked in every profile: the level L (the preamp in dB plus the speakers' level while their
+mixers are wet) of a node never rises by more than 0.5 dB between two of its states (every boundary
+between kinds of port in a line, every event and every tick), except across a hand edit, a preset
+load or apply, a scene recall, a stage or the EQ turned on, a node that starts afresh and the lines
+a repair line carries after a `pw-cli` lost one. A liveness rule: a climb reaches its target within
+(the rise over 0.32 dB) ticks and two seconds of being first seen (and the second a dead `pw-cli`
+waits before it is started again). Against a controller copy that sends the mixers before the preamp
+in the speakers-off line, or climbs 1 dB a tick, the rules fail.
 
 Each profile draws from a stream of its own, so the first block's seeds do not depend on the others.
 Every sequence ends with a quiet tail: the faults armed and not used are disarmed, the daemon reads

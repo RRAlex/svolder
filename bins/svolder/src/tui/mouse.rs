@@ -16,7 +16,7 @@ use ratatui::layout::{Position, Rect};
 
 use super::app::curve_drag::{self, Gesture};
 use super::app::glide::Bar;
-use super::app::{App, Intent, Ld, Pane, Screen, SettingsBox, Side, ToneRow, Xf};
+use super::app::{App, Intent, Ld, Pane, Screen, SettingsBox, Side, Stage, ToneRow, Xf};
 use super::boxes::device_presets;
 
 /// The longest two left presses on the same cell can be apart and still make a double-click:
@@ -78,10 +78,8 @@ pub enum Hit {
     /// Focus this row of the computer's Crossfeed section, which unfolds it on the tone screen;
     /// the wheel over it steps the row.
     Crossfeed(Xf),
-    /// The on/off word of the tone screen's Crossfeed row.
-    CrossfeedOn,
-    /// Step the model of the tone screen's Crossfeed row one way (`-1` back, `1` on).
-    CrossfeedModel(i64),
+    /// A stop of the computer side's strip: a click opens its panel.
+    Stage(Stage),
     /// Step this row of the Crossfeed section one way (`-1` back, `1` on): the `‹` and `›` of
     /// its select.
     CrossfeedStep(Xf, i64),
@@ -322,10 +320,8 @@ pub enum MouseAction {
     /// Focus this half of the tone control's header or Tone pane rows — Mode or Loudness — and
     /// toggle it, finished the way [`App::click_tone_row`] finishes it.
     ToggleTone(ToneRow),
-    /// Turn crossfeed on or off.
-    CrossfeedOn,
-    /// Step the model one way.
-    CrossfeedModel(i64),
+    /// Open this stage's panel.
+    Stage(Stage),
     /// Focus this row of the Crossfeed section and, from a `‹` or `›`, step it that way
     /// (`0`: only focus).
     Crossfeed {
@@ -752,8 +748,7 @@ fn resolve_click(hits: &HitMap, x: u16, y: u16, app: &App) -> Option<MouseAction
         Hit::PointField(point, field) => Some(MouseAction::PointField { point, field }),
         Hit::Crossfeed(row) => Some(MouseAction::Crossfeed { row, step: 0 }),
         Hit::CrossfeedStep(row, step) => Some(MouseAction::Crossfeed { row, step }),
-        Hit::CrossfeedOn => Some(MouseAction::CrossfeedOn),
-        Hit::CrossfeedModel(dir) => Some(MouseAction::CrossfeedModel(dir)),
+        Hit::Stage(stage) => Some(MouseAction::Stage(stage)),
         Hit::Ld(row) => Some(MouseAction::Ld { row, step: 0 }),
         Hit::LdStep(row, step) => Some(MouseAction::Ld { row, step }),
         Hit::LdOn => Some(MouseAction::LdOn),
@@ -826,7 +821,7 @@ fn resolve_wheel(hits: &HitMap, x: u16, y: u16, app: &App, dir: i64) -> Option<M
         }
         Hit::Loudness | Hit::LoudnessBar => intent(app.step_loudness(dir)),
         // The wheel steps the row it is over, up for on (the next preset, a bigger value).
-        Hit::CrossfeedModel(_) | Hit::CrossfeedOn => None,
+        Hit::Stage(_) => None,
         Hit::Crossfeed(row) | Hit::CrossfeedStep(row, _) => Some(MouseAction::Crossfeed {
             row,
             step: dir.signum(),

@@ -784,6 +784,10 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
   held by `node/core-computer.mjs`, `node/contract.mjs` and `node/core-point-drag.mjs`), `a_refusal_toasts_and_rereads`
   (in the same page),
   `the_side_is_kept_and_a_flip_writes_nothing` (a reload with the side kept posts nothing),
+  `the_bypass_round_trips` (`setBypass`: nothing playing is refused in words, the EQ on is turned off and held, `bypassOf` and
+  `levelsOf` say so, and off brings the EQ back; the node cases `levelsOf_gives_the_stages_the_total_and_the_daemons_words`,
+  `bypassOf_says_on_can_and_the_held_stages_and_setBypass_round_trips` (both orders of the answer and the model) and
+  `the_contract_does_not_list_bypass_until_the_themes_draw_it` are in `node/core-computer.mjs`),
   `a_stale_place_still_lands_on_the_point_dragged` (another viewer's add moves the places: the write lands on the point dragged and its neighbour is untouched; a point that is gone is one 409, one toast and no more writes),
   `unavailable_hides_nothing_but_says_why` (`SVOLDER_FAKE_HOST_EQ=off`), `the_question_is_asked_with_keys_and_buttons`
   (`core.ask`: Yes and No at 44 px, the focus on No, Escape and `n` say No, `y` and a click say Yes),

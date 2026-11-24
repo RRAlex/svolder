@@ -25,7 +25,7 @@ use super::device::{
     self, BANDS_APPLY_IN_EQ, band_dim, band_ids, band_values, bands_apply, row_style,
 };
 use super::header::split_of;
-use super::{crossfeed, rows, table_rows};
+use super::{rows, table_rows};
 
 /// The word in the Bands block's top border.
 const BANDS_ACTIONS: [Action; 1] = [Action {
@@ -161,8 +161,7 @@ pub(crate) fn draw_edit_line(
 ) -> Option<Rect> {
     let line = app.tone.edit_line.as_ref()?;
     let eq = app.profile.eq.as_ref()?;
-    let xf = crossfeed::layout(app, area);
-    let (tier, [_, _, bands, _]) = rows(area, table_rows(app, eq), split_of(app, area), xf);
+    let (tier, [_, _, bands]) = rows(area, table_rows(app, eq), split_of(app, area), false);
     let row = band_area(tier.block().inner(bands), line.band);
     let (text, caret) = edit_line_text(line, usize::from(row.width), theme);
     widgets::surfaces::modal_ground(frame, row, theme);

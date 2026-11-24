@@ -752,7 +752,7 @@
 /* a page's words: a note and the notes that say it failed or what changed, a note under a list, a
    link that leaves the page, the live line; then the focus rings of the frame's own controls */
 .fp-note { margin: 0; color: var(--frame-dim); }
-.fp-rows + .fp-note { margin-top: 12px; }
+.fp-rows + .fp-note, [data-changes] + .fp-note { margin-top: 12px; }
 .fp-page a { color: var(--frame-accent); text-underline-offset: 2px; }
 .fp-page a:focus-visible {
   outline: 2px solid var(--frame-accent); outline-offset: 2px; border-radius: 4px;
@@ -768,8 +768,12 @@
   font: 600 15px/1.35 var(--frame-font);
 }
 .fpk-sum .fp-dot { width: 12px; height: 12px; }
+/* the `From player` and `To DAC` rows between the sink and the summary: the summary keeps the 12px
+   the sink has above it */
+.fpk-sink + .fp-rows { margin-bottom: 12px; }
 .fpk-lab { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
 .fpk-fail { color: var(--frame-warn); }
+.fpk-dim { color: var(--frame-dim); }
 /* the Overview's line that config.toml changed since the last reload: the ink of the theme's own
  * surface and an accent edge, so it reads in every theme without its own colours */
 .fp-note.fp-config {

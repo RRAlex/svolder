@@ -78,6 +78,39 @@ function notes(t) {
   return lines.map((text) => `<p class="p-ronote">${esc(text)}</p>`).join('');
 }
 
+/** The words of a stage on the chain line: its name and, while it plays, its level. */
+function stageText(stage) {
+  const name = stage.key === 'eq' ? 'EQ' : stage.name.toLowerCase();
+  if (!stage.on) return `${name} off`;
+  return `${name}${stage.key === 'space' && stage.kind !== 'off' ? ` ${stage.kind}` : ''} ${stage.text}`;
+}
+
+/**
+ * The chain line under the tone's heading: `CHAIN · EQ −7.8 · loudness 60 % · space speakers −7.0 ·
+ * plays −14.8 dB in all · bypass`. A stage word opens the Sound popup at its tab (plain words for a
+ * viewer who may not open it), `bypass` is the toggle (underlined while the bypass is on; dim for a
+ * viewer who may not write, and `idle` while nothing plays, where a tap still goes to the daemon),
+ * the total is the daemon's own words. Each part carries the dot after it in one unbreakable span,
+ * so a wrapped line never starts with a dot. Nothing from a host that sends no levels and no
+ * bypass.
+ */
+export function chainLine(page, view, quiet) {
+  const levels = view.computer.levelsOf?.(page);
+  const bypass = view.computer.bypassOf?.(page);
+  if (!levels && !bypass) return '';
+  const parts = [`<span class="p-chain-head">${esc(WORDS.chain)}</span>`];
+  for (const stage of levels?.stages ?? []) {
+    parts.push(quiet
+      ? `<span class="p-stage${stage.on ? ' on' : ''}" data-stage="${stage.key}">${esc(stageText(stage))}</span>`
+      : word('c-stage', stageText(stage), false, ` id="p-cs-${stage.key}" data-stage="${stage.key}"`, stage.on ? 'on' : ''));
+  }
+  if (levels?.words) parts.push(`<i class="p-chain-total">${esc(levels.words)}</i>`);
+  const last = bypass ? word('c-bypass', WORDS.bypass, quiet, ` id="p-cbypass" aria-pressed="${bypass.on}"`, bypass.on ? 'on' : (bypass.can || quiet ? '' : 'idle')) : null;
+  const items = [...parts, ...(last ? [last] : [])]
+    .map((part, i, all) => `<span class="p-it">${part}${i < all.length - 1 ? ' &middot;' : ''}</span>`);
+  return `<p id="p-chain" class="p-label p-chain">${items.join(' ')}</p>`;
+}
+
 /** The tone section for the computer; nothing where there is no EQ to draw. */
 export function computerTone(page, view) {
   const t = view.computer.toneOf(page);
@@ -90,7 +123,7 @@ export function computerTone(page, view) {
     + `<th scope="col"><span class="p-sr">${esc(WORDS.removeHead)}</span></th>`;
   const rows = t.points.map((p) => row(quiet, p, selected)).join('');
   const beyond = t.points.length - ROWS_SHOWN;
-  return `<h2 class="p-label">${esc(WORDS.toneLabel)} &middot; ${modes.join(' &middot; ')}</h2>${notes(t)}`
+  return `<h2 class="p-label">${esc(WORDS.toneLabel)} &middot; ${modes.join(' &middot; ')}</h2>${chainLine(page, view, quiet)}${notes(t)}`
     + graph(t, quiet, selected)
     + `<div id="p-ptsbox" class="p-ptsbox${beyond > 0 ? ' fade' : ''}" data-count="${t.points.length}" data-rows="${ROWS_SHOWN}">`
     + `<table id="p-bands" class="p-bands p-pts${t.modes[1].on ? '' : ' faint'}"><thead><tr>${heads}</tr></thead>`

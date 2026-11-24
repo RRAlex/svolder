@@ -10,7 +10,7 @@ the sound's Path, the Bluetooth signal, and the volume. Click it for a popup wit
 reach for most. It is a thin front end: it reads one stream from `svolder panel --json` and runs
 one `svolder` call per click, so everything it does the CLI, the TUI and the web page do too.
 
-<img src="../images/gnome-indicator-untouched.webp" width="49%" alt="The GNOME top bar with the svolder indicator and its open popup, the sound untouched end to end: a box with a green light, full signal bars and 0 dB, and the popup for a Bifrost 3 at 44.1 kHz with the volume slider, input, DAC preset, computer EQ, a green-green-green Path strip, scenes and Open svolder"> <img
+<img src="../images/gnome-indicator-untouched.webp" width="49%" alt="The GNOME top bar with the svolder indicator and its open popup, the sound untouched end to end: a box with a green light, full signal bars and 0 dB, and the popup for a Bifrost 3 at 44.1 kHz with the volume slider, input, DAC preset, computer EQ, a green-green-green Path strip with the line untouched end to end beside it, scenes and Open svolder"> <img
 src="../images/gnome-indicator-changed.webp" width="49%" alt="The same indicator when the DAC changes the sound: the box has a yellow light and the bar reads -24 dB; the popup shows the Path strip green, green, yellow with the line DAC: volume -24.1 dB, tone control">
 
 ## What it needs
@@ -52,7 +52,9 @@ A copy that `make install-gnome-extension` puts in `~/.local/share/gnome-shell/e
 precedence over the package's copy in `/usr/share`; remove it with `make uninstall-gnome-extension`
 to use the packaged one.
 
-**A new extension shows up only after you log out and in again** (GNOME 50 and 51 run on Wayland).
+**A new extension shows up only after you log out and in again** (GNOME 50 and 51 run on Wayland):
+GNOME Shell looks for extensions when you log in, so until then `gnome-extensions enable` says
+`Extension “svolder-indicator@rralex.github.io” does not exist`.
 
 ## The bar
 
@@ -114,15 +116,30 @@ Click the indicator. From top to bottom:
 3. **Input**, with the current input; click for the list.
 4. **DAC preset**: the same list the TUI's DAC preset row shows (tone presets on a device with a
    tone control, otherwise the preset slots and the built-in settings).
-5. **Computer EQ**: a switch and the preset's name (see [Equaliser and presets](eq.md)); click the
-   preset for the list. Hidden when the computer's controls are not available.
+5. **Computer EQ**: a switch, the preset's name and what the chain plays at (`Late night · plays
+   −14.8 dB in all`; see [Equaliser and presets](eq.md)); click the preset for the list. The switch
+   says whether the computer changes the sound: turn it off and every stage that plays (EQ,
+   loudness, crossfeed, speakers) goes off together, held; turn it on and they come back as they
+   were, or, with nothing held, the EQ comes on. Hidden when the computer's controls are not
+   available. With an older svolder the switch is the EQ's alone.
 6. **Path**: three segments, player, computer and DAC, each green (untouched), yellow (it changes
-   the sound) or grey (not read), and, only when something is off, the words for it in yellow
-   (`DAC: volume −24.1 dB · tone control`). A failing PipeWire config check adds `config N`.
-7. **Scenes** with the scene that is on at the right: a sub-menu to load another. 8. **Open
-   svolder**: opens `svolder tui` (no flags) in a terminal emulator, so one has to be installed. It
-   follows the normal launcher chain, so it may start the daemon or a Bluetooth session: you asked
-   for it. It is always there; the web UI needs a port and a token.
+   the sound) or grey (not read). The line beside them says what the strip means: `untouched end to
+   end` in green when nothing on the way changes the sound, and otherwise the words for what is off
+   in yellow (`DAC: volume −24.1 dB · tone control`), and nothing when a hop could not be read and
+   nothing is off. A failing PipeWire config check adds `config N`. Put the pointer on a segment and
+   the line shows that segment's own status (`Player: untouched`, `Computer: resampled`, `DAC: not
+   read`; a stream with no MPRIS player is named `Player (no MPRIS)`, and several streams with no
+   MPRIS player grey all three segments with `no MPRIS player`); the DAC's line ends with what the
+   card is open at, or `not open` for a closed card (`DAC: untouched · 44.1 kHz · 32-bit · stereo`);
+   it returns to the line at rest when the pointer leaves and when the menu closes. The line is as
+   wide as the longest of these words, so the menu does not change width as the pointer moves. While
+   the menu is open the line never shrinks (it grows when new words are longer); it is measured
+   again when the menu closes. A line longer than the menu's width wraps, at the dots between its
+   parts, to two lines (the row is as tall as the tallest, so it does not move on hover).
+7. **Scenes** with the scene that is on at the right: a sub-menu to load another.
+8. **Open svolder**: opens `svolder tui` (no flags) in a terminal emulator, so one has to be
+   installed. It follows the normal launcher chain, so it may start the daemon or a Bluetooth
+   session: you asked for it. It is always there; the web UI needs a port and a token.
 
 When the DAC is away the popup keeps the header, Computer EQ and Scenes and hides the DAC's own
 rows (volume, input, DAC preset and Path).

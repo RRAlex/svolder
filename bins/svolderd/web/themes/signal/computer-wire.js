@@ -19,8 +19,9 @@
 
 import { curveD, fillD } from '../../core/plot.js';
 import { askForm, askQuestion, closeAsk } from './ask.js';
-import { fractionOf, lineHtml } from './draw/computer.js';
+import { fractionOf, lineHtml, stripHtml } from './draw/computer.js';
 import { dragAlong, sliderKeys } from '../../core/gestures.js';
+import { CROSSFEED, LOUDNESS, SOUND, SPEAKERS } from '../../core/popups/listed.js';
 import { closeList } from './lists.js';
 import { shelfAsks } from './shelf-asks.js';
 import { placeOpen } from './place.js';
@@ -29,7 +30,13 @@ import { POINTS, SHELF, WORDS } from './words.js';
 /** The steppers a long press repeats. */
 const STEPPERS = '[data-act="cvol-down"], [data-act="cvol-up"]';
 const ACTS = new Set(['cvol-down', 'cvol-up', 'cmute', 'cmode', 'cpreset', 'cpreset-save', 'cpreset-rename',
-  'cpreset-delete', 'cadd', 'cremove']);
+  'cpreset-delete', 'cadd', 'cremove', 'cbypass', 'cstage']);
+
+/** The Sound popup's page for a stage word of the strip: the EQ library's own (none), Loudness,
+ * and the Space stage's tab (Virtual speakers while they play, else Crossfeed). */
+const SOUND_PAGE = {
+  eq: null, loudness: LOUDNESS, crossfeed: CROSSFEED, speakers: SPEAKERS, off: CROSSFEED,
+};
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -135,6 +142,30 @@ export function wireComputer({
     }
     const line = shelf.querySelector('#sg-cline');
     if (line) line.innerHTML = lineHtml(t);
+    const chain = { levels: core.computer.levelsOf(store.page()), bypass: core.computer.bypassOf(store.page()) };
+    // the stage words and the total are changed in place: a word the focus is on stays the same element
+    const strip = root.querySelector('#sg-cstrip');
+    if (strip && chain.levels) {
+      const fresh = doc.createElement('p');
+      fresh.innerHTML = stripHtml(chain.levels, inert());
+      for (const next of fresh.querySelectorAll('[id^="sg-cstage-"]')) {
+        const here = strip.querySelector(`#${next.id}`);
+        if (!here) continue;
+        here.className = next.className;
+        here.textContent = next.textContent;
+        if (next.hasAttribute('aria-label')) here.setAttribute('aria-label', next.getAttribute('aria-label'));
+        if (next.dataset.kind) here.dataset.kind = next.dataset.kind;
+      }
+      const total = strip.querySelector('.sg-total');
+      const next = fresh.querySelector('.sg-total');
+      if (total && next) total.textContent = next.textContent;
+      else if (Boolean(total) !== Boolean(next)) strip.innerHTML = fresh.innerHTML;
+    }
+    const bypass = root.querySelector('[data-act="cbypass"]');
+    if (bypass && chain.bypass) {
+      bypass.setAttribute('aria-pressed', String(chain.bypass.on));
+      bypass.classList.toggle('on', chain.bypass.on);
+    }
   }
 
   // An edit that ended moved a point in the table's frequency order (the core follows the point in
@@ -458,7 +489,12 @@ export function wireComputer({
   function press(el) {
     const what = el.dataset.act;
     const opened = device();
-    if (what === 'cmode') {
+    if (what === 'cbypass') {
+      act.setBypass(el.getAttribute('aria-pressed') !== 'true').catch(() => {});
+    } else if (what === 'cstage') {
+      const { stage, kind } = el.dataset;
+      core.router.open(SOUND, SOUND_PAGE[stage === 'space' ? kind : stage]);
+    } else if (what === 'cmode') {
       if (el.getAttribute('aria-pressed') !== 'true') act.setMode(el.dataset.mode).catch(() => {});
     } else if (what === 'cpreset') {
       act.recallPreset(el.dataset.name, { asker: asker(el) }).catch(() => {});
