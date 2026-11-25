@@ -26,8 +26,10 @@ RUN chgrp 0 /config /run/svolder && chmod g=u /config /run/svolder
 # The PipeWire clients the computer's volume and EQ spawn (pw-cli, pw-dump, pw-record, pipewire,
 # wpctl); no PipeWire daemon runs here, the host's runtime directory is mounted in
 # (docker-compose.host-audio.yml). ca-certificates: the daemon fetches AutoEq's index over HTTPS
-# and verifies it against /etc/ssl/certs, which the base image does not carry.
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates pipewire-bin wireplumber \
+# and verifies it against /etc/ssl/certs, which the base image does not carry. apt retries each
+# fetch five times.
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
+ && apt-get update && apt-get install -y --no-install-recommends ca-certificates pipewire-bin wireplumber \
  && rm -rf /var/lib/apt/lists/*
 # The CLI binary sits out of PATH behind a wrapper of its own name (the entrypoint script, which
 # runs it as PUID:PGID), so `docker exec svolder svolder ...` runs as the daemon's user.

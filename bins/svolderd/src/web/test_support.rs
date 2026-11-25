@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::body::Body;
+use axum::body::{Body, Bytes, HttpBody};
 use futures::StreamExt;
 use http_body_util::{BodyExt, BodyStream};
 use hyper::{Request, StatusCode};
@@ -277,9 +277,9 @@ async fn fleet_daemon(
 }
 
 /// The events a stream sends until `until` holds of them, as (name, data) pairs, waiting no
-/// longer than five seconds.
+/// longer than five seconds. A body lent as `&mut` is read on by the next call.
 pub(crate) async fn events_until(
-    body: Body,
+    body: impl HttpBody<Data = Bytes> + Unpin,
     until: impl Fn(&[(String, String)]) -> bool,
 ) -> Vec<(String, String)> {
     events_within(body, until, Duration::from_secs(5)).await
@@ -287,7 +287,7 @@ pub(crate) async fn events_until(
 
 /// The events a stream sends until `until` holds of them or `span` is up, as (name, data) pairs.
 pub(crate) async fn events_within(
-    body: Body,
+    body: impl HttpBody<Data = Bytes> + Unpin,
     until: impl Fn(&[(String, String)]) -> bool,
     span: Duration,
 ) -> Vec<(String, String)> {

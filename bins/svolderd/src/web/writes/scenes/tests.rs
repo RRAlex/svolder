@@ -234,10 +234,21 @@ async fn the_scenes_event_goes_to_a_writer_and_to_nobody_else() {
                 .into_body()
         }
     };
-    let writer_body = stream(&open_web).await;
-    let guest_body = stream(&guests).await;
-    let off_body = stream(&read_only).await;
-    // Each stream is open (its model is the first thing it sent) before the change.
+    let mut writer_body = stream(&open_web).await;
+    let mut guest_body = stream(&guests).await;
+    let mut off_body = stream(&read_only).await;
+    // A stream takes its snapshot in a task of its own, after the handler has answered, and a
+    // change made before it is in its model, with no event after: the scene is saved, and the
+    // sentinel below declared, once every stream has sent its model.
+    let model_of = |seen: &[(String, String)]| event(seen, "model");
+    let opened = events_until(&mut writer_body, |seen| model_of(seen).is_some()).await;
+    let model = model_of(&opened).expect("the writer's model");
+    assert_eq!(model["scenes"]["scenes"], serde_json::json!([]), "{model}");
+    for body in [&mut guest_body, &mut off_body] {
+        let opened = events_until(body, |seen| model_of(seen).is_some()).await;
+        let model = model_of(&opened).expect("a model");
+        assert!(model.get("scenes").is_none(), "{model}");
+    }
     saved_through_the_daemon(&dac, "First").await;
 
     let seen = events_until(writer_body, |seen| {
@@ -269,7 +280,6 @@ async fn the_scenes_event_goes_to_a_writer_and_to_nobody_else() {
     for body in [guest_body, off_body] {
         let seen = events_until(body, sentinel).await;
         assert!(sentinel(&seen), "{seen:?}");
-        assert!(seen.iter().any(|(name, _)| name == "model"), "{seen:?}");
         assert!(
             seen.iter()
                 .all(|(name, data)| name != "scenes" && !data.contains("\"First\"")),

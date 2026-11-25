@@ -20,7 +20,7 @@ import { entryOf } from './hud.js';
 import {
   drawDash, markCoverFailed, moveProgress, placeFills, switchKeys,
 } from './draw/dash.js';
-import { ASK_MS, ackAsk, baseOf, noteReading } from '../../core/volume-ask.js';
+import { createVolumeAsker, noteReading } from '../../core/volume-ask.js';
 import { pressEqKey } from './eq-key.js';
 import { inertOf } from './inert.js';
 import { closeList, closeOf, openList } from './lists.js';
@@ -52,7 +52,6 @@ export function wireDash({
   const inert = () => inertOf(store.page());
   /** The page may repeat a held key: it may write and its stream is open. */
   const writable = () => !inert() && view.state === 'open';
-  const climbing = (v) => v.target !== null && v.target !== undefined && v.raw !== null && v.target > v.raw;
 
   // ---- drawing ----
   /** The markup with the moving parts (the fill and the time) left out: what a redraw compares. */
@@ -115,49 +114,20 @@ export function wireDash({
   signal.addEventListener('abort', () => clearInterval(timer), { once: true });
 
   // ---- the volume ----
-  /** The step a change starts from (core/volume-ask.js). */
-  const base = (v, delta) => baseOf(v, { asked: view.asked, now: now() }, delta);
-
-  async function send(step, target) {
-    const mine = view.asked;
-    const answer = await act.act('volume', step, (actions) => actions.setVolume(step, { device: target }));
-    if (signal.aborted || answer.queued || answer.dropped) return;
-    if (view.asked !== mine || !mine) return;
-    if (!answer.ok) {
-      view.asked = null;
-      return;
-    }
-    // The daemon may land the write on another step (the quietest, under a cap below every step).
-    const landed = answer.landed?.raw;
-    if (typeof landed === 'number' && landed !== mine.raw) {
-      view.asked = { raw: landed, at: now(), read: mine.read, seen: mine.read === landed };
-    }
-    // The device has the step: a reading that comes after this and differs from it is another
-    // hand's (the listener below); one that came before it and was the step answers the ask now.
-    if (view.asked) ackAsk(view, view.asked);
-  }
-
-  /** Ask for step `raw` of `target`: held to the range and the cap, noted in `view.asked`, sent. A
-   * viewer who may not write is told so by the core and nothing is sent. */
-  function ask(raw, target = store.shown()) {
-    const v = volume();
-    if (!v || v.raw === null || v.raw === undefined) return;
-    let step = Math.min(v.hi, Math.max(v.lo, Math.round(raw)));
-    if (v.cap !== null && v.cap !== undefined && step > v.cap) step = v.cap;
-    if (inert()) {
-      core.actions.setVolume(step, { device: target });
-      return;
-    }
-    // The step already asked for stands only while it is fresh and the device has not read another
-    // step since it had it: that reading is another hand's, and the same ask is a new one; a
-    // device that answered and read nothing does not hold the step past ASK_MS.
-    const same = (view.asked?.raw === step && now() - view.asked.at < ASK_MS
-      && (!view.asked.answered || v.raw === step))
-      || (!view.asked && step === v.raw && !climbing(v));
-    if (same) return;
-    view.asked = { raw: step, at: now() };
-    send(step, target).catch(() => {});
-  }
+  /** Ask, nudge and base: the core's asker (core/volume-ask.js). A viewer who may not write is
+   * told so by the core and nothing is sent. */
+  const asker = createVolumeAsker({
+    view,
+    signal,
+    volume,
+    inert,
+    refuse: (step, target) => core.actions.setVolume(step, { device: target }),
+    write: (step, target) => act.act('volume', step,
+      (actions) => actions.setVolume(step, { device: target })),
+    now,
+    shown: () => store.shown(),
+  });
+  const { ask, base } = asker;
 
   /** The computer is the side shown: the keys are its volume's. */
   const onComputer = () => core.computer.side() === 'computer';

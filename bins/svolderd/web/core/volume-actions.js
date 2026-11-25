@@ -68,6 +68,8 @@ export function createVolumeActions({ store, post, toast, writes }) {
       const url = target(options);
       if (!url) return { ok: false, status: 0, error: NO_DEVICE };
       const held = store.part('volume', url);
+      // The themes' asker clamps first (core/volume-ask.js); this is the last guard before the
+      // daemon.
       let step = Math.round(raw);
       if (held) {
         if (Number.isFinite(held.hi)) step = Math.min(held.hi, step);

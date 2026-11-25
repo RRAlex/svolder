@@ -8,6 +8,19 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.39.8
+
+- **The volume works the same in every theme, from one place.** Ember's knob, Paper's and Signal's
+  volume and Night drive's dash now share one volume ask in the page's core: one cap, one way to
+  read an answer, one rule for a repeated press. A press that would change where the volume ends up
+  is always sent, so a quieter press is never lost behind a slower raise; a press that changes
+  nothing is not sent. Paper no longer sends the device's volume from a drag that carries on after
+  the computer's side is shown, and a press held on the target while the device climbs to it is
+  sent again once, which the daemon folds into the same glide.
+- Contributors: the build images retry each package download five times, and CI shows the release
+  build image's whole log, so a package mirror that answers 503 no longer fails a release build
+  quietly.
+
 ## 0.39.7
 
 A release for contributors: nothing you use changes.

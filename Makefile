@@ -270,7 +270,8 @@ license-check: deps-check ## Fail on a licence not compatible with GPL-3.0-or-la
 
 ##@ Release builds (docker)
 build-image: ## Build the container the release builds run in
-	docker build -q --platform $(PLATFORM) -f packaging/Dockerfile.build -t $(BUILD_IMAGE) packaging
+	docker build $(if $(CI),--progress=plain,-q) --platform $(PLATFORM) \
+	  -f packaging/Dockerfile.build -t $(BUILD_IMAGE) packaging
 
 # A release artifact names a commit: its version, its time and its source tarball.
 release-tree:

@@ -163,11 +163,11 @@ every part follows the key rule above: it attaches no key listener, and one that
   so `openList` throws for a list in a modal whose panel would land outside it. The panel is
   measured at its box's top left corner, not shown, and shown once it is placed, so measuring
   it never adds a scrollbar to the box.
-- `core/gestures.js`, `core/place.js`, `core/volume-ask.js`: the hands every theme shares: dragging
-  along a track and the slider keys; a mark's place as a fraction of its box (set through the
-  style object, never a `style` attribute); the step the page asked the volume for, which stands
-  for the reading until the device reports it (`ASK_MS`). Signal and Paper import all three; Night
-  drive places its sheet itself; Ember's knob uses `volume-ask.js` and its `menuRows` is per mount.
+- `core/gestures.js`, `core/place.js`, `core/volume-ask.js`: the hands every theme shares: the track
+  drag and slider keys; a mark's place as a fraction of its box (set through the style object); the
+  volume ask (`ASK_MS`, and `createVolumeAsker`: clamp, "same ask" rule, send, landed fold; a theme
+  keeps its gesture, drawing and `write`; the asker writes only the view's `asked`). Signal and Paper
+  import all three; Night drive places its sheet itself; Ember's knob uses `volume-ask.js`.
 - `core/clock.js`: the daemon's clock on the page. `daemonNow(now_ms, localMs)` is keyed by the
   daemon's `now_ms` value at this page's **first local sight** of it, never by the time of a draw:
   a redraw with no new player reading counts the track on from the same start in every theme, and

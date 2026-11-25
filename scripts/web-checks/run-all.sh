@@ -460,6 +460,7 @@ node_entries=()
 for name in effects facts model sources notes director keep tone-curve plot tone-drag playing viz vu \
     core-store core-api core-stream core-actions core-device-config core-device-settings core-device-readings core-device-facts core-device-wire core-device-walk core-computer core-words core-table core-point-drag core-prefs core-registry core-climb core-loop core-title core-old-readings core-repeat core-freeze core-names core-html core-inline-ask core-list core-driver core-clock core-volume-ask core-mounted core-menu-rows core-menu core-popups core-stay core-devices core-eq-library core-loudness core-crossfeed core-speakers core-scenes core-help core-setup dom-skip core-keys theme-keys ember-parts ember-keys \
     level-write toast frame-keys core-modal core-router switch ember-order contract \
+    core-volume-wires \
     paper-tokens paper-words paper-live paper-ruler paper-draw paper-notes \
     signal-line signal-draw signal-vu nightdrive-scene nightdrive-sky nightdrive-hud nightdrive-tune nightdrive-draw nightdrive-ridge nightdrive-floor nightdrive-budget nightdrive-debug nightdrive-glow nightdrive-mood nightdrive-states nightdrive-controls nightdrive-eqkey nightdrive-dash-clock nightdrive-keys signal-controls signal-palette; do
     node_entries+=("node-$name|node/$name.mjs|")

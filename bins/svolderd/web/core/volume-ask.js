@@ -2,12 +2,14 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // The step a page asked the volume for, as every theme keeps it: `view.asked` is
 // `{ raw, at, read?, seen?, acked?, answered? }` while the page's own ask waits for the device to
-// read it back (`at` in the ms of the clock the theme gives as `view.now`). Until the device reports that step
-// the ask stands for the reading, for `ASK_MS` at most; once the device has answered the ask, a
-// reading that is not the ask (and is no glide up to a target) is another hand's and wins.
+// read it back (`at` in the ms of the clock the theme gives as `view.now`). Until the device
+// reports that step the ask stands for the reading, for `ASK_MS` at most; once the device has
+// answered the ask, a reading that is not the ask (and is no glide up to a target) is another
+// hand's and wins.
 //
-// Pure rules (`shownRaw`, `baseOf`), the two steps that mark an ask (`noteReading`, `ackAsk`) and
-// one timer (`askExpiry`) that ends a stale ask.
+// Pure rules (`shownRaw`, `baseOf`), the two steps that mark an ask (`noteReading`, `ackAsk`), one
+// timer (`askExpiry`) that ends a stale ask, and the asker (`createVolumeAsker`) that holds them
+// together for every theme: the cap clamp, the "same ask" test, the landed fold.
 
 /** How long a step asked for stays the one shown while the device has not reported it (ms). */
 export const ASK_MS = 3000;
@@ -95,4 +97,87 @@ export function askExpiry({ view, now, redraw, signal }) {
     },
     clear,
   };
+}
+
+/**
+ * The volume ask every theme shares. `volume()` is the reading `{ raw, target, hi, lo, cap }` or
+ * `null` (nothing is asked then); `inert()` says the viewer may not write: `refuse(step, device)`
+ * then makes the core say so and nothing is shown or sent. `write(step, device)` posts the step and
+ * resolves with the core's answer; `show()` draws the ask (optional); `expiry` is an `askExpiry`
+ * (optional); `shown()` names the device an ask goes to when the call names none (optional);
+ * `now()` is the clock of `view.asked.at`; `signal` ends the wait for an answer. The asker never
+ * writes into `view` but `view.asked`.
+ * Returns `{ ask(raw, device), nudge(delta, device), base(v, delta) }`.
+ *
+ * An ask is skipped only when it cannot change where the device ends up: nothing is in flight
+ * unanswered and the step is the device's level, or the step is the ask in flight while that is
+ * fresh (no flood). A lost ask older than `ASK_MS` is sent again, and a step that differs from the
+ * one in flight is always sent (it queues behind it, newest wins).
+ * The step is held to the range and the cap here; the core's `setVolume` clamps again, as the last
+ * guard before the daemon, which enforces the rule.
+ */
+export function createVolumeAsker({
+  view, signal, volume, inert, refuse, write, show = () => {}, expiry = null, now,
+  shown = () => undefined,
+}) {
+  async function send(step, device) {
+    const mine = view.asked;
+    const answer = await write(step, device);
+    if (signal.aborted || answer.queued || answer.dropped) return;
+    // Another ask has taken the place of this one meanwhile: its answer is not for that.
+    if (view.asked !== mine || !mine) return;
+    if (!answer.ok) {
+      view.asked = null;
+      show();
+      return;
+    }
+    // The daemon may land the write on another step (the quietest, under a cap below every step).
+    const landed = answer.landed?.raw;
+    if (typeof landed === 'number' && landed !== mine.raw) {
+      view.asked = { raw: landed, at: now(), read: mine.read, seen: mine.read === landed };
+      show();
+    }
+    // The device has the step: a reading that comes after this and differs from it is another
+    // hand's (`answered`, set by that reading, or at once by one that came first).
+    if (ackAsk(view, view.asked)) show();
+  }
+
+  /** Ask for step `raw`: rounded, held to the range and the cap, shown at once, and sent. */
+  function ask(raw, device = shown()) {
+    const v = volume();
+    if (!v || v.raw === null || v.raw === undefined) return;
+    let step = Math.min(v.hi, Math.max(v.lo, Math.round(raw)));
+    if (v.cap !== null && v.cap !== undefined && step > v.cap) step = v.cap;
+    if (inert()) {
+      refuse(step, device);
+      return;
+    }
+    const at = now();
+    const last = view.asked;
+    // Skipped only when it cannot change where the device ends up: nothing is in flight unanswered
+    // and the step is the level (a glide is no level), or the step is the ask in flight while that
+    // is fresh. Anything else is sent, so a press behind a stale raise still lands.
+    const flying = last && !last.answered;
+    const fresh = last && last.raw === step && at - last.at < ASK_MS
+      && (!last.answered || v.raw === step);
+    if (fresh || (!flying && step === v.raw && !gliding(v))) return;
+    view.asked = { raw: step, at };
+    expiry?.arm();
+    show();
+    send(step, device).catch(() => {});
+  }
+
+  /** The step a change by `delta` starts from (`baseOf`), on the asker's clock. The theme's view is
+   * only read: its `now` may be a getter. */
+  function base(v, delta) {
+    return baseOf(v, { asked: view.asked, now: now() }, delta);
+  }
+
+  /** Ask for the step `delta` from the base. */
+  function nudge(delta, device = shown()) {
+    const v = volume();
+    if (v && v.raw !== null && v.raw !== undefined) ask(base(v, delta) + delta, device);
+  }
+
+  return { ask, nudge, base };
 }

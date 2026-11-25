@@ -5,7 +5,7 @@
 // arc and target tick, the readout and its notes — by the geometry the page's drawing uses
 // (draw/dial.js): view box -30 -16 260 220, centre (100, 100), 270° from -135°, 0° up.
 
-import { ackAsk, askExpiry, baseOf, noteReading, shownRaw } from '../../core/volume-ask.js';
+import { askExpiry, createVolumeAsker, noteReading, shownRaw } from '../../core/volume-ask.js';
 import { ember } from './bind.js';
 import {
   angle as dialAngle, arc, fraction, point, SWEEP, spoke as spokeAt, tickClass as classOf,
@@ -59,6 +59,21 @@ class Knob extends HTMLElement {
       // the timer ends itself: no listener on the mount's signal keeps a swapped-out knob
       signal: new AbortController().signal,
     });
+    this.asker = createVolumeAsker({
+      view: this.view,
+      // read at each answer: the page's signal is the mount's, which a swapped-out knob outlives
+      signal: { get aborted() { return ember.signal?.aborted ?? true; } },
+      volume: () => (this.raw === null ? null : {
+        raw: this.raw, target: this.target, hi: this.hi, lo: this.lo, cap: this.cap,
+      }),
+      inert: () => false,
+      refuse: () => {},
+      write: (step) => (this.computer ? ember.core.actions.computer.setVolume(step)
+        : ember.core.actions.setVolume(step)),
+      show: () => this.show(),
+      expiry: this.expiry,
+      now: Date.now,
+    });
     // The climb target a touch cancelled, ignored in readings until the stream drops it.
     this.cancelled = null;
     this.travel = 0;
@@ -80,60 +95,10 @@ class Knob extends HTMLElement {
     return this.target !== null && this.raw !== null && this.target > this.raw;
   }
 
-  /** Ask for step `raw`: held at the cap, shown at once, and sent. */
-  ask(raw) {
-    let step = Math.min(this.hi, Math.max(this.lo, Math.round(raw)));
-    if (this.cap !== null && step > this.cap) step = this.cap;
-    // Nothing to say: the step is the one asked and still shown, or the level the device holds.
-    const { view } = this;
-    const at = Date.now();
-    const held = view.asked?.raw === step
-      && shownRaw(this.reading(), { asked: view.asked, now: at }) === step;
-    const same = held || (!view.asked && step === this.raw && !this.climbing());
-    if (same) return;
-    view.now = at;
-    view.asked = { raw: step, at };
-    this.expiry.arm();
-    this.show();
-    this.write(step);
-  }
-
-  /** Write step `step`: the core holds one write in flight and the newest waiting, and says why a
-   * refusal was one. The daemon may land the write on another step (the quietest, under a cap
-   * below every step): that step is the one asked, unless a newer ask has replaced it. */
-  async write(step) {
-    const { core, signal } = ember;
-    const { view } = this;
-    const mine = view.asked;
-    const answer = this.computer ? await core.actions.computer.setVolume(step)
-      : await core.actions.setVolume(step);
-    if (signal.aborted || answer.queued || answer.dropped) return;
-    // Another ask has taken the place of this one meanwhile: its answer is not for that.
-    if (view.asked !== mine || !mine) return;
-    if (!answer.ok) {
-      view.asked = null;
-      this.show();
-      return;
-    }
-    const landed = answer.landed?.raw;
-    if (typeof landed === 'number' && landed !== mine.raw) {
-      view.asked = { raw: landed, at: Date.now(), read: mine.read, seen: mine.read === landed };
-      this.show();
-    }
-    if (ackAsk(view, view.asked)) this.show();
-  }
-
-  /** The step a change by `delta` starts from: a raise from what is asked or the climb's target,
-   * a lowering from the level (a lower step ends a climb where the device is). */
-  base(delta) {
-    this.view.now = Date.now();
-    return baseOf(this.reading(), this.view, delta);
-  }
-
   /** Move by `steps` whole steps (a held key, a button, Page Up/Down): no detent but a step's. */
   nudge(steps) {
     if (!this.live()) return;
-    this.ask(this.base(steps) + steps);
+    this.asker.nudge(steps);
   }
 
   /**
@@ -145,7 +110,7 @@ class Knob extends HTMLElement {
     for (;;) {
       const dir = Math.sign(this.travel);
       if (dir === 0) return;
-      const from = this.base(dir);
+      const from = this.asker.base(this.reading(), dir);
       const crossing = this.silence && (dir > 0 ? from === this.lo : from === this.lo + 1);
       const need = crossing ? DETENT : 1;
       if (Math.abs(this.travel) < need) return;
@@ -154,7 +119,7 @@ class Knob extends HTMLElement {
         this.travel = 0;
         return;
       }
-      this.ask(from + dir);
+      this.asker.ask(from + dir);
     }
   }
 
@@ -253,7 +218,7 @@ class Knob extends HTMLElement {
     if (up || down) this.nudge(up ? 1 : -1);
     else if (event.key === 'PageUp' || event.key === 'PageDown') {
       this.nudge(event.key === 'PageUp' ? 8 : -8);
-    } else if (event.key === 'Home') this.ask(this.lo);
+    } else if (event.key === 'Home') this.asker.ask(this.lo);
     else return;
     event.preventDefault();
     event.stopPropagation();
@@ -449,7 +414,7 @@ class Knob extends HTMLElement {
     const release = () => {
       const jumps = !mode && !climbed && this.ringHit(x0, y0);
       const step = jumps ? this.stepAt(angleOf(event)) : null;
-      if (step !== null) this.ask(step);
+      if (step !== null) this.asker.ask(step);
       end();
     };
     const end = () => {

@@ -8,7 +8,7 @@
 // or `ASK_MS` pass. A drag takes a hold of the open area (`keep`, shared with the tone's), so what
 // the device reports meanwhile is drawn when the hand lets go, from the newest reading, never from the one at the touch.
 
-import { ackAsk, askExpiry, baseOf, noteReading, shownRaw } from '../../core/volume-ask.js';
+import { askExpiry, createVolumeAsker, noteReading } from '../../core/volume-ask.js';
 import { rawAt, showVolume } from './draw/volume.js';
 import { dragAlong, sliderKeys } from '../../core/gestures.js';
 
@@ -37,66 +37,26 @@ export function wireVolume({
    * then, from the reading. */
   const expiry = askExpiry({ view, now: Date.now, redraw: () => live.draw('open'), signal });
 
-  /** The step a change starts from (core/volume-ask.js). */
-  function base(v, delta) {
-    view.now = Date.now();
-    return baseOf(v, view, delta);
-  }
-
-  async function send(step, device) {
-    const mine = view.asked;
-    const answer = await act.act('volume', step, (actions) => actions.setVolume(step, { device }));
-    if (signal.aborted || answer.queued || answer.dropped) return;
-    // Another ask has taken the place of this one meanwhile: its answer is not for that.
-    if (view.asked !== mine || !mine) return;
-    if (!answer.ok) {
-      view.asked = null;
-      show();
-      return;
-    }
-    // The daemon may land the write on another step (the quietest, under a cap below every step).
-    const landed = answer.landed?.raw;
-    if (typeof landed === 'number' && landed !== mine.raw) {
-      view.asked = { raw: landed, at: Date.now(), read: mine.read, seen: mine.read === landed };
-      show();
-    }
-    // The device has the step: a reading that comes after this and differs from it is another
-    // hand's (`answered`, set by that reading, or at once by one that came first).
-    if (ackAsk(view, view.asked)) show();
-  }
+  /** Ask, nudge and base: the core's asker (core/volume-ask.js). A viewer who may not write is
+   * told so by the core and the knob does not move. */
+  const asker = createVolumeAsker({
+    view,
+    signal,
+    volume,
+    inert,
+    refuse: (step, device) => core.actions.setVolume(step, { device }),
+    write: (step, device) => act.act('volume', step,
+      (actions) => actions.setVolume(step, { device })),
+    show,
+    expiry,
+    now: Date.now,
+    shown: () => store.shown(),
+  });
+  const { ask, nudge } = asker;
 
   live.onReading('volume', () => {
     if (noteReading(view, volume()?.raw)) show();
   });
-
-  /** Ask for step `raw`: held to the range and the cap, shown at once, and sent. A viewer who may
-   * not write is told so by the core and the knob does not move. */
-  function ask(raw, device = store.shown()) {
-    const v = volume();
-    if (!v || v.raw === null || v.raw === undefined) return;
-    let step = Math.min(v.hi, Math.max(v.lo, Math.round(raw)));
-    if (v.cap !== null && v.cap !== undefined && step > v.cap) step = v.cap;
-    if (inert()) {
-      core.actions.setVolume(step, { device });
-      return;
-    }
-    // The step already asked for stands only while it is the one shown: once the device has it and
-    // reads another step, that is another hand's and the same ask is a new one.
-    const at = Date.now();
-    const same = (view.asked?.raw === step && shownRaw(v, { asked: view.asked, now: at }) === step)
-      || (!view.asked && step === v.raw && !climbing(v));
-    if (same) return;
-    view.now = at;
-    view.asked = { raw: step, at };
-    expiry.arm();
-    show();
-    send(step, device).catch(() => {});
-  }
-
-  const nudge = (delta) => {
-    const v = volume();
-    if (v && v.raw !== null && v.raw !== undefined) ask(base(v, delta) + delta);
-  };
 
   // A drag along the track, from the knob or from a press elsewhere on it.
   let gripped = false;
