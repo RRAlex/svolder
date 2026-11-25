@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Read by `make test NEXTEST=1` only (CI and the 1.100 container run `cargo test`). nextest
+# starts every test as its own process at once; svolder-host's lab and sweep tests each spawn
+# worker threads of their own, so uncapped they starve the real-time tests (the MQTT broker's
+# windows, the daemon's timeouts). The pool is 6 threads, and the heavy ones share a smaller one.
+[profile.default]
+test-threads = 6
+
+[test-groups]
+heavy-host = { max-threads = 1 }
+realtime = { max-threads = 2 }
+
+[[profile.default.overrides]]
+filter = """package(svolder-host) and (test(/^eq::lab::/) or test(/^eq::loudness::/) \
+  or test(/random_mixed_stacks/))"""
+test-group = 'heavy-host'
+
+# The real-time tests (they run a broker, with 20 s windows: svolderd's `mqtt`, svolder-mqtt's
+# `client` and the one `daemon status` test of svolder's `backend`) get a pool of their own, so
+# they never all wait on a loaded machine at once.
+[[profile.default.overrides]]
+filter = '''
+  (package(svolderd) and binary(mqtt))
+  or (package(svolder-mqtt) and binary(client))
+  or (package(svolder) and binary(backend) and test(/^daemon_status_says_where/))
+'''
+test-group = 'realtime'

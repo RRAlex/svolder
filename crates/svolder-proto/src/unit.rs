@@ -36,6 +36,7 @@ impl UnitId {
     }
 
     /// Build from the little-endian u64 form.
+    #[cfg(test)]
     pub fn from_u64_le(value: u64) -> Self {
         Self(value.to_le_bytes())
     }

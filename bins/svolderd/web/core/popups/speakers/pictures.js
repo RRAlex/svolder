@@ -16,7 +16,6 @@ export const PICTURE_WORDS = {
   arrivals: 'Arrivals',
   directions: 'Directions',
   decay: 'Decay',
-  notMeasured: 'Not measured for this set.',
   left: 'Left ear',
   right: 'Right ear',
   near: 'near, direct',

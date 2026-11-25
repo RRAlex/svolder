@@ -69,13 +69,13 @@ also those that name what it changes (a lane's CODE DONE); a tag needs `make web
 
 `make test` runs `cargo test --workspace --all-features` once, so every binary is built by the same
 invocation and a test that needs a sibling binary runs the one on disk (`SVOLDER_TEST_PREBUILT=1`;
-without it the daemon a test spawns is built into a directory of its own; `T='-p <crate>'`, another
-set, leaves it unset; `make help T=<target>` takes a target instead, so the two uses of `T` differ).
-The environment is a scratch one: config, state, data and cache homes under a temporary directory,
-no WirePlumber (`SVOLDER_WIREPLUMBER` names nothing), the MCP and web tokens unset, and the AutoEq
-catalogue pointed at a closed port. The run fails, naming it, if a test leaves anything in its
-temporary directory. `make check` runs it on a private no-BlueZ bus, so the BlueZ-answers branch of
-`backend.rs`:179 and `device_cli.rs`:507 runs only in a by-hand `make test`.
+`T='-p <crate>'`, another set, leaves it unset). It links with lld (`ld.lld` or `ld.lld-NN` on the
+PATH; `NO_LLD=1` turns it off; never in release builds or CI) through `COMPILER_PATH`, which is in
+cargo's fingerprint: every dev-profile `make` target sets it and they agree; a hand `cargo` run
+without it rebuilds ring, psm and their dependents once. `NEXTEST=1` runs cargo-nextest (166-272 s,
+`cargo test` 196 s): opt-in; its concurrent processes fail real-time tests on a loaded machine.
+It runs in a scratch environment and fails naming anything a test leaves in its TMPDIR. `make check`
+runs with no BlueZ: only a hand run takes the BlueZ branch of `backend.rs`:179, `device_cli.rs`:507.
 
 The in-process MQTT broker (`rumqttd`, about 175 crates svolder-mqtt would otherwise build) is an
 optional dependency behind the `broker-tests` feature of `svolder-mqtt`, `svolderd` and `svolder`.

@@ -88,8 +88,8 @@ password` follow the same rule through `Request::MqttSet { op }` (feature `mqtt_
 `enabled`, `commands`, `host`, `port`, `username` or `password`, the last two taking `null` to
 clear), answered with `Response::MqttSet` carrying the bridge's `MqttStatus`. The handler
 (`handler/mqtt_set.rs`) writes the one key with
-`Config::update_mqtt` through `edit_then_reload`, so the reload restarts the bridge on the new
-section. The verb then asks `version` for up to three seconds while the status is still a plain
+`Config::update_mqtt_noting` through `edit_then_reload`, so the reload restarts the bridge on
+the new section. The verb then asks `version` for up to three seconds while the status is still a plain
 `connecting`, so the line it prints can name a refused login. A refused login is a note, not a
 failure: the key is written and the bridge runs; the verb fails only when the daemon did not act
 (`on` with the bridge still off, `off` with it still running, `commands` with a `Connected` that
@@ -101,7 +101,7 @@ terminal without echo or from the first line of standard input, never from an ar
 `SVOLDER_MQTT_ENABLED`, `_HOST`, `_PORT` and `_USERNAME` are read by `ListenDefaults` as the
 web and MCP switches are, and the file wins; `SVOLDER_MQTT_PASSWORD` is read where the daemon
 connects and wins over the file. The TUI's Connect rows write the file with the same
-`Config::update_mqtt` and send `reload`, as its other `[mqtt]` rows do.
+`Config::update_mqtt_noting` and send `reload`, as its other `[mqtt]` rows do.
 
 ## Where the code and tests live
 

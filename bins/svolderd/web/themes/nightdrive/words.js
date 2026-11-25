@@ -98,7 +98,6 @@ export const SHEET = Object.freeze({
   lowerPoint: (n, param) => `Lower the ${PARAM_WORD[param]} of point ${n}`,
   raisePoint: (n, param) => `Raise the ${PARAM_WORD[param]} of point ${n}`,
   moreBelow: (hidden) => (hidden > 0 ? `${hidden} more below ↓` : ''),
-  notNumber: 'Not a number.',
   unconfirmed: 'not confirmed yet',
   presets: 'Presets',
   saveAs: 'Save as…',

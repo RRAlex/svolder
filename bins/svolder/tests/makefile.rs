@@ -32,6 +32,9 @@ fn dry_run_of(target: &str, prefix: &str, home: &str, extra: &[&str]) -> String 
         .env_remove("MFLAGS")
         // `make test T=...` exports its selection, which would stand in for the one asked here
         .env_remove("T")
+        // `make test NEXTEST=1` and nextest export it, and it would turn `make -n test` into
+        // `cargo nextest run`
+        .env_remove("NEXTEST")
         .output()
         .expect("make runs");
     assert!(out.status.success(), "make -n failed: {out:?}");

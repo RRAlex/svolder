@@ -635,7 +635,6 @@
 }
 .nd-nodash .nd-dash, .nd-nohud :is(.nd-top, .nd-vol, .nd-eq) { display: none; }
 .nd-noglow * { box-shadow: none !important; text-shadow: none !important; }
-.nd-noglow .nd-odb :is(g, text) { }
 
 /* a phone held upright: the scene is the whole window and the dash panel lies over its foot, two rows pinned to the
    bottom (`−` `MUTE` `+` and the transport; the track with the input and `DEVICE ▴`). The panel is translucent, so the road

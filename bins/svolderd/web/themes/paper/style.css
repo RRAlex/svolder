@@ -479,7 +479,6 @@
 .p-mstate { margin: 2px 0 0; font-size: 15px; color: var(--paper-print-dim); }
 .p-mstate:empty { display: none; }
 .p-devset { margin: 0; line-height: 1.6; }
-.p-note { font-style: italic; font-size: 14px; color: var(--paper-print-dim); overflow-wrap: anywhere; }
 .p-faults { margin: 4px 0 0; padding-left: 20px; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
 .p-faults li + li { margin-top: 4px; }
 .p-detail code { font: 400 .92em var(--paper-mono); }

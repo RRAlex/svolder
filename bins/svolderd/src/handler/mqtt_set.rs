@@ -7,9 +7,9 @@
 //! [`Daemon::mqtt_set`] in one line of `handle_from`.
 //!
 //! The write goes through [`Daemon::edit_then_reload`], as the server switch's does:
-//! [`Config::update_mqtt`] changes the one key in the file the daemon reads, under the file's
-//! lock and against the file as it is then, and writes nothing when the key already stands as
-//! asked. The reload that follows restarts the bridge on the new section. The answer is where
+//! [`Config::update_mqtt_noting`] changes the one key in the file the daemon reads, under the
+//! file's lock and against the file as it is then, and writes nothing when the key already
+//! stands as asked. The reload that follows restarts the bridge on the new section. The answer is where
 //! the bridge stands once the reload has run, which for a bridge that has only just started is
 //! `connecting`: the broker's verdict comes a moment later, in `version`.
 //!

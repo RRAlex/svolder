@@ -60,8 +60,6 @@ export const WORDS = Object.freeze({
   saved: (name) => `Saved ${name}.`,
   renamed: (from, to) => `${from} is now ${to}.`,
   deleted: (name) => `Deleted ${name}.`,
-  recallAsk: (name) => `Recall ${name}?`,
-  renameAsk: (name) => `Rename “${name}” to`,
   deleteAsk: (name) => `Delete “${name}”? The sound now playing does not change.`,
   overAsk: (name) => `Save over “${name}”?`,
   answers: Object.freeze({

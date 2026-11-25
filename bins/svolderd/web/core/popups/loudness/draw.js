@@ -50,7 +50,6 @@ export const WORDS = {
   noComputer: 'The computer\'s sound is not on, so there is no loudness to set.',
   dacOn: 'The DAC\'s loudness is on too.',
   strength: 'Strength',
-  strengthLabel: 'Loudness strength',
   reference: 'Reference',
   less: 'Lower the reference',
   more: 'Raise the reference',

@@ -6,7 +6,7 @@ resolver = "3"
 members = ["crates/*", "bins/*"]
 
 [workspace.package]
-version = "0.39.5"
+version = "0.39.7"
 edition = "2024"
 rust-version = "1.93"
 license = "GPL-3.0-or-later"
@@ -121,6 +121,11 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.nalgebra]
 opt-level = 3
+
+# The preamp lab's short runs and the headroom checks in svolder-host are numeric loops: 3200 CPU
+# seconds unoptimised, 1700 at opt-level 1. Debug assertions and overflow checks stay on.
+[profile.dev.package.svolder-host]
+opt-level = 1
 
 # What `make demo*` builds and runs: optimised like a release, but incremental with many codegen
 # units so a developer's rebuild after an edit stays short. Like a release it has no debug

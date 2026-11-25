@@ -14,8 +14,8 @@
 //! After slot 16 the graph holds one crossfeed stage per channel, the same six nodes whatever
 //! the model (see [`crossfeed`](super::crossfeed)), so crossfeed changes are `set-param`s too
 //! ([`crossfeed_params`]). The config on disk always has the stage off, a bypass that is
-//! bit-exact: [`render_live_conf`] writes it so, and [`render_live_conf_with`] writes a given
-//! stage for a chain that cannot be set live.
+//! bit-exact: [`render_live_conf_full`] writes it so, and writes a given stage for a chain
+//! that cannot be set live.
 //!
 //! Between slot 16 and the crossfeed stage each channel holds the loudness stage, two first-order
 //! `bq_raw` sections (`ld1`, `ld2`). The config always holds them as the identity and no render
@@ -290,12 +290,8 @@ fn preamp_node(channel: char, db: f64) -> String {
     }
 }
 
-/// The complete PipeWire config of the live chain in front of the sink `target`, for `route`:
-/// the frame of [`render_conf`](super::render_conf) round a graph of
-/// `lpre → l01 … l16 → lld1 → lld2` and `rpre → r01 … r16 → rld1 → rld2` (the last two the loudness
-/// stage, at the identity), the slots holding `points` (their coefficients worked out for a sink
-/// running at `rate_hz`), the preamp `preamp_db` and the crossfeed stage OFF (a bypass). The
-/// node is called [`NODE_NAME`].
+#[cfg(test)]
+/// [`render_live_conf_full`] with the crossfeed stage off (a bypass) and no virtual speakers.
 pub fn render_live_conf(
     points: &Points,
     preamp_db: f64,
@@ -306,8 +302,8 @@ pub fn render_live_conf(
     render_live_conf_with(points, preamp_db, target, route, rate_hz, &Stage::bypass())
 }
 
-/// [`render_live_conf`] with the crossfeed stage holding `stage`: for a chain that cannot be set
-/// live, so the stage has to be in the config it starts with.
+#[cfg(test)]
+/// [`render_live_conf_full`] with the crossfeed stage holding `stage` and no virtual speakers.
 pub fn render_live_conf_with(
     points: &Points,
     preamp_db: f64,
@@ -332,7 +328,7 @@ pub struct SpeakersGraph {
 impl SpeakersGraph {
     /// A stage reading `wav`, playing when `on`. The config on disk always has the stage off
     /// (`on` false); `true` is for a chain that cannot be set live, as with
-    /// [`render_live_conf_with`]'s stage. The WAV must stay readable while any running chain was
+    /// [`render_live_conf_full`]'s crossfeed stage. The WAV must stay readable while any running chain was
     /// started with it (see [`speakers`](super::speakers)). The path must be absolute and free of what
     /// would end the config's string early (a quote, a backslash, a control character).
     pub fn new(wav: &Path, on: bool) -> Result<SpeakersGraph, String> {
@@ -417,8 +413,14 @@ fn speakers_links() -> String {
     out
 }
 
-/// [`render_live_conf_with`] with the virtual speakers' stage after the crossfeed stage when
-/// `speakers` is given; without it the graph is the plain one.
+/// The complete PipeWire config of the live chain in front of the sink `target`, for `route`:
+/// the frame of the config round a graph of
+/// `lpre → l01 … l16 → lld1 → lld2` and `rpre → r01 … r16 → rld1 → rld2` (the last two the loudness
+/// stage, at the identity), the slots holding `points` (their coefficients worked out for a sink
+/// running at `rate_hz`), the preamp `preamp_db` and the crossfeed stage holding `stage`: a
+/// chain that can be set live passes the bypass, one that cannot has the stage in the config it
+/// starts with. The virtual speakers' stage follows the crossfeed stage when `speakers` is
+/// given; without it the graph is the plain one. The node is called [`NODE_NAME`].
 pub fn render_live_conf_full(
     points: &Points,
     preamp_db: f64,

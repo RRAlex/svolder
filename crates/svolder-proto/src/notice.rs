@@ -9,6 +9,7 @@ pub const COPYRIGHT: &str = "Copyright (C) 2026 the svolder authors";
 /// The licence and the warranty disclaimer in one line, for a screen with room for little.
 pub const LICENCE: &str = "Free software under the GNU GPL, version 3 or later, with NO WARRANTY.";
 
+#[cfg(test)]
 /// Where the licence's full text is published.
 pub const LICENCE_URL: &str = "https://gnu.org/licenses/gpl.html";
 

@@ -47,9 +47,6 @@ export const FACT_WORDS = {
   identifyBusy: 'The device cannot be asked to show itself just now.',
 };
 
-/** The labels of the facts, in the order they stand. */
-export const FACT_LABELS = Object.freeze(Object.values(FACT_WORDS.labels));
-
 /** One fact: its label and its value, which carries the label for a check to find. */
 const fact = (label, value, more = '', cls = '') => `<div class="fp-row fpd-fact">`
   + `<dt class="fp-row-label">${esc(label)}</dt>`

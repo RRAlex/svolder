@@ -293,7 +293,7 @@ of the sink as a PipeWire filter chain; its live controls and front ends are in
 [host-control.md](host-control.md). `apply` writes the chain's config and starts it; `remove` stops
 it and deletes what `apply` wrote; `status` reads the state file and checks that the chain runs.
 
-**The config.** `render_live_conf` (`crates/svolder-host/src/eq/live.rs`) renders a complete
+**The config.** `render_live_conf_full` (`crates/svolder-host/src/eq/live.rs`) renders a complete
 standalone PipeWire config for `pipewire -c <file>`: a preamp and sixteen biquad slots per channel
 (see host-control.md), with the FL and FR ports named. It differs by `Route`, chosen from the
 WirePlumber version (`wireplumber_version`, `Route::for_wireplumber`):

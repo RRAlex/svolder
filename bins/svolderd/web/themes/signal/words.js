@@ -139,7 +139,6 @@ export const SHELF = {
 /** The `+` of the line, the sheet it opens and the open area of a hop the person declared. */
 export const HOPS = {
   addMenu: 'Add to the chain…',
-  addNote: 'an amp, headphones, speakers',
   sheetTitle: (dac) => `After the ${dac}`,
   what: 'What is it',
   name: 'Name',

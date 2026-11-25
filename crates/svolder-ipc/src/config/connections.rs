@@ -6,7 +6,7 @@
 //!
 //! No writer here writes the token file or any other key the Connections settings do not show:
 //! the keys are named one by one below. The broker's password is written only by
-//! [`Config::update_mqtt`], when an edit changes it, and is never read back out to a client.
+//! [`Config::update_mqtt_noting`], when an edit changes it, and is never read back out to a client.
 
 use std::path::Path;
 
@@ -91,6 +91,12 @@ impl Config {
         })
     }
 
+    /// [`Config::update_mqtt_noting`] without the answer.
+    #[cfg(test)]
+    pub fn update_mqtt(path: &Path, edit: impl FnOnce(&mut MqttConfig)) -> Result<(), ConfigError> {
+        Self::update_mqtt_noting(path, edit).map(|_| ())
+    }
+
     /// Change the `[mqtt]` table of the file at `path` with `edit`, and rewrite only the keys of
     /// `enabled`, `host`, `port`, `username`, `password` and `commands` that change alters, as
     /// [`Config::update_mcp`] does for `[mcp]`. A username or password an edit takes away is
@@ -98,14 +104,8 @@ impl Config {
     ///
     /// The file's own mode is kept, as every writer here keeps it, except that a password
     /// written into a group- or world-accessible file narrows it to 0600; a file created here
-    /// is 0600.
-    pub fn update_mqtt(path: &Path, edit: impl FnOnce(&mut MqttConfig)) -> Result<(), ConfigError> {
-        Self::update_mqtt_noting(path, edit).map(|_| ())
-    }
-
-    /// [`Config::update_mqtt`] that answers whether it tightened the file's mode: a password
-    /// written into a file that group or others could read leaves it at 0600, and a front end
-    /// says so once.
+    /// is 0600. The answer says whether it tightened the file's mode: a password written into a
+    /// file that group or others could read leaves it at 0600, and a front end says so once.
     pub fn update_mqtt_noting(
         path: &Path,
         edit: impl FnOnce(&mut MqttConfig),

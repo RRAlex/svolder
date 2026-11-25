@@ -83,26 +83,100 @@ async fn watch(broker: &TestBroker) -> Watcher {
 
 /// A watcher that subscribes once the bridge has published the whole of the fake device's
 /// state, so what it is given first is the broker's retained copy of everything and nothing
-/// more is published but what a test causes.
+/// more is published but what a test causes. The bridge's messages are taken as they come, in
+/// whatever order and whether live or retained: it is the set of what has arrived that decides.
 async fn watch_settled(broker: &TestBroker) -> Watcher {
-    let keys = settled_keys();
     let mut first = watch(broker).await;
-    first
-        .wait_for(&device_topic("state"), STEP, |seen| {
-            let state = json(seen);
-            keys.iter().all(|key| state.get(key).is_some())
-        })
-        .await;
-    // The session asks for the firmware builds after its refresh, one at a time, and the last
-    // of them is the last thing it publishes.
-    first
-        .wait_for(&device_topic("dsp_firmware/state"), STEP, |_| true)
-        .await;
-    // The device's first discovery waits for its computer's (up to the bridge's start wait).
-    first
-        .wait_for(&config_topic("binary_sensor", "link"), STEP, |_| true)
-        .await;
+    let mut settle = Settle::new();
+    let deadline = tokio::time::Instant::now() + STEP;
+    while !settle.done() {
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match first.next(left).await {
+            Some(seen) => settle.note(&seen.topic, &seen.payload),
+            None => panic!("the bridge did not publish everything within {STEP:?}: {settle:#?}"),
+        }
+    }
     watch(broker).await
+}
+
+/// What `watch_settled` waits to have seen from the bridge, whichever order it came in: the
+/// device's availability and the bridge's, a state carrying every key of `settled_keys`, the
+/// firmware builds' state, and every discovery config the bridge publishes for the device
+/// (those of `commands = false` or those of `commands = true`: the topics differ by platform).
+#[derive(Debug)]
+struct Settle {
+    keys: Vec<String>,
+    configs: [Vec<String>; 2],
+    availability: bool,
+    bridge: bool,
+    state: bool,
+    firmware: bool,
+    seen: std::collections::BTreeSet<String>,
+}
+
+impl Settle {
+    fn new() -> Settle {
+        let registry = svolder_profiles::Registry::builtin().expect("the built-in profiles");
+        let profile = registry
+            .get("gungnir2-v2")
+            .expect("the gungnir2-v2 profile");
+        let device = svolder_mqtt::Device {
+            name: "fake",
+            unit_id: UNIT,
+            firmware: None,
+            computer: "computer",
+        };
+        let configs = [false, true].map(|commands| {
+            svolder_mqtt::discovery_configs(
+                "svolder",
+                "homeassistant",
+                profile,
+                &device,
+                commands,
+                &[],
+            )
+            .into_iter()
+            .map(|entry| entry.topic)
+            .collect()
+        });
+        Settle {
+            keys: settled_keys(),
+            configs,
+            availability: false,
+            bridge: false,
+            state: false,
+            firmware: false,
+            seen: Default::default(),
+        }
+    }
+
+    /// Take one message the bridge published.
+    fn note(&mut self, topic: &str, payload: &str) {
+        if topic == device_topic("availability") {
+            self.availability = true;
+        } else if topic == bridge_topic() {
+            self.bridge = true;
+        } else if topic == device_topic("dsp_firmware/state") {
+            self.firmware = true;
+        } else if topic == device_topic("state") {
+            let state: Json = serde_json::from_str(payload).unwrap_or(Json::Null);
+            self.state |= self.keys.iter().all(|key| state.get(key).is_some());
+        } else if topic.starts_with("homeassistant/") && !payload.is_empty() {
+            self.seen.insert(topic.to_string());
+        }
+    }
+
+    /// Whether everything has arrived.
+    fn done(&self) -> bool {
+        self.availability
+            && self.bridge
+            && self.state
+            && self.firmware
+            && self
+                .configs
+                .iter()
+                .any(|topics| topics.iter().all(|topic| self.seen.contains(topic)))
+    }
 }
 
 /// The keys the fake device's state carries once the bridge has published everything the
@@ -2288,4 +2362,70 @@ async fn a_recall_through_the_select_names_the_computers_part() {
     })
     .await
     .expect("test timed out");
+}
+
+/// The settle logic does not depend on the order the bridge publishes in: the bridge announces
+/// its configs sorted by topic, so the link's (`binary_sensor`) comes before the volume's
+/// (`sensor`), and a state may complete before either. A watcher that took the link config as
+/// the last message would subscribe again while the rest were still arriving, and be given them
+/// live, not retained.
+#[test]
+fn the_settle_waits_for_every_config_whatever_the_order() {
+    let mut settle = Settle::new();
+    let all_keys: serde_json::Map<String, Json> = settle
+        .keys
+        .iter()
+        .map(|key| (key.clone(), Json::from(0)))
+        .collect();
+    let state = Json::Object(all_keys).to_string();
+    let configs = settle.configs[0].clone();
+    let link = config_topic("binary_sensor", "link");
+    assert!(configs.contains(&link));
+    assert!(
+        configs.len() > 2,
+        "the device has more configs than its link"
+    );
+
+    // The bad order: state, firmware, availability, then the link config, with the rest of the
+    // configs still to come.
+    settle.note(&device_topic("state"), &state);
+    settle.note(&device_topic("dsp_firmware/state"), "1");
+    settle.note(&device_topic("availability"), "online");
+    settle.note(bridge_topic(), "online");
+    settle.note(&link, "{}");
+    assert!(!settle.done(), "the link config alone is not the whole set");
+    let (last, rest) = configs
+        .iter()
+        .filter(|topic| **topic != link)
+        .collect::<Vec<_>>()
+        .split_last()
+        .map(|(last, rest)| {
+            (
+                last.to_string(),
+                rest.iter().map(|t| t.to_string()).collect::<Vec<_>>(),
+            )
+        })
+        .expect("more than one config");
+    for topic in &rest {
+        settle.note(topic, "{}");
+    }
+    assert!(!settle.done(), "one config is still to come");
+    settle.note(&last, "");
+    assert!(!settle.done(), "a cleared config is not a published one");
+    settle.note(&last, "{}");
+    assert!(settle.done());
+
+    // The other order: the configs first, the state last.
+    let mut settle = Settle::new();
+    for topic in &configs {
+        settle.note(topic, "{}");
+    }
+    settle.note(&device_topic("availability"), "online");
+    settle.note(bridge_topic(), "online");
+    settle.note(&device_topic("dsp_firmware/state"), "1");
+    assert!(!settle.done(), "the state has not arrived");
+    settle.note(&device_topic("state"), "{}");
+    assert!(!settle.done(), "a partial state is not the whole");
+    settle.note(&device_topic("state"), &state);
+    assert!(settle.done());
 }

@@ -329,8 +329,8 @@ that branch rather than listed here.
   no daemon: the verb writes its own file and says nothing answers on that socket
   (`bins/svolder/src/commands/server_switch.rs`, `bins/svolderd/src/handler/server_switch.rs`).
 - [trade-off] **`daemon stop` waits the full request time for a silent daemon.** `svolder daemon
-  stop` sends its `Stop` on the default request timeout, 65 seconds, so a daemon that takes the line
-  and says nothing holds the verb that long (`bins/svolder/src/commands/daemon/lifecycle.rs`).
+  stop` sends its `Stop` on the default request timeout, 125 seconds, so a daemon that takes the
+  line and says nothing holds the verb that long (`bins/svolder/src/commands/daemon/lifecycle.rs`).
 - [trade-off] **A device can be pinned to a base profile.** The profile lists of the web page, the
   wizard and the TUI's editor offer the base profiles (`dac-common`, `amp-common`, `mesh-eq-5`),
   which have no product id, marked `base`, and the daemon accepts any registry name
@@ -608,7 +608,7 @@ that branch rather than listed here.
   keys for the listen addresses and the other MCP and web settings, the `[tui]` and `[autoeq]`
   rows and a device's own edits write `config.toml` in the TUI's own process and then ask the
   daemon to reload (`bins/svolder/src/tui/run/connect.rs:227`,
-  `bins/svolder/src/tui/run/look.rs:267`, `bins/svolder/src/tui/run/devices.rs:206`).
+  `bins/svolder/src/tui/run/look.rs:271`, `bins/svolder/src/tui/run/devices.rs:206`).
 - [bug] **On an amp in the tall tier the Controls rows can re-space when the level graphs
   change.** The graphs sit above or below the Host group by whether the meters stream, so when the
   meters stall and nothing is captured the pane can lay out differently, and a mouse wheel resting
@@ -634,7 +634,7 @@ that branch rather than listed here.
   size can stay until the next input too. The cause is in crossterm 0.29.0's unix reader (`try_read`
   returns at the first token of a batch of readiness events; the Esc case is likely the same); there
   is no upstream fix, and svolder does not vendor or fork the library for it
-  (`bins/svolder/tests/tui_pty/harness.rs:516`).
+  (`bins/svolder/tests/tui_pty/harness.rs`, `RESEND`).
 - [limit] **Over SSH in a VTE terminal a pairing code and the MCP token cannot reach the local
   clipboard.** VTE (GNOME Terminal, Ptyxis) ignores OSC 52, and only the Web UI box's link is a
   terminal hyperlink (OSC 8), so a code or token copied in a session with no display has no route
@@ -670,9 +670,6 @@ that branch rather than listed here.
   row never waits on a daemon; a request for the frames that connects and is not answered within 3 s
   (`Opened::Mute`) bars the connection for `FRAMES_RETRY`, 30 s, and the own capture feeds the row
   meanwhile (`bins/svolder/src/tui/run/host/frames.rs`).
-- [trade-off] **The footer has no tooltip.** The footer is only the setup wizard's key line, which
-  has no app state and gets no mouse-move events; the main screens' key words have tooltips on
-  their pane borders (`bins/svolder/src/tui/boxes/tooltip.rs:386`).
 - [trade-off] **Cover art is drawn on the device screen's Status pane only, and some terminals
   get half-blocks.** Other screens keep the picture but draw none. WezTerm and Konsole are never
   asked for the kitty or sixel protocol (the image library's own exclusion), so they show
@@ -720,11 +717,11 @@ that branch rather than listed here.
   line writes its keys short, `Tab ←→ ↑↓ · ↵ writes · Esc cancels`, with no word for moving
   between the fields or stepping one, since the full form (`Tab/⇧Tab ←→ moves · ↑↓ steps ·
   Enter writes · Esc cancels`) does not fit beside the three fields at 78 inner cells
-  (`bins/svolder/src/tui/screens/tone.rs`, `LINE_KEYS_SHORT`).
+  (`bins/svolder/src/tui/screens/tone/bands.rs`, `LINE_KEYS_SHORT`).
 - [trade-off] **The clipping-risk note is shortened at 80 columns.** The clipping-risk note drops
   "on loud masters" at 80 columns (`peaks at +6.0 dB — keep the volume at or below -6.0 dB to avoid
   clipping`), since the whole sentence does not fit the Bands block's bottom border there; from
-  about 92 columns it prints in full (`bins/svolder/src/tui/screens/tone.rs`).
+  about 92 columns it prints in full (`bins/svolder/src/tui/screens/tone/bands.rs`).
 - [trade-off] **A failed write does not stop a TUI preset load.** The TUI does not stop a preset
   load part-way on a failed write, unlike the CLI's `eq load`: every key's writes, presets included,
   are sent in order without waiting for the device's answer, and `take_intents` goes on past a
@@ -766,8 +763,8 @@ that branch rather than listed here.
 ### Web UI
 
 - [bug] **Some controls are faint or small.** Hairline edges of buttons and fields, in the pages and
-  the popups alike, fall under 3:1 in all four themes (291 pairs held in the contrast baseline,
-  Chromium), and 186 targets on the theme pages, none in a popup, are under 24 px or cut by an
+  the popups alike, fall under 3:1 in all four themes (329 pairs held in the contrast baseline,
+  Chromium), and 239 targets on the theme pages, none in a popup, are under 24 px or cut by an
   ancestor at phone width: hairline edges of active controls in all four themes, the graph's gap
   wash against its plot, Paper's dark red note, a guest's dimmed Signal table heads, Ember's 23 px
   `button.viz-graph` and 14 px `button.np-fold`, Paper's 20 px band steppers, Signal's slide
@@ -968,11 +965,12 @@ that branch rather than listed here.
   track with the picture's hash; the cover's box is fixed, so nothing moves, and waiting for the
   read would delay every track change (`bins/svolderd/src/host.rs`).
 - [trade-off] **A stream replays every ended job to a follower that opens or lags.** A family
-  replays the last state of up to 16 ended jobs, results included (512 KiB each), and a `progress`
-  payload has no bound, so a subscriber that lagged reads states it already had; states are
-  idempotent, and a front end must not count events. `stop_all` aborts a job given up on after its
-  bound, but a `spawn_blocking` thread it left runs on until it looks at its flag, and the runtime's
-  stop bound ends the process regardless; the bounded end is covered by the unit tests of the job
+  replays the last state of its newest ended jobs, up to 16 and up to 1 MiB of results together
+  (one result is at most 512 KiB; a `progress` payload over 64 KiB is dropped), so a subscriber that
+  lagged reads states it already had; states are idempotent, and a front end must not count
+  events. `stop_all` aborts a job given up on after its bound, but a `spawn_blocking` thread it
+  left runs on until its own timeouts (no job family uses a stop flag), and the runtime's stop
+  bound ends the process regardless; the bounded end is covered by the unit tests of the job
   bound, not by a process-level test (`bins/svolderd/src/handler/jobs.rs`,
   `crates/svolder-ipc/src/socket/protocol/timeouts.rs`).
 - [trade-off] **A client's wait for the first line of a stream has no bound of its own.**
@@ -1101,8 +1099,6 @@ that branch rather than listed here.
   sent: no lab mode lists zeros, drops sends and starts from the config on the first run, so the
   not-run look's ordering and bound cases are pinned by `control/tests/idle.rs` and host-e2e S1 and
   S2 only (`crates/svolder-host/src/eq/lab.rs`).
-- [test] **`the_reaper_thread_is_named` fails under heavy load.** It should wait on a condition
-  (`crates/svolder-host/src/eq/manage/tests/process.rs`).
 - [test] **Nothing guards the capture's held sink reader.** The daemon builds the capture's look
   with `sink.held()` so the two readers cost one `wpctl` call a beat; a test of the sink proves the
   sharing, and none proves the daemon's wiring uses it (`bins/svolderd/src/host.rs`).
@@ -1161,6 +1157,7 @@ that branch rather than listed here.
   the word "Status", dropping the wire's Command/Status distinction; harmless today because
   `ValueObject`, the only thing this renders, represents a device's reported readings and never
   carries a Command (`bins/svolder/src/format.rs`).
+
 ### TUI: device screen
 
 - [trade-off] **A history graph's columns are recomputed every frame.** `graph::columns` walks
@@ -1235,7 +1232,7 @@ that branch rather than listed here.
   taken name shows on screen only after a race; no pty case reaches it
   (`bins/svolder/src/tui/run/input.rs:30`).
 
-- - [debt] **The Linkwitz, Meier and Mid/Side bass numbers are placeholders.** Their names, ranges
+- [debt] **The Linkwitz, Meier and Mid/Side bass numbers are placeholders.** Their names, ranges
   and defaults are svolder's own choices; Mid/Side bass's own lag (about 1.9 ms at 120 Hz) is not
   shown as delay, and Bauer at 15 % is 15.06 dB of feed, just past bs2b's 15 dB limit
   (`crates/svolder-host/src/eq/crossfeed.rs`, `SPECS`). The preset names are wire ids: renaming one
@@ -1244,7 +1241,7 @@ that branch rather than listed here.
   limit turns crossfeed off with a note, but no rate in the engine's ranges gets there
   (`crates/svolder-host/src/eq/control/xf.rs`).
 - [test] **Most TUI loop tests wait on fixed real time.** `quit_after` deadlines remain in the loop
-  tests of `mouse`, `link`, `keys`, `exit`, `meters`, `writes`, `daemon`, `curve` and `devices`;
+  tests of `mouse`, `link`, `keys`, `exit`, `meters`, `writes`, `daemon`, `daemon_loss` and `curve`;
   with 300 ms of delay injected into a frame draw seven of them fail
   (`a_daemon_restarted_under_the_tui_is_reopened_without_a_key`,
   `a_double_click_on_a_bands_gain_opens_the_line_on_it`,
@@ -1288,7 +1285,7 @@ that branch rather than listed here.
   `bandWriter` moved to the core for Paper, and Ember's `tone-graph.js` still reads its steps and
   writes its bands through its own chain (it uses the core's `BAND_PARAM`)
   (`bins/svolderd/web/core/tone-drag.js`, `bins/svolderd/web/themes/ember/tone-graph.js`).
-- [trade-off] **The `ember-parts` fixture is 4.25 MB.** It holds the markup of every part of every
+- [trade-off] **The `ember-parts` fixture is about 4 MB.** It holds the markup of every part of every
   device kind, so the node check compares the browser-drawn page with the daemon's own drawing
   byte for byte; a smaller fixture would prove less (`scripts/web-checks/node/fixtures/ember-parts.json`).
 - [debt] **The theme style check is name-based, and a theme script that timed out may
@@ -1383,10 +1380,6 @@ that branch rather than listed here.
 - [limit] **nalgebra stays at 0.34.** `levenberg-marquardt` 0.15.0, the latest, pins nalgebra 0.34,
   so 0.35 waits for it; `generic-array` 0.14.7 (0.14.9 is out) and `matchit` 0.8.4 (0.8.6 is out)
   are held by their dependents too (`crates/svolder-profiles/Cargo.toml`).
-- [observed] **The Rust 1.100.0 and cargo-auditable paths are unproven until CI runs.** The release
-  image's cargo-auditable 0.7.7 and the 1.100.0 toolchain of the `check` workflow have not run
-  until CI or `make build-image` does; `make audit` writes its advisory database to
-  `~/.cargo/advisory-db` (`Makefile`, `.github/workflows/check.yml`).
 - [observed] **The `playing` check of Ember fails now and then in Firefox.** In the runs of
   0.31.2 it failed three times, with a 2 px overflow of the title marquee under load, a
   geckodriver websocket 405 and a websockets `InvalidMessage`, and each time passed when run alone;

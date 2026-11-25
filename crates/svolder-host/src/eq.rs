@@ -5,10 +5,10 @@
 //! computer plays, the systemd unit and the autostart entry that keep it running, and the
 //! state file that remembers what is applied.
 //!
-//! The text is pure: [`render_conf`], [`render_unit`] and [`render_desktop`] run no program and
-//! write nothing, and [`HostEqState::load`] and [`HostEqState::save`] touch only the state
-//! file. [`Host`] is what decides what to do with the text: it writes the
-//! files, runs the programs and keeps the chain running.
+//! The text is pure: [`live::render_live_conf_full`], [`render_unit`] and [`render_desktop`] run
+//! no program and write nothing, and [`HostEqState::load`] and [`HostEqState::save`] touch only
+//! the state file. [`Host`] is what decides what to do with the text: it writes the files, runs
+//! the programs and keeps the chain running.
 //!
 //! - `manage`: [`Host`], the manager of the chain, with [`ApplyRequest`] and [`Status`].
 //! - `process`: the process manager's plumbing: finding, starting and stopping the chain.
@@ -33,6 +33,7 @@
 //!   the target through `target.object`, and the caller makes it the default output. When the
 //!   target is unplugged the filter stays the default and plays into the next sink, filtered.
 
+#[cfg(test)]
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -166,6 +167,7 @@ fn builtin_type(kind: FilterKind) -> &'static str {
     }
 }
 
+#[cfg(test)]
 /// The complete standalone PipeWire config (`pipewire -c <file>`) of a filter chain applying
 /// `c` in front of the sink whose `node.name` is `target`, for `route`.
 ///

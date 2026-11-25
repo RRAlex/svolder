@@ -336,7 +336,7 @@ pub struct CrossfeedSettings {
     #[serde(default)]
     pub model: Model,
     /// The preset the numbers came from; `None` is Custom (the wire's word for it is the absence
-    /// of a preset, see [`CUSTOM_PRESET`]).
+    /// of a preset).
     #[serde(default)]
     pub preset: Option<String>,
     /// For Custom values, the preset they were edited from, so a screen can say "edited from
@@ -393,6 +393,7 @@ impl CrossfeedSettings {
     }
 }
 
+#[cfg(test)]
 /// The word a screen shows for values that came from no preset. On the wire a Custom state is
 /// `preset: None`, so no preset can clash with it; `EqView.preset` uses the lower-case `custom`.
 pub const CUSTOM_PRESET: &str = "Custom";
@@ -1160,8 +1161,8 @@ pub struct CrossfeedView {
     pub on: bool,
     /// The model's wire word.
     pub model: String,
-    /// The preset the numbers came from; `None` is Custom ([`CUSTOM_PRESET`]; `EqView.preset`
-    /// itself says `custom`).
+    /// The preset the numbers came from; `None` is Custom (`EqView.preset` itself says
+    /// `custom`).
     pub preset: Option<String>,
     /// For Custom, the preset the values were edited from ("Edited from bs2b default").
     pub edited_from: Option<String>,

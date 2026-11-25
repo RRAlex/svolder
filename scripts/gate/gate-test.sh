@@ -11,7 +11,7 @@ tmp=$(svtmp_dir gt) || exit 1
 trap 'rm -rf "$tmp"' EXIT
 # the test's own git must not see the caller's repository or configuration
 for v in $(compgen -e); do
-    case $v in GIT_* | SVOLDER_* | RUSTFLAGS | RUSTDOCFLAGS | CARGO_ENCODED_* | CARGO_PROFILE_* | CARGO_BUILD_* | RUSTC* | RUST_TEST_* | RUST_MIN_STACK | RUST_BACKTRACE | MAKEFLAGS | MFLAGS | MAKELEVEL | T) unset "$v" ;; esac
+    case $v in GIT_* | SVOLDER_* | RUSTFLAGS | RUSTDOCFLAGS | CARGO_ENCODED_* | CARGO_PROFILE_* | CARGO_BUILD_* | RUSTC* | RUST_TEST_* | RUST_MIN_STACK | RUST_BACKTRACE | MAKEFLAGS | MFLAGS | MAKELEVEL | T | NEXTEST) unset "$v" ;; esac
 done
 unset CARGO
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1

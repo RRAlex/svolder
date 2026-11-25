@@ -89,7 +89,7 @@ compute_blocked() {
     for v in $(compgen -e); do
         case $v in
             CARGO_BUILD_JOBS) ;;
-            SVOLDER_* | RUSTFLAGS | RUSTDOCFLAGS | CARGO_ENCODED_* | CARGO_PROFILE_* | CARGO_BUILD_* | RUSTC | RUSTC_WRAPPER | RUSTC_WORKSPACE_WRAPPER | CARGO_TARGET_*_LINKER | CARGO_TARGET_*_RUNNER | RUST_TEST_* | RUST_MIN_STACK)
+            NEXTEST | SVOLDER_* | RUSTFLAGS | RUSTDOCFLAGS | CARGO_ENCODED_* | CARGO_PROFILE_* | CARGO_BUILD_* | RUSTC | RUSTC_WRAPPER | RUSTC_WORKSPACE_WRAPPER | CARGO_TARGET_*_LINKER | CARGO_TARGET_*_RUNNER | RUST_TEST_* | RUST_MIN_STACK)
                 blocked="$v is set"; return ;;
         esac
     done

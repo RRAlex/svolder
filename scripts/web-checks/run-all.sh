@@ -434,16 +434,16 @@ run_pool() {
     wait
 }
 
-# Seconds a check took in a measured run (the quick gate): the longest start first so
+# Mean seconds a check took in the 0.39.4 and 0.39.5 release gates: the longest start first so
 # the long browser checks are not left for the end. A check not listed counts as 60.
 declare -A weight=(
-    [nightdrive_theme]=570 [signal_theme]=450 [paper]=300 [visualizer]=240 [effects_menu]=160
-    [nightdrive_phone]=90 [nightdrive_states]=90 [space_key]=45 [ember_link]=15 [modal]=80 [popups]=60 [devices_popup]=120 [eq_library]=120 [loudness_popup]=90 [setup_popup]=90 [crossfeed_popup]=90 [speakers_popup]=90 [scenes_popup]=150 [menu_theme_row]=60 [tone_overlay]=60 [contrast]=150 [phone_sweep]=175
-    [completeness]=100 [playing]=140 [tone_note]=120 [contract]=150 [frame_button]=140 [keys]=140
-    [nightdrive_sheet]=175 [arrange]=110 [tone_drag]=80 [core_rows]=75 [computer_core]=45 [computer_ember]=170 [computer_paper]=150 [computer_signal]=170 [signal_vu]=120 [sweep]=300
-    [effects_cycle]=55 [scroll]=40 [sources]=105 [smoke_page]=95 [smoke_quick]=6
-    [smoke_core]=145 [haze]=190 [touch]=100 [tone_touch]=100
-    [computer_nightdrive]=200 [ha_cards]=30
+    [nightdrive_theme]=535 [signal_theme]=440 [paper]=265 [visualizer]=255 [effects_menu]=200
+    [nightdrive_phone]=115 [nightdrive_states]=90 [space_key]=45 [ember_link]=15 [modal]=90 [popups]=395 [devices_popup]=570 [eq_library]=180 [loudness_popup]=160 [setup_popup]=180 [crossfeed_popup]=130 [speakers_popup]=105 [scenes_popup]=160 [menu_theme_row]=30 [tone_overlay]=35 [contrast]=495 [phone_sweep]=220
+    [completeness]=230 [playing]=315 [tone_note]=120 [contract]=200 [frame_button]=180 [keys]=170
+    [nightdrive_sheet]=165 [arrange]=115 [tone_drag]=60 [core_rows]=60 [computer_core]=40 [computer_ember]=280 [computer_paper]=175 [computer_signal]=285 [signal_vu]=175 [sweep]=60
+    [effects_cycle]=50 [scroll]=40 [sources]=115 [smoke_page]=95 [smoke_quick]=6
+    [smoke_core]=145 [haze]=200 [touch]=35 [tone_touch]=50
+    [computer_nightdrive]=515 [ha_cards]=25
 )
 by_weight() {
     local e script

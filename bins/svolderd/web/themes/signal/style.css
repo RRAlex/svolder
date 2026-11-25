@@ -727,7 +727,7 @@ span.sg-prm { border-color: transparent; cursor: default; }
   .sg-chip.sg-loudc { padding: 3px 48px; }
   .sg-st.sg-rb { width: 38px; height: 38px; margin-top: -19px; font-size: 19px; }
   .sg-st.sg-rb::before { content: ""; position: absolute; inset: -3px; }
-  .sg-opt, .sg-fold, .sg-link { min-height: 44px; }
+  .sg-opt, .sg-link { min-height: 44px; }
   .sg-link { min-width: 44px; }
   .sg-input, .sg-val { min-height: 44px; }
   .sg-vtrack { margin: 30px 8px 12px; }
@@ -760,7 +760,7 @@ span.sg-prm { border-color: transparent; cursor: default; }
 /* ---- the computer's level meters: two dials, three glows (a class on the section), Spectrum ---- */
 
 .sg-vu {
-  --sg-face: #130f0c; --sg-glow: rgba(240, 167, 58, .5); --sg-ink2: #f4eee5; --sg-lamp-off: #2a241d;
+  --sg-face: #130f0c; --sg-glow: rgba(240, 167, 58, .5); --sg-ink2: #f4eee5;
   min-width: 0;
 }
 .sg-vpane[hidden] { display: none; }

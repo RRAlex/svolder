@@ -13,8 +13,7 @@ use tower::ServiceExt;
 use super::*;
 use crate::web::router::router;
 use crate::web::test_support::{
-    Code, FakeDaemon, call, events_until, events_within, fake_daemon, get, open, page_model, post,
-    web, web_with,
+    Code, FakeDaemon, call, events_until, fake_daemon, get, open, page_model, post, web, web_with,
 };
 use crate::writer::Origin;
 
@@ -247,8 +246,29 @@ async fn the_scenes_event_goes_to_a_writer_and_to_nobody_else() {
     .await;
     let sent = event(&seen, "scenes").expect("a scenes event");
     assert_eq!(sent["scenes"][0]["name"], "First", "{sent}");
+    // The sentinel: a hop declared after the change reaches every open stream as a `fleet` event,
+    // so what a guest's and a read-only stream sent before it is everything the change could have
+    // sent.
+    let hop = svolder_ipc::config::Hop {
+        what: svolder_ipc::config::HopWhat::Declared {
+            kind: svolder_ipc::config::HopKind::Speakers,
+            name: "Studio monitors".to_string(),
+        },
+        note: None,
+        after: None,
+    };
+    svolder_ipc::Config::add_hop(&dac.dir.join("config.toml"), &hop).expect("the hop is added");
+    dac.daemon.reload_all().await.unwrap();
+    for page in [&guests, &read_only] {
+        page.fleet_changed.send_modify(|turn| *turn += 1);
+    }
+    let sentinel = |seen: &[(String, String)]| {
+        seen.iter()
+            .any(|(name, data)| name == "fleet" && data.contains("Studio monitors"))
+    };
     for body in [guest_body, off_body] {
-        let seen = events_within(body, |_| false, Duration::from_millis(1500)).await;
+        let seen = events_until(body, sentinel).await;
+        assert!(sentinel(&seen), "{seen:?}");
         assert!(seen.iter().any(|(name, _)| name == "model"), "{seen:?}");
         assert!(
             seen.iter()

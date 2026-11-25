@@ -1922,7 +1922,7 @@ version, and three entries (four while the daemon keeps scenes, below):
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.39.5 │
+│                          v0.39.7 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -1942,7 +1942,7 @@ nothing in the menu there.
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.39.5 │
+│                          v0.39.7 │
 │                                  │
 │             Settings             │
 │             Scenes z             │

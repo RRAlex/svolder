@@ -151,11 +151,13 @@ pub struct SpeakersResponse {
 
 impl SpeakersResponse {
     /// A tone on the left speaker alone: what the left and the right ear hear.
+    #[cfg(test)]
     pub fn left_only(&self) -> ([f64; 2], [f64; 2]) {
         (self.ll, self.lr)
     }
 
     /// A tone on the right speaker alone: what the left and the right ear hear.
+    #[cfg(test)]
     pub fn right_only(&self) -> ([f64; 2], [f64; 2]) {
         (self.rl, self.rr)
     }

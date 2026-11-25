@@ -8,6 +8,34 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.39.7
+
+A release for contributors: nothing you use changes.
+
+- Contributors: `make test` links with lld when `ld.lld` (or a versioned `ld.lld-NN`) is installed,
+  and every dev and test target of the Makefile uses the same linker setting, so going from one to
+  another rebuilds nothing because of the linker; release builds, packages, Docker images and CI
+  keep the system linker (`NO_LLD=1` turns lld off). `make test NEXTEST=1` runs the tests under
+  cargo-nextest, with the preamp lab and loudness tests and the tests that start a real MQTT broker
+  in capped pools. The scenes event test waits for a later event that reaches every page instead
+  of a fixed window.
+
+## 0.39.6
+
+A tidy-up release: nothing you use changes.
+
+- **Less dead code.** Test-only helpers in the host, IPC and protocol crates are compiled only for
+  tests, and code nothing called any more is gone from the web pages (core and the themes):
+  helpers, word keys and CSS rules left over from earlier layouts.
+- **Known issues brought up to date.** Entries for things already fixed are gone, and timeouts,
+  sizes and file pointers that had moved are corrected.
+- Contributors: svolder-host builds at opt-level 1 in dev and test builds (its lab and headroom
+  tests run in about half the time, same results); the web check runner weighs each check by its
+  measured duration; the mascot and MQTT reconnect tests run shorter with the same checks, and a new
+  test pins the reconnect wait's growth; the MQTT bridge tests settle on the set of what the bridge
+  published, in any order, so a loaded machine no longer fails them; `check-no-bluez` and
+  `check-tests-private` are listed in `.PHONY`.
+
 ## 0.39.5
 
 - **A volume glide that waited is judged again when it goes out.** A glide queued behind a write

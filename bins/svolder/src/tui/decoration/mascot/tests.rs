@@ -486,7 +486,10 @@ mod tricks {
         for month in 1..=12u8 {
             for day in 1..=31u8 {
                 if let Some(season) = Season::on(month, day) {
-                    dresses.push(looks::dress(Costume::Ice, Some(season), ms(300)));
+                    let dress = looks::dress(Costume::Ice, Some(season), ms(300));
+                    if !dresses.contains(&dress) {
+                        dresses.push(dress);
+                    }
                 }
             }
         }

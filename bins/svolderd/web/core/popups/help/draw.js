@@ -22,9 +22,6 @@ import { attr, esc } from '../../html.js';
 import { capsOf } from '../../keys.js';
 import { heading, keycap, rows } from '../frame.js';
 
-/** The ids of Help's three pages, in order. */
-export const PAGES = ['here', 'everywhere', 'about'];
-
 /** Help's own words. */
 export const WORDS = {
   page: 'The whole page',

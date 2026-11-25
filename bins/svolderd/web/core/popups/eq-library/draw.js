@@ -142,7 +142,6 @@ export const WORDS = {
   builtInRefusal: (name) => `${name} is built in: save the curve under a new name.`,
   importedRefusal: (name) => `${name} is imported: save the curve under a new name.`,
   computerRefusal: 'The computer\'s points are saved as a new preset, not over one.',
-  notPlayable: (why) => why,
 };
 
 /** The phrase of the daemon's words for a configuration file that is gone (it answers those as

@@ -43,7 +43,7 @@ The configuration on disk always has the stage OFF: a bypass that is bit-exact (
 `x` and `s` silent, `Cmix` `Gain 2` 0, so the output is the input). Turning it on is a `set-param`
 of `crossfeed_params` (the three paths' coefficients, the sum's gains, the delay in seconds and
 `Cmix`'s `Gain 2`), one call for both channels, with no rebuild and no gap. A chain that cannot be
-set live has the stage written into its configuration instead (`render_live_conf_with`).
+set live has the stage written into its configuration instead (`render_live_conf_full`).
 
 ## The models' maths
 

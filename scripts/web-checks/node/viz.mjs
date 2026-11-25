@@ -12,7 +12,7 @@ import {
 } from '../../../bins/svolderd/web/themes/ember/viz-colour.js';
 import {
   BANDS, BeatClock, DelayMedian, VIZ, VizModel, bandCentreHz, bandPos, decode, freqPos, posBand,
-  posFreq, rowBands,
+  posFreq,
 } from '../../../bins/svolderd/web/core/viz-model.js';
 
 let n = 0;
@@ -630,15 +630,6 @@ ok('bands_map_to_pixels_on_a_log_axis_from_20_hz_to_20_khz', () => {
   // Off the ends: clamped to the first and last band.
   assert.equal(posBand(-5, 1000), 0);
   assert.equal(posBand(2000, 1000), 239);
-  // A spectrogram column: the top row is the highest band, the bottom the lowest.
-  const rows = rowBands(200);
-  assert.equal(rows.length, 200);
-  assert.equal(rows[199], 0);
-  assert.ok(rows[0] >= 238, `top row ${rows[0]}`);
-  for (let y = 1; y < 200; y++) assert.ok(rows[y] <= rows[y - 1], `row ${y}`);
-  // On a phone card 360 px tall, one row never skips more than 2 bands, so none are lost.
-  const tall = rowBands(360);
-  for (let y = 1; y < 360; y++) assert.ok(tall[y - 1] - tall[y] <= 2);
   assert.ok(VIZ.F_MIN === 20 && VIZ.F_MAX === 20000);
 });
 ok('the_head_script_reads_the_key_the_card_keeps_its_choices_under', () => {

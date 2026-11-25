@@ -11,6 +11,3 @@ export function presetOf(presets) {
   if (name === null || name === undefined || name === '') return null;
   return { name, edited: /\bedited\b/.test(presets.status.tail ?? '') };
 }
-
-/** A preset as a chip names it: `Warm`, or `Warm, edited`. */
-export const presetName = (preset) => (preset.edited ? `${preset.name}, edited` : preset.name);

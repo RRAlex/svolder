@@ -36,6 +36,7 @@ pub const PASSPHRASE: FunctionId = FunctionId::one(250);
 pub const FIRMWARE_FAMILY: u8 = 210;
 /// Second byte of the read-only firmware version query, `210.2.<subsystem>`.
 pub const FIRMWARE_VERSION_QUERY: u8 = 2;
+#[cfg(test)]
 /// First byte of fault reports, `230.1` over-current, `230.2` over-temperature.
 pub const FAULT_FAMILY: u8 = 230;
 /// The status a device answers a passphrase-changing command with when it refused it.

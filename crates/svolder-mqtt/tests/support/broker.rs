@@ -370,6 +370,14 @@ impl Watcher {
         found.into_iter().flatten().collect()
     }
 
+    /// The next message of any topic, or `None` when none arrives within `within`.
+    pub async fn next(&mut self, within: Duration) -> Option<Seen> {
+        tokio::time::timeout(within, self.seen.recv())
+            .await
+            .ok()
+            .flatten()
+    }
+
     /// Everything that arrives within `within`, for a test that checks what did not.
     pub async fn collect(&mut self, within: Duration) -> Vec<Seen> {
         let mut all = Vec::new();

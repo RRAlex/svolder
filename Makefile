@@ -3,6 +3,41 @@
 
 CARGO ?= cargo
 
+# The targets that build the dev or test profile into target/ link with lld when it is installed
+# (ld.lld, or a versioned ld.lld-NN; GNU ld otherwise). Not when CI is set (GitHub's runners set
+# it) and not with NO_LLD=1. lld is reached through COMPILER_PATH, a directory whose `ld` points at
+# it, which gcc's linker driver searches before the system's `ld`: no rustc flag changes.
+# COMPILER_PATH is in cargo's fingerprint (the build scripts of ring and psm declare it), so every
+# target on the list below sets it the same way and they agree with each other: no target rebuilds
+# because of the linker setting. A hand `cargo` run without it rebuilds ring, psm and
+# what depends on them once, and `make` then rebuilds them again once. The install, release,
+# packaging, docker and release-profile targets are not on the list: they never see lld.
+# `make test` runs `cargo test`; with NEXTEST=1 and cargo-nextest installed, `cargo nextest run`
+# instead (opt-in: see docs/design/testing.md; not under CI).
+LLD := $(if $(or $(CI),$(NO_LLD)),,$(shell for l in ld.lld ld.lld-22 ld.lld-21 ld.lld-20 \
+  ld.lld-19; do command -v $$l && break; done 2>/dev/null))
+LLD_DIR = $(CURDIR)/target/lld-bin
+DEV_TARGETS = test check check-no-bluez check-tests-private clippy build docs-env tui-harness \
+  tui-hangup-check speakers-fixtures demo demo-dac demo-amp demo-computer demo-computer-amp \
+  demo-safe sim-app screenshots mascot-shots vu-shots web-icons vu-golden vu-golden-check \
+  paper-shots signal-shots nightdrive-shots web-checks web-checks-cold web-checks-quick \
+  web-checks-task web-checks-affected e2e host-e2e host-e2e-bits web-shots ha-shots \
+  speakers-catalogue-check
+ifneq ($(LLD),)
+$(shell mkdir -p "$(LLD_DIR)" 2>/dev/null && ln -sf "$(LLD)" "$(LLD_DIR)/ld" 2>/dev/null)
+endif
+# A read-only checkout cannot hold the link: GNU ld then, as before.
+ifneq ($(and $(LLD),$(shell test -x "$(LLD_DIR)/ld" && echo yes)),)
+LLD_TAIL := $(if $(COMPILER_PATH),:$(COMPILER_PATH))
+LLD_CP := $(if $(findstring $(LLD_DIR),$(COMPILER_PATH)),$(COMPILER_PATH),$(LLD_DIR)$(LLD_TAIL))
+$(DEV_TARGETS): export COMPILER_PATH := $(LLD_CP)
+endif
+NEXTEST_ON := $(if $(CI),,$(if $(filter 1,$(NEXTEST)),$(shell $(CARGO) nextest --version \
+  >/dev/null 2>&1 && echo yes)))
+TEST_RUN = $(if $(NEXTEST_ON),$(CARGO) nextest run,$(CARGO) test)
+NEXTEST_MISSING = $(if $(and $(filter 1,$(NEXTEST)),$(if $(NEXTEST_ON),,x)),echo 'make test: \
+  NEXTEST=1 but cargo-nextest is not available (or CI is set); running cargo test';)
+
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 # The user unit directory when PREFIX is the user's own ~/.local, the system one otherwise.
@@ -69,7 +104,7 @@ ASSETS = svolder_$(VERSION)_amd64.deb svolder_$(VERSION)_arm64.deb svolder-$(VER
 ARTIFACTS = svolder svolderd svolder-sim aarch64/svolder aarch64/svolderd aarch64/svolder-sim \
   $(ASSETS) RELEASE-NOTES.md
 
-.PHONY: gate gate-test vu-golden vu-golden-check speakers-fixtures speakers-catalogue-check tmp-snapshot tmp-leak-check tmp-base-test demo-knobs-check help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots mascot-shots vu-shots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots ha-shots gnome-shots web-snippets tests-check theme-css-check tui-hangup-check tui-harness web-checks web-checks-cold web-checks-quick web-checks-task web-touched web-checks-affected gate-fails paper-shots signal-shots nightdrive-shots e2e host-e2e host-e2e-bits preamp-lab preamp-lab-outcomes loudness-fit sim-app sim-app-test docker install install-service uninstall install-gnome-extension uninstall-gnome-extension gnome-extension-check help-check
+.PHONY: gate gate-test vu-golden vu-golden-check speakers-fixtures speakers-catalogue-check tmp-snapshot tmp-leak-check tmp-base-test demo-knobs-check help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots mascot-shots vu-shots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots ha-shots gnome-shots web-snippets tests-check theme-css-check tui-hangup-check tui-harness web-checks web-checks-cold web-checks-quick web-checks-task web-touched web-checks-affected gate-fails paper-shots signal-shots nightdrive-shots e2e host-e2e host-e2e-bits preamp-lab preamp-lab-outcomes loudness-fit sim-app sim-app-test docker install install-service uninstall install-gnome-extension uninstall-gnome-extension gnome-extension-check help-check check-no-bluez check-tests-private
 
 ##@ Start
 demo-knobs-check: ## Fail if the env line the demos start with does not run
@@ -408,18 +443,20 @@ audit: ## Fail on an advisory in Cargo.lock (needs network)
 # address holds.
 ##@ Start
 #: Runs the workspace's tests in a scratch home. Another selection leaves SVOLDER_TEST_PREBUILT unset,
-#: since it builds only that crate's binaries.
+#: since it builds only that crate's binaries. Links with lld when installed (not under CI; NO_LLD=1
+#: turns it off); NEXTEST=1 runs cargo-nextest instead of cargo test (one line says when it cannot).
 #: T=<cargo-args>   what cargo tests, such as '-p svolder-host' (default --workspace --all-features)
 test: deps-build ## Run all tests
 	@. scripts/tmp-base.sh; scratch=$$(svtmp_dir sv) || exit 1; \
 	trap 'rm -rf "$$scratch"' EXIT; \
 	mkdir "$$scratch/t" || exit 1; \
+	$(NEXTEST_MISSING) \
 	env -u SVOLDER_MCP_TOKEN -u SVOLDER_WEB_TOKEN -u SVOLDER_WEB_ENABLED -u SVOLDER_MCP_ENABLED \
 	  -u SVOLDER_WEB_LISTEN -u SVOLDER_MCP_LISTEN -u SVOLDER_WEB_URL TMPDIR="$$scratch/t" \
 	  XDG_CONFIG_HOME="$$scratch/config" \
 	  XDG_STATE_HOME="$$scratch/state" \
 	  XDG_DATA_HOME="$$scratch/data" XDG_CACHE_HOME="$$scratch/cache" SVOLDER_WIREPLUMBER="$$scratch/no-wireplumber" \
-	  SVOLDER_AUTOEQ_URL=http://127.0.0.1:9/ SVOLDER_SPEAKERS_URL=http://127.0.0.1:9/ $(if $(T),,SVOLDER_TEST_PREBUILT=1) $(CARGO) test $(or $(T),--workspace --all-features) \
+	  SVOLDER_AUTOEQ_URL=http://127.0.0.1:9/ SVOLDER_SPEAKERS_URL=http://127.0.0.1:9/ $(if $(T),,SVOLDER_TEST_PREBUILT=1) $(TEST_RUN) $(or $(T),--workspace --all-features) \
 	  || exit $$?; \
 	left=$$( { find "$$scratch/t" -mindepth 1 -maxdepth 1 ! \( -name svolder -type d \) -exec basename {} \;; \
 	  find "$$scratch/t/svolder" -mindepth 1 -maxdepth 1 ! -name 'unit-*' -exec basename {} \; 2>/dev/null; } ); \

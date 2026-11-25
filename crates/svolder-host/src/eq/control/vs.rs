@@ -185,6 +185,7 @@ impl EqControl {
 
     /// The store this controller plays sets from; the pin on the set a running chain holds lives
     /// in it, so the catalogue service must use this very store.
+    #[cfg(test)]
     pub fn speakers_store(&self) -> Option<Arc<Store>> {
         self.sp.store.clone()
     }
@@ -202,6 +203,7 @@ impl EqControl {
     }
 
     /// Whether the controller serves the speakers at all.
+    #[cfg(test)]
     pub fn serves_speakers(&self) -> bool {
         self.sp.store.is_some()
     }

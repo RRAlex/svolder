@@ -195,17 +195,6 @@ export function place(band) {
   }
 }
 
-/** Mark `id` chosen in place: its class and aria state, the roving tab stop, the box under it. */
-export function mark(band, id) {
-  for (const el of band.querySelectorAll('.sg-hop')) {
-    const on = el.dataset.hop === id;
-    el.classList.toggle('sg-cur', on);
-    el.setAttribute('aria-selected', String(on));
-    el.tabIndex = on ? 0 : -1;
-  }
-  place(band);
-}
-
 /**
  * The moving dashes of the wire in `band`: the turn each loop is at, in seconds, and where each
  * dash stands for it. `step(dt)` moves them on by `dt` seconds (0 leaves them); `apply()` sets the

@@ -40,9 +40,7 @@
 //                        pixels, on a log scale from 20 Hz to 20 kHz (place 0 is 20 Hz)
 //   bandPos(i, size), posBand(pos, size)    the place of band `i`'s centre, and the band a place
 //                        falls in (clamped to the first and the last)
-//   bandEdgeHz(i), bandCentreHz(i)          a band's lower edge and its centre, in Hz
-//   rowBands(height)     a spectrogram column's band for each row, row 0 (the top) the highest
-//   levelY(level, height) a level's row in a bar graph: 0 at the bottom, 1 at the top
+//   bandCentreHz(i)      a band's centre, in Hz
 //   FREQ_MARKS           the frequencies a faint scale marks
 //   VIZ                  the numbers (hold, smoothing, windows) as one frozen object
 //
@@ -89,7 +87,6 @@ export const FREQ_MARKS = Object.freeze([50, 100, 200, 500, 1000, 2000, 5000, 10
 const MAX_FLAGS = 8;
 
 const BANDS_PER_OCTAVE = 24;
-const OCTAVES = Math.log2(VIZ.F_MAX / VIZ.F_MIN);
 
 /** What a draw applies once the frames have stopped: the curves fall as in silence. */
 const SILENCE = Object.freeze({
@@ -413,11 +410,6 @@ export function posFreq(pos, size) {
   return VIZ.F_MIN * (VIZ.F_MAX / VIZ.F_MIN) ** (pos / size);
 }
 
-/** Band `i`'s lower edge, Hz. */
-export function bandEdgeHz(i) {
-  return VIZ.F_MIN * 2 ** (i / BANDS_PER_OCTAVE);
-}
-
 /** Band `i`'s centre, Hz (on the log scale, half a band above its lower edge). */
 export function bandCentreHz(i) {
   return VIZ.F_MIN * 2 ** ((i + 0.5) / BANDS_PER_OCTAVE);
@@ -434,16 +426,4 @@ export function bandPos(i, size) {
 export function posBand(pos, size) {
   const band = Math.floor(Math.log2(posFreq(pos, size) / VIZ.F_MIN) * BANDS_PER_OCTAVE);
   return Math.min(BANDS - 1, Math.max(0, band));
-}
-
-/** A spectrogram column's band for each of `height` rows, taken at the row's middle: row 0 (the
- * top) holds the highest. Between the 20 Hz and 20 kHz edges, so a tall card has several rows
- * for one low band and a short one skips bands. */
-export function rowBands(height) {
-  return Uint8Array.from({ length: height }, (_, y) => posBand(height - (y + 0.5), height));
-}
-
-/** The row of a level `v` of 0 to 1 in a graph `height` rows tall, row 0 at the top. */
-export function levelY(v, height) {
-  return (1 - Math.min(1, Math.max(0, v))) * height;
 }

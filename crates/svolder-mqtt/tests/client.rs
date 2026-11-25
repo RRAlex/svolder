@@ -303,25 +303,22 @@ async fn a_clear_is_sent_again_on_a_reconnect() {
     client.stop(STEP).await;
 }
 
-/// Nothing listening is tried again after two seconds, then four; a broker that appears on the
-/// port is connected to on the attempt after.
+/// Nothing listening is tried again after two seconds; a broker that appears on the port is
+/// connected to within the step limit. The doubling after the first wait is pinned by
+/// `the_wait_starts_at_two_seconds_and_doubles_to_a_minute`.
 #[tokio::test]
-async fn a_broker_that_is_not_there_is_tried_again_after_two_seconds_then_four() {
+async fn a_broker_that_is_not_there_is_tried_again_after_two_seconds() {
     let port = free_port();
     let (client, mut events) = Client::start(settings(port));
-    let mut waits = Vec::new();
-    for _ in 0..2 {
-        let lost = next_event(&mut events, |e| matches!(e, ClientEvent::Lost { .. })).await;
-        let ClientEvent::Lost { retry_in, .. } = lost else {
-            unreachable!()
-        };
-        waits.push(retry_in);
-    }
-    let rounded: Vec<u64> = waits
-        .iter()
-        .map(|w| (w.as_millis() as u64 + 500) / 1000)
-        .collect();
-    assert_eq!(rounded, [2, 4], "the waits were {waits:?}");
+    let lost = next_event(&mut events, |e| matches!(e, ClientEvent::Lost { .. })).await;
+    let ClientEvent::Lost { retry_in, .. } = lost else {
+        unreachable!()
+    };
+    assert_eq!(
+        (retry_in.as_millis() as u64 + 500) / 1000,
+        2,
+        "the wait was {retry_in:?}"
+    );
     let Link::Waiting { retry_at, .. } = client.link() else {
         panic!("waiting between attempts, got {:?}", client.link());
     };
@@ -331,6 +328,22 @@ async fn a_broker_that_is_not_there_is_tried_again_after_two_seconds_then_four()
     let _proxy = Proxy::on(port, broker.port).await;
     next_event(&mut events, |e| *e == ClientEvent::Connected).await;
     until_link(&client, |l| l == Link::Connected).await;
+    client.stop(STEP).await;
+}
+
+/// Two failures in a row wait two seconds, then four: the live client's failure count grows.
+#[tokio::test]
+async fn a_second_failure_in_a_row_waits_four_seconds() {
+    let (client, mut events) = Client::start(settings(free_port()));
+    let mut waits = Vec::new();
+    for _ in 0..2 {
+        let lost = next_event(&mut events, |e| matches!(e, ClientEvent::Lost { .. })).await;
+        let ClientEvent::Lost { retry_in, .. } = lost else {
+            unreachable!()
+        };
+        waits.push((retry_in.as_millis() as u64 + 500) / 1000);
+    }
+    assert_eq!(waits, [2, 4]);
     client.stop(STEP).await;
 }
 
