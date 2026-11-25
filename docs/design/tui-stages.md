@@ -36,7 +36,9 @@ graph never loses a row to the panel, and `render::draw` draws a toast as one li
 (`toast::draw_row`) instead of a box that would cover the panel. The panel's border is heavy
 (`border::THICK`) in `device::border_style`, the frame the keys are in, while the keys are in a row of
 it, and thin otherwise. The device screen's Tone pane keeps its own rows: the Loudness row and, with
-crossfeed playing, Model and Preset rows (`screens/device/tone_pane.rs`); `f` there is the bypass too.
+crossfeed playing, Model and Preset rows, which are indented under the row they belong to; with the EQ
+off and a short pane the points table folds into the Preset line (`screens/device/tone_pane.rs`);
+`f` there is the bypass too.
 
 ## Keys with a side
 

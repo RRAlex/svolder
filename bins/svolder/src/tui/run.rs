@@ -957,6 +957,7 @@ where
             watching.app.mascot.codes.clear();
             // The present moment, which a climb a press starts counts from.
             watching.app.now = Instant::now();
+            watching.app.unfold_focus();
             mouse::note_press(&mut watching.app, &event, Instant::now());
             let action = mouse::resolve(&turns.hits, event, &watching.app);
             // A press or a wheel step anywhere but on the Volume bar stops the climb.

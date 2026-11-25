@@ -277,6 +277,7 @@ impl App {
             self.tone.xf_note = note;
         }
         self.note_speakers_view();
+        self.unfold_focus();
         // A stage the view no longer has gives the keys back to the mode row.
         let gone = match self.tone.row {
             ToneRow::Ld(_) => !self.ld_shown(),
@@ -331,6 +332,28 @@ impl App {
             (point.f, point.g, point.q) = (f, g, q);
         }
         points
+    }
+
+    /// Whether the device screen's Tone pane has folded the computer's points table away: the EQ
+    /// is off and the pane, as last drawn, is too short for every point and every row under them.
+    /// No point is there to focus, step to or click while it is.
+    pub(crate) fn tone_folded(&self) -> bool {
+        // A pane never drawn (size 0) has folded nothing.
+        let size = self.drawn.tone_pane.get();
+        self.screen == Screen::Device
+            && self.on_computer()
+            && size.1 > 0
+            && crate::tui::screens::device::computer_folds(self, size)
+    }
+
+    /// A point the table folded away from under the cursor gives the keys back to the mode row. No
+    /// matter what folded the table or put the focus there (a flip, a resize or divider drag, the
+    /// tone screen, the DAC's loudness, a new view), the one rule runs before a key or a mouse
+    /// event acts, on the pane as last drawn, so no key edits a point that is not on the screen.
+    pub(crate) fn unfold_focus(&mut self) {
+        if matches!(self.tone.row, ToneRow::Point(_)) && self.tone_folded() {
+            self.tone.row = ToneRow::Mode;
+        }
     }
 
     /// The focused point, held inside the table.
@@ -389,6 +412,7 @@ impl App {
             ) => ToneRow::Band,
             (_, row) => row,
         };
+        self.unfold_focus();
         if self.screen == Screen::Device {
             self.cursor = self.cursor_over(on_switch);
         }
@@ -429,6 +453,13 @@ impl App {
         if eq.points.len() >= usize::from(eq.max.max(1)) {
             let max = eq.max;
             self.warn(format!("the computer EQ holds {max} points"));
+            return Vec::new();
+        }
+        // A folded table shows no point to add to: the key does nothing, and says why.
+        if self.tone_folded() {
+            self.warn(
+                "the points are folded away: turn the EQ on, or make the pane taller".to_string(),
+            );
             return Vec::new();
         }
         let at = eq.points.len();
@@ -561,7 +592,7 @@ impl App {
             KeyCode::Char(']') => self.step_point_q(at, Self::q_factor(true)),
             KeyCode::Char(digit @ '1'..='9') => {
                 let index = digit as usize - '1' as usize;
-                if index < self.computer_points().len() {
+                if index < self.computer_points().len() && !self.tone_folded() {
                     self.focus_point(index);
                 }
                 Vec::new()

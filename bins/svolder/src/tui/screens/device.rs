@@ -59,6 +59,7 @@ use status::{
     device_drawn, faults_fit, level_from_drawn, link_drawn, now_playing_drawn, passphrase_drawn,
     scene_drawn,
 };
+pub(crate) use tone_pane::computer_folds;
 #[cfg(test)]
 use tone_pane::tone_lines;
 use tone_pane::{LOUDNESS_BAR_AT, TonePane, tone_lines_in};
@@ -218,9 +219,13 @@ pub fn draw(
         (Some(eq), Some(area)) => {
             let inner = tier.block().inner(area);
             let size = (usize::from(inner.width), usize::from(inner.height));
+            app.drawn.tone_pane.set(size);
             Some(tone_lines_in(app, eq, theme, size))
         }
-        _ => None,
+        _ => {
+            app.drawn.tone_pane.set((0, 0));
+            None
+        }
     };
     let (mut rows, spectrum) =
         draw_controls(frame, controls_area, controls, app, theme, tier, hits);

@@ -142,7 +142,9 @@ impl App {
             // The chain's order: the mode and a row per point (the EQ), then the Loudness rows,
             // then the Space rows; the device pane has one row of each kind.
             let mut stops = vec![ToneRow::Mode];
-            stops.extend((0..self.computer_points().len()).map(ToneRow::Point));
+            if !self.tone_folded() {
+                stops.extend((0..self.computer_points().len()).map(ToneRow::Point));
+            }
             stops.extend(self.ld_stops().into_iter().map(ToneRow::Ld));
             stops.extend(self.xf_stops().into_iter().map(ToneRow::Crossfeed));
             let at = stops.iter().position(|r| *r == self.tone.row).unwrap_or(0);

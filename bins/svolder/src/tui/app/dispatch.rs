@@ -25,6 +25,7 @@ impl App {
     pub fn key(&mut self, key: KeyEvent) -> Vec<Intent> {
         // A key hides the tooltip.
         self.pointer.tooltip = None;
+        self.unfold_focus();
         let from = self.cursor_id();
         // A plain key stops the Volume's climb where it is, and lets go of a level bar held,
         // before it does what it does. A chord with control or alt (Ctrl-C included) drops both

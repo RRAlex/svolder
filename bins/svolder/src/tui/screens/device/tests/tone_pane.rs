@@ -430,3 +430,371 @@ fn the_pane_s_mode_arrows_keep_their_hits_when_the_chain_is_not_verified() {
     assert_eq!(hits.hit_at(at("‹"), row), Some(&Hit::ModePrev));
     assert_eq!(hits.hit_at(at("›"), row), Some(&Hit::ModeNext));
 }
+
+/// The computer side's pane on the stages fixture (loudness, crossfeed playing) with `points`
+/// points, the EQ `on` or off, drawn once at `(width, height)` so the app knows the pane's size.
+fn fold_app(on: bool, points: usize, size: (u16, u16)) -> App {
+    let mut app = mockup_app();
+    let mut eq = crate::tui::test_support::computer_eq_stages(crate::tui::app::Space::Crossfeed);
+    eq.on = on;
+    eq.points.truncate(points);
+    app.host.computer.eq = Some(eq);
+    app.flip_side();
+    assert!(app.on_computer());
+    drop(frame(&app, size.0, size.1));
+    app
+}
+
+/// The pane's rows at `(width, height)`, the pane's own cells only, trimmed.
+fn pane_rows(app: &App, size: (u16, u16)) -> Vec<String> {
+    text(&frame(app, size.0, size.1))
+        .iter()
+        .map(|row| {
+            row.chars()
+                .skip(usize::from(CONTROLS_WIDTH) + 1)
+                .collect::<String>()
+                .trim_end_matches(['│', ' '])
+                .to_string()
+        })
+        .collect()
+}
+
+/// The sub-rows of the computer's pane are indented two cells inside the label column: the
+/// Preset under Mode, and the Model and Preset rows under the crossfeed row. Their values stay
+/// in the column the rows above them use, and the DAC side's own Preset line does not move.
+#[test]
+fn the_computer_panes_sub_rows_are_indented_under_their_rows() {
+    for size in [(80, 24), (80, 40)] {
+        let app = fold_app(true, 8, size);
+        let rows = pane_rows(&app, size);
+        let find = |needle: &str| {
+            rows.iter()
+                .find(|row| row.contains(needle))
+                .unwrap_or_else(|| panic!("{needle}: {rows:#?}"))
+                .clone()
+        };
+        let col = |row: &str, word: &str| {
+            row.chars()
+                .collect::<Vec<_>>()
+                .windows(word.chars().count())
+                .position(|w| w.iter().collect::<String>() == word)
+        };
+        let mode = find("Mode");
+        let space = find("Space     ‹");
+        let model = find("Model");
+        let preset_xf = find("Default");
+        let preset_eq = rows
+            .iter()
+            .find(|row| row.contains("Preset") && !row.contains('‹'))
+            .cloned()
+            .expect("the EQ's Preset row");
+        let label_at = col(&mode, "Mode").expect("Mode");
+        assert_eq!(col(&space, "Space"), Some(label_at), "{size:?}");
+        for sub in [&preset_eq, &model, &preset_xf] {
+            let word = if sub.contains("Model") {
+                "Model"
+            } else {
+                "Preset"
+            };
+            assert_eq!(col(sub, word), Some(label_at + 2), "{size:?}: {sub}");
+        }
+        // values stay where they were: after the 10-cell label column
+        assert_eq!(col(&preset_eq, "Bass"), col(&mode, "‹"), "{size:?}");
+        assert_eq!(col(&model, "‹"), col(&mode, "‹"), "{size:?}");
+    }
+    // the DAC side's pane is as it was
+    let rows = pane_rows(&mockup_app(), (80, 24));
+    assert!(
+        rows.iter().any(|row| row.contains("Preset    custom")),
+        "{rows:#?}"
+    );
+}
+
+/// With the EQ off and a pane too short for every point and everything under the table, the
+/// table folds into the Preset line and the readout stays; tall, it stays, dimmed; with the EQ
+/// on it never folds.
+#[test]
+fn the_computer_points_table_folds_with_the_eq_off_in_a_short_pane() {
+    let size = (80, 24);
+    let app = fold_app(false, 8, size);
+    let rows = pane_rows(&app, size);
+    assert!(
+        rows.iter().any(|row| row.ends_with("Bass · 8 points")),
+        "{rows:#?}"
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.contains("Point") || row.contains("Freq"))
+    );
+    assert!(!rows.iter().any(|row| row.contains("60.0 Hz")));
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("at ") && row.contains("bass")),
+        "{rows:#?}"
+    );
+    assert!(rows.iter().any(|row| row.contains("Model")), "{rows:#?}");
+    // the blank row after Preset stays
+    let at = rows
+        .iter()
+        .position(|row| row.contains("Bass · 8"))
+        .expect("the line");
+    assert_eq!(rows[at + 1], "", "{rows:#?}");
+    assert!(rows[at + 2].contains("Loudness"), "{rows:#?}");
+
+    // tall: nothing folds and the points are dimmed
+    let tall = (80, 50);
+    let app = fold_app(false, 8, tall);
+    let rows = pane_rows(&app, tall);
+    assert!(!rows.iter().any(|row| row.contains("points")), "{rows:#?}");
+    assert!(rows.iter().any(|row| row.contains("Freq")), "{rows:#?}");
+    let buffer = frame(&app, tall.0, tall.1);
+    let y = text(&buffer)
+        .iter()
+        .position(|row| row.contains("105 Hz"))
+        .expect("a point");
+    let dim = (CONTROLS_WIDTH..buffer.area.width)
+        .filter_map(|x| buffer.cell((x, u16::try_from(y).unwrap())))
+        .any(|cell| cell.modifier.contains(Modifier::DIM));
+    assert!(dim, "the table is dimmed");
+
+    // EQ on at 80x24: scrolled, not folded
+    let app = fold_app(true, 8, size);
+    let rows = pane_rows(&app, size);
+    assert!(rows.iter().any(|row| row.contains("Freq")), "{rows:#?}");
+    assert!(!rows.iter().any(|row| row.contains("points")), "{rows:#?}");
+}
+
+/// A folded table's points are out of the walk: the arrows go from Mode to Loudness; a point
+/// that had the cursor when the table folds gives it to Mode; turning the EQ on unfolds it; and
+/// nothing is clickable where a folded row was.
+#[test]
+fn a_folded_table_is_skipped_by_the_arrows_and_takes_no_click() {
+    let size = (80, 24);
+    let mut app = fold_app(false, 8, size);
+    assert!(app.tone_folded());
+    app.pane = Pane::Tone;
+    app.tone.row = ToneRow::Mode;
+    app.key(crossterm::event::KeyEvent::from(KeyCode::Down));
+    assert_eq!(
+        app.tone.row,
+        ToneRow::Ld(crate::tui::app::Ld::Strength),
+        "Mode, then Loudness"
+    );
+    app.key(crossterm::event::KeyEvent::from(KeyCode::Up));
+    assert_eq!(app.tone.row, ToneRow::Mode);
+
+    // a point focused while the table was shown moves to Mode when it folds
+    let mut app = fold_app(true, 8, size);
+    app.pane = Pane::Tone;
+    app.focus_point(3);
+    let mut eq = app.host.computer.eq.as_deref().cloned().expect("eq");
+    eq.on = false;
+    app.host.computer.eq = Some(Box::new(eq));
+    drop(frame(&app, size.0, size.1));
+    app.note_computer_view();
+    assert!(app.tone_folded());
+    assert_eq!(app.tone.row, ToneRow::Mode);
+
+    // no point under the pointer where the first point's row was
+    let (buffer, hits) = crate::tui::test_support::drawn(&app, size.0, size.1);
+    let rows = text(&buffer);
+    let preset = rows
+        .iter()
+        .position(|row| row.contains("Bass · 8"))
+        .expect("line");
+    let x = CONTROLS_WIDTH + 12;
+    for y in 0..buffer.area.height {
+        assert!(
+            !matches!(hits.hit_at(x, y), Some(Hit::Point(_))),
+            "a point hit at row {y}: {rows:#?}"
+        );
+    }
+    assert!(preset > 0);
+
+    // the EQ turned on unfolds at once
+    let mut eq = app.host.computer.eq.as_deref().cloned().expect("eq");
+    eq.on = true;
+    app.host.computer.eq = Some(Box::new(eq));
+    assert!(!app.tone_folded());
+    app.tone.row = ToneRow::Mode;
+    app.key(crossterm::event::KeyEvent::from(KeyCode::Down));
+    assert!(matches!(app.tone.row, ToneRow::Point(_)));
+}
+
+/// The loudness readout never takes a point's row: with the EQ on and a short pane there is no
+/// readout line, and the table holds as many points as it does with the readout's rows not asked
+/// for; in a tall pane, where every point is in view, the readout shows.
+#[test]
+fn the_loudness_readout_never_costs_a_point_row() {
+    let size = (80, 24);
+    let points = |app: &App| {
+        pane_rows(app, size)
+            .iter()
+            .filter(|row| row.contains(" Hz") && row.contains(" dB"))
+            .count()
+    };
+    let app = fold_app(true, 8, size);
+    let rows = pane_rows(&app, size);
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.contains("at ") && row.contains("bass")),
+        "{rows:#?}"
+    );
+    // the same pane with no loudness stage keeps one more row for the table than the row
+    // itself leaves it
+    let with = points(&app);
+    let mut bare = fold_app(true, 8, size);
+    let mut eq = bare.host.computer.eq.as_deref().cloned().expect("eq");
+    eq.loudness = None;
+    bare.host.computer.eq = Some(Box::new(eq));
+    assert_eq!(
+        points(&bare),
+        with + 1,
+        "only the Loudness row itself takes a row"
+    );
+
+    let tall = (80, 50);
+    let app = fold_app(true, 8, tall);
+    let rows = pane_rows(&app, tall);
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("at ") && row.contains("bass")),
+        "{rows:#?}"
+    );
+}
+
+/// The computer's pane, EQ off with `points` points, drawn at `size` while the DAC side is shown
+/// (a band focused), so the app knows the pane's size when the side is flipped.
+fn dac_side_then_flip_app(points: usize, size: (u16, u16)) -> App {
+    let mut app = mockup_app();
+    let mut eq = crate::tui::test_support::computer_eq_stages(crate::tui::app::Space::Crossfeed);
+    eq.on = false;
+    eq.points.truncate(points);
+    app.host.computer.eq = Some(eq);
+    app.pane = Pane::Tone;
+    app.tone.row = ToneRow::Band;
+    drop(frame(&app, size.0, size.1));
+    assert!(!app.on_computer());
+    app
+}
+
+/// Whether a key's intents write a point.
+fn writes_a_point(intents: &[crate::tui::app::Intent]) -> bool {
+    format!("{intents:?}").contains("Set {")
+}
+
+/// A `C` flip from the DAC side onto a folded table leaves no point focused, and the keys that
+/// edit a point do nothing to a hidden one.
+#[test]
+fn flipping_to_a_folded_table_leaves_no_point_focused() {
+    let size = (80, 24);
+    let mut app = dac_side_then_flip_app(8, size);
+    app.flip_side();
+    assert!(app.on_computer());
+    assert!(app.tone_folded());
+    assert_eq!(app.tone.row, ToneRow::Mode);
+    for code in [KeyCode::Right, KeyCode::Left, KeyCode::Char('.')] {
+        let before = app.computer_points();
+        let intents = app.key(crossterm::event::KeyEvent::from(code));
+        assert!(!writes_a_point(&intents), "{code:?}: {intents:?}");
+        assert_eq!(app.computer_points(), before);
+    }
+}
+
+/// A resize that folds the table under a focused point gives the cursor to Mode before the next
+/// key acts.
+#[test]
+fn a_resize_that_folds_the_table_takes_the_cursor_off_a_point() {
+    let mut app = fold_app(false, 8, (80, 50));
+    app.pane = Pane::Tone;
+    app.focus_point(3);
+    assert!(!app.tone_folded());
+    drop(frame(&app, 80, 24));
+    assert!(app.tone_folded());
+    let before = app.computer_points();
+    let intents = app.key(crossterm::event::KeyEvent::from(KeyCode::Right));
+    assert_eq!(app.tone.row, ToneRow::Mode);
+    assert!(!writes_a_point(&intents), "{intents:?}");
+    assert_eq!(app.computer_points(), before);
+    // `a` on a folded table adds nothing out of sight
+    let intents = app.key(crossterm::event::KeyEvent::from(KeyCode::Char('a')));
+    assert!(intents.is_empty(), "{intents:?}");
+    assert_eq!(app.tone.row, ToneRow::Mode);
+}
+
+/// The pane's lines as plain text at an exact interior size, whatever the terminal could give.
+fn lines_at(app: &App, size: (usize, usize)) -> Vec<String> {
+    let theme = Theme::new(false);
+    let eq = app.profile.eq.as_ref().expect("a tone control");
+    super::super::tone_pane::tone_lines_in(app, eq, &theme, size)
+        .lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect()
+        })
+        .collect()
+}
+
+/// The fold counts exactly the rows the layout draws: with no Crossfeed row there is no blank row
+/// over what is under the table, so the table folds only below `6 + points` rows (Loudness and its
+/// readout) and, with a Crossfeed row and no Loudness, below `4 + points + 4`.
+#[test]
+fn the_fold_is_decided_at_the_exact_height_the_rows_need() {
+    for (loudness, crossfeed, need) in [(true, false, 6 + 8), (false, true, 4 + 8 + 4)] {
+        let mut app = fold_app(false, 8, (80, 24));
+        let mut eq = app.host.computer.eq.as_deref().cloned().expect("eq");
+        if !loudness {
+            eq.loudness = None;
+        }
+        if !crossfeed {
+            eq.crossfeed = None;
+        }
+        app.host.computer.eq = Some(Box::new(eq));
+        for height in need - 1..=need {
+            let folded = crate::tui::screens::device::computer_folds(&app, (80, height));
+            assert_eq!(
+                folded,
+                height < need,
+                "{loudness} {crossfeed}: pane {height}"
+            );
+            let shown = lines_at(&app, (80, height));
+            assert_eq!(
+                shown.iter().any(|row| row.contains("Freq")),
+                !folded,
+                "{shown:#?}"
+            );
+            assert!(shown.len() <= height || folded, "{shown:#?}");
+            if loudness && !folded {
+                assert!(shown.iter().any(|row| row.contains("at ")), "{shown:#?}");
+            }
+        }
+    }
+}
+
+/// A folded table says what it holds: `1 point`, `custom · N points` for no preset name, and just
+/// `custom` for no points and no name.
+#[test]
+fn a_folded_preset_line_counts_points_and_names_custom() {
+    let preset_line = |points: usize, name: Option<&str>| {
+        let mut app = fold_app(false, points, (80, 24));
+        let mut eq = app.host.computer.eq.as_deref().cloned().expect("eq");
+        eq.preset = name.map(str::to_string);
+        app.host.computer.eq = Some(Box::new(eq));
+        assert!(crate::tui::screens::device::computer_folds(&app, (80, 6)));
+        lines_at(&app, (80, 6))
+            .into_iter()
+            .find(|row| row.contains("Preset") && !row.contains('\u{2039}'))
+            .expect("the Preset line")
+            .trim_end()
+            .to_string()
+    };
+    assert!(preset_line(1, Some("Bass")).ends_with("Bass \u{b7} 1 point"));
+    assert!(preset_line(8, None).ends_with("custom \u{b7} 8 points"));
+    assert_eq!(preset_line(0, None).trim_start(), "Preset  custom");
+    assert!(preset_line(0, Some("Bass")).ends_with("Preset  Bass"));
+}

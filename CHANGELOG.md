@@ -8,6 +8,15 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.39.9
+
+- **The computer's Tone pane reads in stages, and folds what is off.** In the TUI's Tone control pane
+  on the computer's side, the EQ's Preset now sits indented under Mode, and crossfeed's Model and
+  Preset under Space, so each reads as part of the row above it. With the EQ off and a pane too
+  short for everything, the points table folds away: the Preset line says how many points it holds
+  (`custom · 8 points`), Loudness and Space move up under it, and turning the EQ on brings the table
+  back. The loudness readout under its row shows only where it fits, never in place of a point.
+
 ## 0.39.8
 
 - **The volume works the same in every theme, from one place.** Ember's knob, Paper's and Signal's

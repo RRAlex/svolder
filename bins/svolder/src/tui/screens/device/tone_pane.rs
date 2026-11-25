@@ -21,6 +21,9 @@ use crate::tui::screens::tone::computer_loudness as ld_tone;
 
 /// Columns the Tone pane's own label column takes.
 const TONE_FIELD: usize = 10;
+/// Cells a sub-row's label is indented inside the label column: the computer side's Preset under
+/// Mode, and Model and Preset under the Crossfeed row, so each reads as part of the row above it.
+const SUB_INDENT: usize = 2;
 /// Columns the word "Loudness" takes where it is written in a header rather than in a label
 /// column of its own: the word and the space after it.
 const LOUDNESS_FIELD: usize = 9;
@@ -180,14 +183,23 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
         theme,
         max_width,
     );
+    let points = app.computer_points();
+    let folded = computer_folds(app, (max_width, max_height));
     let preset = app
         .computer_eq()
         .and_then(|eq| eq.preset.clone())
         .unwrap_or_default();
+    // A folded table says what it holds in the Preset line.
+    let preset = match (folded, points.len()) {
+        (false, _) => preset,
+        (true, 0) => custom_or(preset),
+        (true, 1) => format!("{} \u{b7} 1 point", custom_or(preset)),
+        (true, n) => format!("{} \u{b7} {n} points", custom_or(preset)),
+    };
     let room = max_width.saturating_sub(CURSOR_WIDTH + TONE_FIELD);
     let preset = tone_row(
         vec![
-            widgets::rows::label("Preset", TONE_FIELD),
+            sub_label("Preset"),
             Span::raw(widgets::text::cut_to_cells(&preset, room)),
         ],
         false,
@@ -195,14 +207,14 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
         theme,
         max_width,
     );
-    let mut lines = vec![
-        mode,
-        preset,
-        Line::default(),
-        Line::from(Span::styled(POINT_TITLES, theme.style(Role::Dim))),
-    ];
+    let mut lines = vec![mode, preset, Line::default()];
+    if !folded {
+        lines.push(Line::from(Span::styled(
+            POINT_TITLES,
+            theme.style(Role::Dim),
+        )));
+    }
     let mut bands = Vec::new();
-    let points = app.computer_points();
     // The Crossfeed row (and its numbers under it, where the pane has the room) sit at the
     // bottom: the table gives up rows to them, scrolled to keep the focused point in view.
     let xf = app.crossfeed();
@@ -218,46 +230,27 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
             .collect(),
     };
     // The Loudness row sits over the Crossfeed row (the chain's order: the points, loudness,
-    // crossfeed), with its dim readout under it where the pane has the room.
+    // crossfeed). Its dim readout and the hint under it never take a point's row: they show only
+    // where every point is in view (or the table is folded away) and the row fits.
     let ld = app.loudness_view().filter(|_| app.ld_shown());
-    let ld_dim = match (ld, max_height) {
-        (None, _) => false,
-        (Some(_), usize::MAX) => true,
-        (Some(_), h) => h >= head + 2 + usize::from(xf.is_some()) + 2,
-    };
-    // The line saying the device's own loudness plays too, where there is room for it.
-    let said_inline = ld.is_some_and(|view| {
-        crate::tui::app::computer_loudness::readout(
-            view,
-            true,
-            false,
-            max_width.saturating_sub(CURSOR_WIDTH),
-        )
-        .contains(crate::tui::app::computer_loudness::DAC_HINT)
-    });
-    let ld_hint = ld_dim
-        && app.dac_loudness_on()
-        && !said_inline
-        && match max_height {
-            usize::MAX => true,
-            h => h >= head + 2 + usize::from(xf.is_some()) + 3,
-        };
-    let ld_rows = ld.map_or(0, |_| 1 + usize::from(ld_dim) + usize::from(ld_hint));
+    let ld_base = usize::from(ld.is_some());
+    // The table's own rows: a point and the gap row under it, which a folded table has not.
+    let table = usize::from(!folded);
     let (shown, gap) = match (xf, max_height) {
         (None, _) => (0, false),
-        (Some(_), usize::MAX) => (details.len(), true),
+        (Some(_), usize::MAX) => (details.len(), !folded),
         (Some(_), h) => {
-            let room = h >= head + 1 + 2 + details.len() + ld_rows;
-            (if room { details.len() } else { 0 }, room)
+            let room = h >= head + table + table + 1 + details.len() + ld_base;
+            (if room { details.len() } else { 0 }, room && !folded)
         }
     };
     let xf_rows = xf.map_or(0, |_| 1 + shown);
-    let tail = ld_rows + xf_rows;
     let reserved = match (xf, ld) {
         (None, None) => 0,
-        _ => tail + usize::from(gap),
+        _ => ld_base + xf_rows + usize::from(gap),
     };
     let visible = match max_height {
+        _ if folded => 0,
         usize::MAX => points.len(),
         h => h.saturating_sub(head + reserved).min(points.len()),
     };
@@ -265,6 +258,14 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
         usize::MAX => 0,
         _ => widgets::scroll::scroll_start(points.len(), visible, app.focused_point()),
     };
+    let spare = match max_height {
+        usize::MAX => usize::MAX / 2,
+        h => h.saturating_sub(head + reserved + visible),
+    };
+    let in_view = folded || visible == points.len();
+    let ld_dim = ld.is_some() && in_view && spare >= 1;
+    let ld_hint = ld_dim && dac_hint_wanted(app, max_width) && spare >= 2;
+    let tail = ld_base + usize::from(ld_dim) + usize::from(ld_hint) + xf_rows;
     for (at, point) in points.iter().enumerate().skip(first).take(visible) {
         bands.push(u16::try_from(lines.len()).unwrap_or(u16::MAX));
         let text = format!(
@@ -287,10 +288,10 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
         ));
     }
     // Under the table, at the pane's bottom where its height is known.
-    if tail > 0 {
+    if tail > 0 && !folded {
         let target = match max_height {
             usize::MAX => lines.len() + usize::from(gap),
-            h => h - tail,
+            h => h.saturating_sub(tail),
         };
         while lines.len() < target {
             lines.push(Line::default());
@@ -343,6 +344,73 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
         crossfeed,
         loudness,
     }
+}
+
+/// A sub-row's label: indented under the row it belongs to, in the pane's label column.
+fn sub_label(text: &str) -> Span<'static> {
+    widgets::rows::label(&format!("{}{text}", " ".repeat(SUB_INDENT)), TONE_FIELD)
+}
+
+/// The preset's name, `custom` where the view names none.
+fn custom_or(name: String) -> String {
+    match name.is_empty() {
+        true => "custom".to_string(),
+        false => name,
+    }
+}
+
+/// Whether the line saying the device's own loudness plays too wants a row of its own: the
+/// computer's loudness is shown, the device's is on, and the readout does not already say so.
+fn dac_hint_wanted(app: &App, max_width: usize) -> bool {
+    let Some(view) = app.loudness_view().filter(|_| app.ld_shown()) else {
+        return false;
+    };
+    let said_inline = crate::tui::app::computer_loudness::readout(
+        view,
+        true,
+        false,
+        max_width.saturating_sub(CURSOR_WIDTH),
+    )
+    .contains(crate::tui::app::computer_loudness::DAC_HINT);
+    app.dac_loudness_on() && !said_inline
+}
+
+/// How many lines sit under the Crossfeed (or Space) row on the computer side.
+fn detail_rows(app: &App) -> usize {
+    match (app.crossfeed(), app.space_now()) {
+        (None, _) | (Some(_), Space::Off) => 0,
+        (Some(_), Space::Crossfeed) => 2,
+        (Some(_), Space::Speakers) => 2 * usize::from(app.speakers().is_some()),
+    }
+}
+
+/// Whether the computer side's points table is folded away in a pane whose interior is `(width,
+/// height)`: the EQ is off, there is something under the table, and the pane is too short for
+/// every point and every row under them (Loudness, its readout and hint, Space with its sub-rows
+/// and the blank row over them). With the EQ on the table never folds; it scrolls.
+pub(crate) fn computer_folds(app: &App, (width, height): (usize, usize)) -> bool {
+    let Some(eq) = app.computer_eq() else {
+        return false;
+    };
+    if eq.on || height == usize::MAX {
+        return false;
+    }
+    let ld = app.loudness_view().filter(|_| app.ld_shown()).is_some();
+    let xf = app.crossfeed().is_some();
+    if !ld && !xf {
+        return false;
+    }
+    let under = match ld {
+        true => 2 + usize::from(dac_hint_wanted(app, width)),
+        false => 0,
+    } + match xf {
+        // the Crossfeed (or Space) row, its sub-rows, and the blank row over what is under, which
+        // only the layout with a Crossfeed row draws
+        true => 1 + detail_rows(app) + 1,
+        false => 0,
+    };
+    // the mode, the preset, the blank, the titles, the points and what is under them
+    height < 4 + app.computer_points().len() + under
 }
 
 /// The Crossfeed row of the pane: `Crossfeed ‹ on › Bauer · Chu Moy`, and where its `‹` and `›`
@@ -408,11 +476,11 @@ fn space_line(app: &App, theme: &Theme, max_width: usize) -> (Line<'static>, (us
 /// then how it sounds; for the crossfeed its model and preset, then its numbers; none for off.
 fn space_details(app: &App, theme: &Theme, max_width: usize) -> Vec<Line<'static>> {
     let dim = |text: String| {
-        let room = max_width.saturating_sub(CURSOR_WIDTH + 1);
+        let room = max_width.saturating_sub(CURSOR_WIDTH + SUB_INDENT + 1);
         Line::from(Span::styled(
             format!(
                 "{}{}",
-                " ".repeat(CURSOR_WIDTH),
+                " ".repeat(CURSOR_WIDTH + SUB_INDENT),
                 widgets::text::cut_to_cells(&text, room)
             ),
             theme.style(Role::Dim),
@@ -435,8 +503,8 @@ fn space_details(app: &App, theme: &Theme, max_width: usize) -> Vec<Line<'static
     }
 }
 
-/// The Model and Preset rows under the Crossfeed row while crossfeed plays: `Model      ‹ Bauer
-/// ›`, `Preset     ‹ Chu Moy ›`, each with where its `‹` and `›` sit.
+/// The Model and Preset rows under the Crossfeed row while crossfeed plays, each indented two
+/// cells inside the label field (`  Model     ‹ Bauer ›`, `  Preset    ‹ Chu Moy ›`), each with where its `‹` and `›` sit.
 fn xf_pick_lines(
     app: &App,
     view: &svolder_host::eq::crossfeed::CrossfeedView,
@@ -467,8 +535,8 @@ fn xf_pick_lines(
             let value = widgets::text::cut_to_cells(&value, room);
             let width = widgets::text::cells(&value);
             let spans = vec![
-                Span::styled(row.label(), head),
-                Span::raw(" ".repeat(TONE_FIELD - row.label().len())),
+                Span::styled(format!("{}{}", " ".repeat(SUB_INDENT), row.label()), head),
+                Span::raw(" ".repeat(TONE_FIELD.saturating_sub(SUB_INDENT + row.label().len()))),
                 Span::styled("\u{2039} ", arrow),
                 Span::styled(value, if focused { lit } else { Style::default() }),
                 Span::styled(" \u{203a}", arrow),

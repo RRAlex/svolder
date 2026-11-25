@@ -218,6 +218,9 @@ pub struct Drawn {
     pub controls_pending: std::cell::Cell<bool>,
     /// The tone screen's switch row.
     pub tone_switch: std::cell::Cell<bool>,
+    /// The interior, in cells, of the device screen's Tone pane in the frame last drawn, `(0, 0)`
+    /// where it drew none: what the computer side's points table folds by.
+    pub tone_pane: std::cell::Cell<(usize, usize)>,
     /// Where the last device frame drew the bar between its two panes, `None` where it drew no
     /// bar to move: another screen, one pane, or a terminal too narrow for two of 40 columns.
     pub split: std::cell::Cell<Option<divider::Split>>,
@@ -362,6 +365,7 @@ impl Default for Drawn {
             path_travel: std::cell::Cell::new(None),
             controls_pending: std::cell::Cell::new(false),
             tone_switch: std::cell::Cell::new(true),
+            tone_pane: std::cell::Cell::new((0, 0)),
             split: std::cell::Cell::new(None),
             held: std::cell::Cell::new(false),
             device_rows: std::cell::Cell::new(None),

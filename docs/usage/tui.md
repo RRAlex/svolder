@@ -382,18 +382,31 @@ pane keeps a Loudness row at the bottom, under the points table: `Loudness ‹ o
 a dim line of what the stage plays at the volume it read under it
 (`at 35 %: bass +7.3 · mids −7.3 dB`; the stage's shelf gains, not the response at three
 frequencies), and a dim "the DAC's loudness is on too" when the device's own Loudness plays as well.
+Those dim lines never take a point's row: they show only when every point is already in view (or
+the points table is folded, below) and the line fits.
 `←→` step the strength, `␣` turns it on and off (`Enter` too), and `r` sets the reference to the
 current volume; the tone screen (`e`) has the stage's own panel with its Reference row (see "The
 computer's stages" below). A daemon that does not offer loudness shows no row.
 
 Under it, where the daemon (or the TUI itself) serves the computer's crossfeed, the pane keeps the
 **Crossfeed** row, `Crossfeed ‹ on ›`, and, while crossfeed plays, a Model row and a Preset row
-under it: `Model      ‹ Bauer ›` and `Preset     ‹ Chu Moy ›`. `←→` or `␣` turn crossfeed on and
+under it, indented two cells to show they belong to it: `  Model    ‹ Bauer ›` and
+`  Preset   ‹ Chu Moy ›`. `←→` or `␣` turn crossfeed on and
 off on the first row, `←→` step the model or the preset round the ends on the others
 (a model's first preset loads with it), and `Enter` or `X` open the tone screen with the Space
 panel on the row. On a short pane the Model and Preset rows go first, then rows of the points
 table, which scrolls to keep the focused point in sight. A daemon that does not offer crossfeed
 shows no row.
+
+The computer's own Preset line, under Mode, is indented the same two cells. While the computer EQ
+is **off** and the pane is too short for every point and every row under them, the points table
+folds: its header and its point rows are gone, the Preset line reads `NAME · 8 points`
+(`1 point`; with no preset name it says `custom`, and a table with no points says just that
+name), and `↑↓` go from Mode straight to Loudness. A point that has the cursor when the table
+folds, however it folds (a resize, the `C` flip), gives it to Mode before the next key acts;
+`a` adds nothing while the table is folded and says why; and nothing in the pane answers a click
+where a folded row was. With the EQ on the table never folds (it scrolls), and
+with the EQ off and room for everything it stays, dimmed.
 
 Where the daemon also offers [virtual speakers](eq.md#virtual-speakers), that row becomes the
 **Space** row: `Space ‹ Virtual speakers ›`, a choice of **Off**, **Crossfeed** or **Virtual
@@ -1922,7 +1935,7 @@ version, and three entries (four while the daemon keeps scenes, below):
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.39.8 │
+│                          v0.39.9 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -1942,7 +1955,7 @@ nothing in the menu there.
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.39.8 │
+│                          v0.39.9 │
 │                                  │
 │             Settings             │
 │             Scenes z             │
