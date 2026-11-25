@@ -8,6 +8,33 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.39.5
+
+- **A volume glide that waited is judged again when it goes out.** A glide queued behind a write
+  that was slow to answer kept the volume it had read before it waited; if the device's knob was
+  turned down in the meantime, the glide could still be sent whole (54 straight to 99 on a
+  Gungnir 2, where the volume rule allows a few steps at a time above three quarters of the range).
+  It is now judged from the readings at the moment it is sent: it goes no higher than three
+  quarters of the range (or the level the volume already had above that) and stops there instead
+  of climbing on.
+- **The TUI's history graphs keep what they drew.** The host level line, the meters and the
+  Telemetry graphs no longer redraw past stretches at other heights from one frame to the next: a
+  drawn column keeps its height while the graph's span and width stay the same, and the graph moves
+  on one column at a time.
+- **The TUI's focused Transport key is boxed whole.** The highlight now covers the whole key, a
+  cell either side of the glyph (`▶` included), and is exactly the area the mouse takes for it.
+- **Signal: the meters beside the volume, the hops evenly spread.** The computer side's level
+  meters sit to the right of the volume, above the tone curve, at every width (they were a third
+  column on wide windows). The hops on the signal line stand at 1/(n+1), 2/(n+1) … of its width,
+  so three hops sit at a quarter, the middle and three quarters; a name too long for its place is
+  cut with an ellipsis and shown whole as its tooltip.
+- **New pictures in the README:** the computer side's tone screen with the stages strip and the EQ
+  panel open, and the web Sound popup on its EQ library tab.
+- Contributors: `make screenshots` also draws `docs/images/computer.webp`, and
+  `scripts/web-shot.py --sound` (run by `make web-shots`) draws `docs/images/web-sound.webp`; the
+  history graphs lay their column grid from a series' first sample (`history::columns`); the
+  release workflow refuses up front when the tag already has a published release.
+
 ## 0.39.4
 
 - **The computer's chain shows its stages and what it plays at.** Everywhere the computer's side is

@@ -858,16 +858,12 @@ span.sg-prm { border-color: transparent; cursor: default; }
 .sg-w3 .bloom.b { stroke: rgba(255, 170, 60, .30); stroke-width: 5; }
 .sg-w2 .sg-vrd .sg-vnum, .sg-w3 .sg-vrd .sg-vnum { text-shadow: 0 0 9px rgba(255, 170, 60, .28); }
 
-/* the third column from 1240 px (where the curve keeps 300 px), beside the volume from 720 px, after the
-   volume on a phone; below 1240 px the curve has its own row under the volume and the meters */
-@media (min-width: 1240px) {
-  .sg-open:has(> #sg-cvu) { grid-template-columns: 310px minmax(0, 1fr) 400px; }
-}
-@media (max-width: 1239px) {
-  #sg-cvu { order: 2; }
-  .sg-open:has(> #sg-cvu) #sg-ctone { order: 3; grid-column: 1 / -1; }
-  #sg-cvolume { order: 1; }
-}
+/* The meters sit in the top area at every width: beside the volume from 720 px, after it on a phone, and
+   always above the tone (the curve has the row under them, the whole width). */
+.sg-open:has(> #sg-cvu) #sg-cvolume { order: 1; }
+.sg-open:has(> #sg-cvu) #sg-cvu { order: 2; }
+.sg-open:has(> #sg-cvu) #sg-ctone { order: 3; grid-column: 1 / -1; }
+@media (min-width: 720px) { #sg-cvu { max-width: 640px; } }
 @media (max-width: 719px) {
   .sg-vface { padding: 6px 6px 8px; }
   .sg-vrd { gap: 6px; font-size: 12.5px; }

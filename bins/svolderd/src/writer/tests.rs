@@ -357,6 +357,7 @@ fn report_bands(stand: &Stand, bands: [i64; 6]) {
 
 mod climb;
 mod echo;
+mod glide;
 mod memory;
 mod modes;
 mod ordering;

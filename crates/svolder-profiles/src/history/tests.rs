@@ -535,3 +535,108 @@ fn an_unknown_aggregate_kind_decodes_and_reads_as_last() {
         [3.0]
     );
 }
+
+/// A level series of music-like peaks: a block every 21 ms, the level wandering between 0.05 and
+/// 0.95 on a fixed pseudo-random walk.
+fn wandering_series(seconds: u64) -> (Series, Instant) {
+    let t0 = origin();
+    let mut series = Series::new(Aggregate::Max, Window::TUI);
+    let mut state = 12_345u64;
+    let mut ms = 0;
+    while ms < seconds * 1_000 {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
+        series.push(
+            t0 + Duration::from_millis(ms),
+            0.05 + 0.9 * ((state >> 40) % 1_000) as f64 / 1_000.0,
+        );
+        ms += 21;
+    }
+    (series, t0)
+}
+
+/// A column that has been drawn keeps its height while the window moves within one column of
+/// time: only the newest column, still filling, may change between two frames.
+#[test]
+fn a_drawn_column_keeps_its_height_between_frames() {
+    let (series, t0) = wandering_series(400);
+    let (span, count) = (Duration::from_secs(300), 240);
+    // The window's grid starts at the series' first sample, one column being span / count.
+    let column = span / 240;
+    let base = t0 + column * 200;
+    let mut frames = Vec::new();
+    for step in 0..12u32 {
+        // Frames 100 ms apart, 1.25 s to a column, so they cross a column edge.
+        let now = base + Duration::from_millis(100) * step + Duration::from_millis(7);
+        frames.push((now, columns(&series, now, span, count)));
+    }
+    for pair in frames.windows(2) {
+        let (a, b) = (&pair[0].1, &pair[1].1);
+        // `b` is `a` shifted by `moved` columns, the newest ones aside.
+        let edge = |now: Instant| {
+            let since = now.duration_since(t0).as_nanos();
+            since.div_ceil(column.as_nanos())
+        };
+        let moved = (edge(pair[1].0) - edge(pair[0].0)) as usize;
+        let kept = count - moved - 1;
+        assert!(
+            a[moved..moved + kept] == b[..kept],
+            "an old column changed between frames at {:?}",
+            pair[1].0.duration_since(base)
+        );
+    }
+}
+
+/// Trimming the oldest samples does not move the column grid: with a window that keeps one
+/// minute, a series that has trimmed for a long while still keeps the columns in view as they
+/// were while the frames advance.
+#[test]
+fn a_trimmed_series_keeps_its_grid() {
+    let t0 = origin();
+    let window = Window {
+        bin: Duration::from_millis(250),
+        keep: Duration::from_secs(60),
+        capacity: 14_400,
+    };
+    let mut series = Series::new(Aggregate::Max, window);
+    let mut state = 99u64;
+    let mut ms = 0;
+    while ms < 300_000 {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
+        series.push(
+            t0 + Duration::from_millis(ms),
+            0.05 + 0.9 * ((state >> 40) % 1_000) as f64 / 1_000.0,
+        );
+        ms += 21;
+    }
+    assert!(
+        series
+            .samples()
+            .next()
+            .is_some_and(|(at, _)| at > t0 + Duration::from_secs(200))
+    );
+    let (span, count) = (Duration::from_secs(30), 60);
+    let column = span / 60;
+    let edge = |now: Instant| {
+        now.duration_since(t0)
+            .as_nanos()
+            .div_ceil(column.as_nanos())
+    };
+    let frames: Vec<(Instant, Vec<Option<f64>>)> = (0..8u32)
+        .map(|step| {
+            let now = t0 + Duration::from_millis(300_000 + 100 * u64::from(step) + 7);
+            (now, columns(&series, now, span, count))
+        })
+        .collect();
+    for pair in frames.windows(2) {
+        let moved = (edge(pair[1].0) - edge(pair[0].0)) as usize;
+        let kept = count - moved - 1;
+        assert!(
+            pair[0].1[moved..moved + kept] == pair[1].1[..kept],
+            "a column in view changed"
+        );
+    }
+}

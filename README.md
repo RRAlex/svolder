@@ -52,6 +52,12 @@ knob, its buttons and its controls on the left and the tone control in EQ mode o
 curve, the band table and the preset list; and under the footer a strip of recent volume bars with
 the marks of a Warm and a Sennheiser HD 800 S recall">
 
+<img src="docs/images/web-sound.webp" width="66%" alt="The web UI's Sound popup open on its EQ
+library tab, over the dimmed page: the tabs EQ library, Loudness, Crossfeed and Virtual speakers,
+the pills AutoEq, Upload a file and Saved presets, a search for hd 650 with its one headphone and
+three measurements (the recommended one chosen), and under them the preview graph of the target,
+the fit and the shaded gap, with the fit and worst-miss numbers below">
+
 ### Web themes on a phone
 
 <img src="docs/images/web-phone-paper.webp" width="48%" alt="Paper on a phone: squared paper with a
@@ -80,6 +86,11 @@ R VU meters with their needles on the 0 VU scale">
 <img src="docs/images/tone.webp" width="100%" alt="The tone-control screen of a Gungnir 2 with the
 Sennheiser HD 800 S correction from AutoEq, measured by oratory1990, fitted to its five bands: the
 response curve, the correction's target and its filters">
+
+<img src="docs/images/computer.webp" width="100%" alt="The tone-control screen on the computer side,
+the target switch set to Computer: the response curve of the Bass preset with its correction pane, the
+stages strip under it with EQ, Loudness, Space and Bypass and the EQ's panel open on its table of
+nine points, the first one selected">
 
 <img src="docs/images/amp.webp" width="100%" alt="The device screen of an Aegir 2 amplifier,
 powered on: its controls, its L and R meters as bars with a class-A block, the live part filled and

@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // The line of the theme Signal, drawn: the wire and its dots as SVG, each hop's label, the box
-// round the chosen one. Hops stand evenly between 10 % and 90 % of the band's width, so every
+// round the chosen one. Hop k of n stands at k/(n+1) of the band's width, so every
 // coordinate is a percentage and nothing here needs the band's size. No markup carries a `style`
 // attribute: the labels' places and the box's go through the CSSOM (`place`). The moving dashes
 // are moved by `createFlow`, which only sets `stroke-dashoffset`.
@@ -22,8 +22,9 @@ const BOX_PX = 200;
 const STEP_PX = 16;
 const PERIOD_S = { before: 1.1, after: 1.6 };
 
-/** Where hop `i` of `n` stands, in percent of the band's width. */
-export const xOf = (i, n) => (n === 1 ? 50 : 10 + (80 * i) / (n - 1));
+/** Where hop `i` of `n` (counting from 0) stands, in percent of the band's width: k/(n+1) for the
+ * k-th (3 hops: 1/4, 1/2, 3/4), which centres the line and spaces the hops and the two ends alike. */
+export const xOf = (i, n) => (100 * (i + 1)) / (n + 1);
 
 const pct = (x) => `${x.toFixed(2)}%`;
 
@@ -176,7 +177,8 @@ export const stub = (page) => (page.host ? '' : NOT_WATCHED);
 export function place(band) {
   const labels = band.querySelectorAll('.sg-hop');
   const n = labels.length;
-  const width = n > 1 ? 80 / (n - 1) : 80;
+  // A label's slot is the distance between two hops; a name longer than it is cut with an ellipsis.
+  const width = 100 / (n + 1);
   for (const el of labels) {
     el.style.left = `${el.dataset.x}%`;
     el.style.width = `min(${LABEL_PX}px, ${width.toFixed(2)}%)`;

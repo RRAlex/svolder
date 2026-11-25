@@ -24,8 +24,8 @@ the needle's own settling.
   the_now_playing_bar_clears_its_buttons_at_390_360_320   no part of the bar's row leaves it or lies over another,
                                         the progress bar clear of the transport buttons, no scroll
   the_layout_holds_at_390_900_1020_1239_1240_1241_1280   no horizontal scroll, dials inside the area and side by
-                                        side, the curve at least 300 px wide from 720 px, the third column from
-                                        1240 px, beside the volume below it
+                                        side, the curve at least 300 px wide from 720 px, the dials above the
+                                        tone at every width and, from 720 px, beside the volume
   reduced_motion_jumps_the_needle_to_the_settled_value   prefers-reduced-motion: one frame and two animation
                                         frames later the needles stand at the model's angle (an eased needle would
                                         not); the lamp lights; the Spectrum line is drawn when bands arrive
@@ -397,7 +397,7 @@ def markup(b, d):
 
 def layout(b, d):
     load(b, d)
-    # the widths: the phone, the two-row layout, the breakpoint of the third column and a step either side
+    # the widths: the phone, the two-row layout and the steps either side of the old third column's breakpoint
     for w, h in ((390, 844), (900, 1000), (1020, 1000), (1239, 1100), (1240, 1100), (1241, 1100), (1280, 1100)):
         b.resize(w, h)
         time.sleep(0.6)
@@ -408,13 +408,12 @@ def layout(b, d):
           return { scroll: document.documentElement.scrollWidth - window.innerWidth,
             inside: faces.every((r) => r.left >= area.left - 1 && r.right <= area.right + 1 && r.width > 100),
             curve: g.width, side: Math.abs(faces[0].top - faces[1].top) < 4 && faces[1].left > faces[0].right - 1,
-            third: faces[0].left > g.right - 1, beside: faces[0].left > v.right - 1 && faces[0].top < v.bottom }; })()""")
+            above: Math.max(...faces.map((r) => r.bottom)) <= g.top + 1, beside: faces[0].left > v.right - 1 && faces[0].top < v.bottom }; })()""")
         ok = got['scroll'] <= 0 and got['inside'] and (got['curve'] >= 300 or w < 720)
         check(f'the_layout_holds_at_{w}: no scroll, dials inside, curve {got["curve"]:.0f} px', ok, got)
         check(f'  the dials are side by side at {w}', got['side'], got)
-        if w >= 1240:
-            check(f'  and they are the third column at {w}', got['third'], got)
-        elif w >= 720:
+        check(f'  and they are above the tone at {w}', got['above'], got)
+        if w >= 720:
             check(f'  and they are beside the volume at {w}', got['beside'], got)
 
 

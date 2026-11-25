@@ -223,16 +223,22 @@ for browser in firefox chromium; do
     done
 done
 
-# The README's two pictures, lossless WebP as make screenshots encodes its stills.
+# The Sound popup on its EQ library tab, the default theme, a headphone searched for and one
+# measurement previewed (a daemon and an AutoEq fixture of its own, made by web-shot.py).
+timeout 180 python3 "$root/scripts/web-shot.py" --sound "$out/chromium-desk-sound.png" 1280 1000 \
+    || { echo "web-shots: chromium failed on the Sound popup" >&2; exit 1; }
+[ -s "$out/chromium-desk-sound.png" ] || { echo "web-shots: chromium drew no Sound popup" >&2; exit 1; }
+
+# The README's pictures, lossless WebP as make screenshots encodes its stills.
 mkdir -p "$images"
-for pair in phone:web-phone desk:web-desktop; do
-    ffmpeg -v error -y -fflags +bitexact -i "$out/chromium-${pair%%:*}-dac.png" \
+for pair in phone-dac:web-phone desk-dac:web-desktop desk-sound:web-sound; do
+    ffmpeg -v error -y -fflags +bitexact -i "$out/chromium-${pair%%:*}.png" \
         -map_metadata -1 -flags:v +bitexact -c:v libwebp -lossless 1 -compression_level 6 \
         "$images/${pair#*:}.webp"
     size=$(stat -c %s "$images/${pair#*:}.webp")
     if [ "$size" -gt 300000 ]; then
         # Too big lossless at 2x: the same picture at a near-lossless quality.
-        ffmpeg -v error -y -fflags +bitexact -i "$out/chromium-${pair%%:*}-dac.png" \
+        ffmpeg -v error -y -fflags +bitexact -i "$out/chromium-${pair%%:*}.png" \
             -map_metadata -1 -flags:v +bitexact -c:v libwebp -quality 92 -compression_level 6 \
             "$images/${pair#*:}.webp"
         size=$(stat -c %s "$images/${pair#*:}.webp")

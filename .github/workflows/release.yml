@@ -289,6 +289,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # This job is the only publisher. A release published by hand for the tag would make the
+          # Publish step fail with a bare HTTP 422 after the whole upload; refuse here instead.
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION" --jq .id > /dev/null 2>&1; then
+            echo "::error::v$VERSION is already published (not by this workflow). Delete that release, keep the tag, and re-run this job."
+            exit 1
+          fi
           cd src/target/dist
           id=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" -f "tag_name=v$VERSION" \
             -f "target_commitish=$GITHUB_SHA" -f "name=svolder $VERSION" -F draft=true --jq .id)

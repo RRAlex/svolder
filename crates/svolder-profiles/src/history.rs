@@ -67,8 +67,8 @@ pub enum Aggregate {
 pub struct Series {
     /// The samples, oldest first.
     samples: VecDeque<(Instant, f64)>,
-    /// When the bin the newest sample stands for began.
-    bin_start: Option<Instant>,
+    /// The first sample's time, kept as the samples age out: the columns' grid is laid from it.
+    origin: Option<Instant>,
     /// What a sample landing in the newest bin does to it.
     aggregate: Aggregate,
     /// How the samples are binned and aged.
@@ -80,7 +80,7 @@ impl Series {
     pub fn new(aggregate: Aggregate, window: Window) -> Series {
         Series {
             samples: VecDeque::new(),
-            bin_start: None,
+            origin: None,
             aggregate,
             window,
         }
@@ -95,10 +95,12 @@ impl Series {
         if !value.is_finite() {
             return;
         }
-        let same_bin = match (self.bin_start, self.samples.back_mut()) {
-            (Some(start), Some(_)) => at.saturating_duration_since(start) < self.window.bin,
-            _ => false,
-        };
+        self.origin.get_or_insert(at);
+        // A sample is stamped where its bin began, so the newest one says when its bin did.
+        let same_bin = self
+            .samples
+            .back()
+            .is_some_and(|&(start, _)| at.saturating_duration_since(start) < self.window.bin);
         match self.samples.back_mut() {
             Some(newest) if same_bin => {
                 newest.1 = match self.aggregate {
@@ -108,7 +110,6 @@ impl Series {
             }
             _ => {
                 self.samples.push_back((at, value));
-                self.bin_start = Some(at);
             }
         }
         // The newest sample at or before the keep stays: it says what held before the next one.
@@ -139,8 +140,8 @@ impl Series {
         for sample in earlier.into_iter().rev() {
             self.samples.push_front(sample);
         }
-        if self.bin_start.is_none() {
-            self.bin_start = self.samples.back().map(|&(at, _)| at);
+        if let Some(&(oldest, _)) = self.samples.front() {
+            self.origin = Some(self.origin.map_or(oldest, |held| held.min(oldest)));
         }
         while self.samples.len() > self.window.capacity {
             self.samples.pop_front();
@@ -155,7 +156,7 @@ impl Series {
     /// Forgets every sample.
     pub fn clear(&mut self) {
         self.samples.clear();
-        self.bin_start = None;
+        self.origin = None;
     }
 
     /// How many samples it holds.
@@ -237,28 +238,51 @@ pub fn aggregate_of(profile: &Profile, id: FunctionId) -> Aggregate {
     }
 }
 
-/// `count` half-cell columns covering `[now - span, now)`: each the series' own aggregate of the
-/// samples inside it, the previous value carried through a column with none, `None` before the
-/// first sample. A sample older than the span still carries into the columns after it; one at or
-/// after `now` is not counted.
+/// `count` half-cell columns covering `span`, the newest ending at the grid line at or after
+/// `now`: each the series' own aggregate of the samples inside it, the previous value carried
+/// through a column with none, `None` before the first sample. A sample older than the span still
+/// carries into the columns after it; one at or after `now` is not counted.
+///
+/// The grid is laid from the series' first sample, one column being `span / count` wide, so a
+/// sample stays in the same column for as long as `span` and `count` hold: a column that has
+/// been drawn keeps its height as time passes, the window moving a column at a time and only the
+/// newest column, still filling, changing. A different `span` or `count` is a different grid and
+/// bins the history anew.
 pub fn columns(series: &Series, now: Instant, span: Duration, count: usize) -> Vec<Option<f64>> {
     let mut out: Vec<Option<f64>> = vec![None; count];
-    if count == 0 || span.is_zero() {
+    let span_ns = span.as_nanos();
+    if count == 0 || span_ns == 0 {
         return out;
     }
-    let span_ns = span.as_nanos() as f64;
-    // The samples older than the span come first: the newest of them carries into the window.
-    let first = series
+    let Some(origin) = series.origin else {
+        return out;
+    };
+    let width = (span_ns / count as u128).max(1) as i128;
+    // Nanoseconds from the grid's origin; negative before it.
+    let since = |at: Instant| match at.checked_duration_since(origin) {
+        Some(after) => after.as_nanos() as i128,
+        None => -(origin.duration_since(at).as_nanos() as i128),
+    };
+    // The window's last column is the one `now` falls in, or ends on.
+    let last = (since(now) + width - 1).div_euclid(width) - 1;
+    let first = last - count as i128 + 1;
+    // The samples older than the window come first: the newest of them carries into it.
+    let begin = series
         .samples
-        .partition_point(|&(at, _)| now.checked_duration_since(at).is_some_and(|age| age > span));
-    let before = first.checked_sub(1).map(|i| series.samples[i].1);
-    for &(at, value) in series.samples.iter().skip(first) {
-        let Some(age) = now.checked_duration_since(at).filter(|age| !age.is_zero()) else {
+        .partition_point(|&(at, _)| since(at).div_euclid(width) < first);
+    let before = begin.checked_sub(1).map(|i| series.samples[i].1);
+    for &(at, value) in series.samples.iter().skip(begin) {
+        if now
+            .checked_duration_since(at)
+            .is_none_or(|age| age.is_zero())
+        {
+            continue;
+        }
+        let index = since(at).div_euclid(width) - first;
+        let Some(slot) = usize::try_from(index).ok().and_then(|i| out.get_mut(i)) else {
             continue;
         };
-        let from_start = span_ns - age.as_nanos() as f64;
-        let index = ((from_start / span_ns * count as f64) as usize).min(count - 1);
-        out[index] = Some(match (out[index], series.aggregate) {
+        *slot = Some(match (*slot, series.aggregate) {
             (Some(held), Aggregate::Max) => held.max(value),
             _ => value,
         });

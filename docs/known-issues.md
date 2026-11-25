@@ -928,17 +928,6 @@ that branch rather than listed here.
 
 ### Daemon and IPC
 
-- [bug] **A volume glide that waits can be judged from an old volume reading.** A glide to 99 and a
-  relative step wait behind a write that is stuck, after the volume was last read at 111; if the
-  knob on the device is turned down to 51 just before the next command goes out, the glide still
-  counts the volume as 111, so 99 looks like a lowering and is sent at once, and the device, now at
-  54, jumps to 99. The rule (above three quarters of the range, at most 3 steps over the level since
-  the last answer) allows 57 there. The volume never goes above the level it had before the knob
-  turn (111 here), but it can come back up from what the knob was turned to. It needs a knob turn at
-  the device in the same short window as a waiting glide, so it is rare, and the writer was the same
-  before scenes; the writer lab's seed 838 of its scenes variant draws it, 10 of 10 runs. Judging a
-  waiting glide again from the readings when it is sent would close it
-  (`bins/svolderd/src/writer.rs`, `glide`).
 - [bug] **A probe dropped unfinished starts no actor until the next reload.** A probe future dropped
   by a runtime shutdown frees the slot but does not start the device's actor; one whose `Shutdown`
   is not answered within `SHUTDOWN_DEADLINE` also leaves the slot, so the walk's writes go on and
@@ -1178,10 +1167,8 @@ that branch rather than listed here.
   every sample inside the span for each graph on each draw, and `Link::columns` copies up to 4096
   changes. Measured in release: about 115 µs per series at the cap (14,400 samples, 60-minute
   span), 4.6 ms for 40 such graphs; a Kraken's five meters at 60 minutes cost about 0.6 ms per
-  frame, a tenth of that at the default 5 minutes. A cache would have to be keyed on the sample
-  count and a column boundary of a window that slides with every instant, which changes what a
-  frame draws between boundaries, so it is left until a frame budget asks for it
-  (`bins/svolder/src/tui/widgets/graph.rs`).
+  frame, a tenth of that at the default 5 minutes. No cache until a frame budget asks for it
+  (`bins/svolder/src/tui/widgets/graph.rs`, `crates/svolder-profiles/src/history.rs`).
 
 ### TUI: effects
 

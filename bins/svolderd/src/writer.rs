@@ -557,6 +557,9 @@ struct Pending {
     answer: Answer,
     /// The relative step this write was worked out from, to work out again as it is sent.
     relative: Option<Relative>,
+    /// The raw level a glide asked for, when this write is that glide's immediate step that lands
+    /// at once: judged again by [`Task::rejudged`] from the readings as it is sent.
+    glide: Option<i64>,
     /// The origin and arrival number of a band write submitted with `flat_to_eq`, which
     /// [`Task::switch_to_eq`] may follow once it is answered.
     switch: Option<(Origin, u64)>,
@@ -1034,6 +1037,7 @@ impl Task {
                     command,
                     answer: Answer::Write(done),
                     relative: None,
+                    glide: None,
                     switch,
                 };
                 self.submit(pending, options.mode).await;
@@ -1284,6 +1288,7 @@ impl Task {
             },
             answer: Answer::Write(done),
             relative: None,
+            glide: None,
             switch: None,
         };
         self.submit(pending, Mode::Ordered).await;
@@ -1404,6 +1409,7 @@ impl Task {
                     command: set_to(&control.key, step),
                     answer: Answer::Landed(glided),
                     relative: None,
+                    glide: None,
                     switch: None,
                 };
                 self.submit(pending, mode).await;
@@ -1445,6 +1451,7 @@ impl Task {
                         epoch: self.epoch,
                     }),
                     relative: None,
+                    glide: None,
                     switch: None,
                 };
                 self.submit(pending, mode).await;
@@ -1481,6 +1488,7 @@ impl Task {
                     command: set_to(&control.key, target),
                     answer: Answer::Landed(glided),
                     relative: None,
+                    glide: Some(raw),
                     switch: None,
                 };
                 self.submit(pending, mode).await;
@@ -1544,6 +1552,7 @@ impl Task {
                         before: climbing.before,
                     },
                     relative: None,
+                    glide: None,
                     switch: None,
                 };
                 if !climbing.climb.reached() {
@@ -1878,6 +1887,7 @@ impl Task {
     /// worked out to when it arrived, whichever its sign, which is what holds a chain of quick
     /// steps where it stalls and a lowering on its way where it is.
     fn refreshed(&mut self, id: FunctionId, pending: Pending) -> Pending {
+        let pending = self.rejudged(id, pending);
         let Some(Relative {
             delta,
             to,
@@ -1915,6 +1925,57 @@ impl Task {
             no_wait: *no_wait,
         };
         Pending { command, ..pending }
+    }
+
+    /// `pending`, a glide's immediate step that lands at once, judged again from the readings as
+    /// it goes out, by the rule [`Task::glide`] judged it by on arrival: the step sent is never
+    /// louder than the step the glide was judged to, nor than the step the rule lets the volume
+    /// take from where it reads now, so a glide that waited behind a write while the knob was
+    /// turned down is not sent as the lowering it looked like. A step the rule lets land only at
+    /// the level the volume is at is sent as that level, and answers the glide as a write that
+    /// landed.
+    fn rejudged(&mut self, id: FunctionId, pending: Pending) -> Pending {
+        let Some(raw) = pending.glide else {
+            return pending;
+        };
+        let (Some(control), Some(asked)) =
+            (self.control_at(id), self.asked_of(id, &pending.command))
+        else {
+            return pending;
+        };
+        let Some(range) = control.range else {
+            return pending;
+        };
+        let reading = self.reading(id);
+        let situation = Situation {
+            reading,
+            base: self.base(id, reading),
+            floor_db: None,
+            asked_db: None,
+        };
+        let limit = match safety::judge(&control, &situation, raw, &Rules::writer()).motion {
+            Motion::Now(step) => step,
+            Motion::Glide {
+                first: Some(step), ..
+            } => step,
+            Motion::Glide { first: None, .. } => situation
+                .base
+                .map_or(safety::safe_step(range), |base| base.min(asked)),
+            Motion::Nothing => safety::safe_step(range),
+        };
+        let step = asked.min(limit);
+        if step == asked {
+            return pending;
+        }
+        if let Some(held) = self.asked.get_mut(&id)
+            && held.0 == asked
+        {
+            held.0 = step;
+        }
+        Pending {
+            command: set_to(&control.key, step),
+            ..pending
+        }
     }
 
     async fn act(&mut self, actions: Vec<Action<Pending, Pick>>) {

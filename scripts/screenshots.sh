@@ -58,7 +58,7 @@ meta=(-map_metadata -1 -flags:v +bitexact -fflags +bitexact)
 # (-compression_level 6) 195 KB, PNG (-pred mixed) 591 KB. A lossless encoder takes no -crf; if the
 # pre-commit hook refuses a still over a byte run in the compressed data, move -compression_level
 # to 5 and say so here.
-for name in dac amp tone telemetry devices; do
+for name in dac amp tone computer telemetry devices; do
     ffmpeg "${still[@]}" -i "$out/$name.ppm" "${meta[@]}" \
       -c:v libwebp -lossless 1 -compression_level 6 "$encoded/$name.webp"
 done
@@ -79,7 +79,7 @@ ffmpeg "${still[@]}" -f rawvideo -pix_fmt rgb24 -video_size "${width}x${height}"
   "$encoded/svolder.avif"
 
 cp "$encoded"/*.webp "$encoded/svolder.avif" "$images/"
-for name in dac amp tone telemetry devices svolder; do
+for name in dac amp tone computer telemetry devices svolder; do
     cp "$out/$name.txt" "$images/$name.txt"
 done
 
@@ -92,7 +92,7 @@ check() {
         printf 'ok: %s is %d bytes, the budget is %d\n' "$file" "$size" "$budget"
     fi
 }
-for name in dac amp tone telemetry devices; do
+for name in dac amp tone computer telemetry devices; do
     check "$name.webp" 300000
 done
 check svolder.avif 2000000

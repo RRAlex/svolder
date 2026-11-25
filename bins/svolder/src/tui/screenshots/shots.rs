@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The five stills: each a device screen of the world, settled for two seconds with the
+//! The six stills: each a device screen of the world, settled for two seconds with the
 //! animation layer's arrivals played out, then taken as the frame the last turn drew.
 //!
 //! - [`record`]: the Particles intro as a first launch plays it, recorded frame by frame.
@@ -15,7 +15,7 @@ use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier};
 use svolder_profiles::tone::apo::Correction;
 
-use crate::tui::app::{App, Screen};
+use crate::tui::app::{App, Screen, Space, Stage};
 use crate::tui::render::FrameAreas;
 use crate::tui::run::drawn_turn;
 use crate::tui::screenshots::raster::{Palette, ink, mix};
@@ -52,6 +52,8 @@ pub(in crate::tui::screenshots) enum Still {
     Amp,
     /// The Gungnir 2's tone-control screen.
     Tone,
+    /// The computer side of the tone screen: the stages strip with the EQ's panel open.
+    Computer,
     /// The Aegir 2's telemetry screen.
     Telemetry,
     /// The Devices screen.
@@ -60,10 +62,11 @@ pub(in crate::tui::screenshots) enum Still {
 
 impl Still {
     /// Every still, in the order the README shows them.
-    pub(in crate::tui::screenshots) const ALL: [Still; 5] = [
+    pub(in crate::tui::screenshots) const ALL: [Still; 6] = [
         Still::Dac,
         Still::Amp,
         Still::Tone,
+        Still::Computer,
         Still::Telemetry,
         Still::Devices,
     ];
@@ -83,6 +86,7 @@ impl Still {
             Still::Dac => "dac",
             Still::Amp => "amp",
             Still::Tone => "tone",
+            Still::Computer => "computer",
             Still::Telemetry => "telemetry",
             Still::Devices => "devices",
         }
@@ -97,7 +101,7 @@ impl Still {
     fn screen(self) -> Screen {
         match self {
             Still::Dac | Still::Amp => Screen::Device,
-            Still::Tone => Screen::Tone,
+            Still::Tone | Still::Computer => Screen::Tone,
             Still::Telemetry => Screen::Telemetry,
             Still::Devices => Screen::Devices,
         }
@@ -155,7 +159,16 @@ pub(in crate::tui::screenshots) fn still_sized(
             app
         };
         feed_host_history(&mut app, signal_start, t0);
+        if still == Still::Computer {
+            app.host.computer.eq = Some(crate::tui::test_support::computer_eq_stages(
+                Space::Speakers,
+            ));
+            app.key(KeyEvent::from(KeyCode::Char('C')));
+        }
         app.show(still.screen());
+        if still == Still::Computer {
+            app.enter_stage(Stage::Eq);
+        }
         tweak(&mut app);
 
         let World { mut look, .. } = world;

@@ -79,6 +79,10 @@ fn each_still_carries_its_landmarks() {
         tone.contains("Sennheiser HD 800 S") && tone.contains("oratory1990"),
         "{tone}"
     );
+    let computer = says(Still::Computer);
+    for word in ["EQ", "Loudness", "Space", "Bypass", "Computer"] {
+        assert!(computer.contains(word), "computer lacks {word}\n{computer}");
+    }
     assert!(says(Still::Telemetry).contains(" Telemetry "));
 }
 

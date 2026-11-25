@@ -222,14 +222,14 @@ reads, the passphrase change, reload and shutdown go straight to the actor.
   goes out (`Task::refreshed`). Two quick `down` presses before the first echo move two steps, and a
   lowering in flight is never undone by a raise.
 - **The volume rule.** `Writer::glide` asks `safety::judge` with `Rules::writer` whether the level
-  lands at once or climbs. Those rules have no cap and ask no question: the cap and the question
-  belong to the front end, which applies them before it submits (MQTT and the web page clamp to
-  their cap, MCP refuses and asks; the front ends' own `Rules` are `Rules::mqtt`, `web` and `mcp`).
-  A climb belongs to the origin that asked: its own next glide steers it, and any other write to the
-  volume, a mute, a power-off, a reading the climb did not write, a lost link or a changed profile
-  ends it. `Writer::climb` publishes it on a watch channel the actor's `forward` task turns into
-  `Event::Climb`. The rule itself, and why a raise above three quarters climbs, is in [the
-  map](../architecture.md#where-the-volume-safety-rule-lives-and-why).
+  lands at once or climbs. Those rules have no cap and ask no question: the front end applies both
+  before it submits (MQTT and the web page clamp to their cap, MCP refuses and asks; the front
+  ends' own `Rules` are `Rules::mqtt`, `web` and `mcp`). A climb belongs to the origin that asked:
+  its own next glide steers it, and any other write to the volume, a mute, a power-off, a reading
+  the climb did not write, a lost link or a changed profile ends it. `Writer::climb` publishes it
+  on a watch channel the actor's `forward` task turns into `Event::Climb`. A glide that waited and
+  became a rise is capped (95, or the base above it), answered `Landed`, and does not climb on.
+  The rule itself is in [the map](../architecture.md#where-the-volume-safety-rule-lives-and-why).
 - **A silent device is not climbed on.** When the device reads itself muted or off (`silent`,
   `silences`), a glide writes only the step that may land at once, and a running climb ends.
 - **Recall as a batch.** `Writer::recall` plans a tone-control preset from the device's readings

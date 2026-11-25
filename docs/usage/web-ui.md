@@ -1004,8 +1004,8 @@ at the top left.
   no box); the computer opens its sink, rate, volume, mute, the computer EQ and the preset applied,
   read only.
 - **Level meters.** The computer's area also shows two needle dials, left and right, of what the
-  computer plays (from 1240 px wide a third column beside the volume and the curve; from 720 px the
-  dials sit beside the volume and the curve has its own row; on a phone they come after the volume).
+  computer plays (from 720 px wide the
+  dials sit beside the volume, above the curve, which has its own row; on a phone they come after the volume).
   Each reads in VU under its dial and has a lamp that lights when that channel reaches full scale
   and stays lit for 1.2 seconds. 0 VU is a level of -18 dBFS by default; *−*, *+* and *Reset*
   under the dials move it from -30 to -6 dBFS (*Reset* shows only when it is not -18). The needle

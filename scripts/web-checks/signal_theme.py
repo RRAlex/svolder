@@ -220,18 +220,18 @@ def the_line(b, d):
     xs = b.page("(() => { const l = document.getElementById('sg-line').getBoundingClientRect();"
                 " return [...document.querySelectorAll('#sg-line [role=option]')]"
                 ".map((o) => { const r = o.getBoundingClientRect(); return (r.left + r.width / 2 - l.left) / l.width; }); })()")
-    check('  spread evenly between 10 % and 90 % of the line\'s width',
-          abs(xs[0] - 0.1) < 0.01 and abs(xs[-1] - 0.9) < 0.01
-          and max(abs((xs[i + 1] - xs[i]) - (xs[1] - xs[0])) for i in range(len(xs) - 1)) < 0.01, xs)
+    check('  hop k of n stands at k/(n+1) of the line\'s width',
+          all(abs(x - (k + 1) / (len(xs) + 1)) < 0.01 for k, x in enumerate(xs)), xs)
     shape = b.page("""(() => { const q = (s) => document.querySelector(s);
       const band = q('#sg-line').getBoundingClientRect(); const box = q('.sg-box').getBoundingClientRect();
       const dot = q('.sg-d-device.sg-shown').getBoundingClientRect(); const lab = q('.sg-hop b').getBoundingClientRect();
-      return { band: band.height, box: [box.width, box.height, box.top - band.top],
+      return { band: band.height, slot: band.width / (document.querySelectorAll('#sg-line [role=option]').length + 1),
+        box: [box.width, box.height, box.top - band.top],
         dot: dot.top + dot.height / 2 - band.top, label: lab.top - band.top,
         role: q('#sg-line').getAttribute('role'), orient: q('#sg-line').getAttribute('aria-orientation'),
         notch: getComputedStyle(q('.sg-box'), '::after').content }; })()""")
-    check('  the band is 140 px, the box 200 by 104 at y 30, the dots on y 60, the names from y 74',
-          shape['band'] == 140 and shape['box'] == [200, 104, 30]
+    check('  the band is 140 px, the box 104 tall at y 30 and 200 wide (less where the slot is narrower), the dots on y 60, the names from y 74',
+          shape['band'] == 140 and shape['box'][1:] == [104, 30] and abs(shape['box'][0] - min(200, shape['slot'] - 8)) < 1
           and abs(shape['dot'] - 60) <= 1 and 72 <= shape['label'] <= 80, shape)
     check('  it is one horizontal listbox with a notch on the box',
           shape['role'] == 'listbox' and shape['orient'] == 'horizontal'

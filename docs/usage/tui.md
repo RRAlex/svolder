@@ -559,8 +559,8 @@ value, with the channels on one shared scale. The 80×24 and 120×24 layouts hav
 `graphs = false` removes the rows.
 
 ```
-│   L/R  ⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ │
-│        ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉ │
+│   L/R  ⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣠⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣴⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ │
+│        ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠟⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠛⠋⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉ │
 ```
 
 ### Waiting for a device
@@ -1719,12 +1719,12 @@ hidden above it, and a `▼` beside the last while readings are hidden below:
 ─ Controls ── EQ ──┤ Telemetry ├── Devices ───────────────── ? help ─ esc back ─
 ┌ Telemetry ──────────────────────────────────────────── refresh ─ 6 functions ┐
 │   ID       Type  Value       Label           History             Age  Rate   │
-│ ▶ 6        u8    2           Sample rate (4… ⣀⣀⣀⣀⣀⣀⣀⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿   1s   1/s   │
-│   7.3      u16   3           ?               ⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣿⣿⣿⣿⣿⣿   1s   1/s   │
-│   9        u16   734         ?               ⣴⣴⣴⣴⣧⣦⣴⣤⣄⣄⣾⣼⣴⣤⣦⣤⣠⣤   1s   1/s   │
+│ ▶ 6        u8    2           Sample rate (4… ⣀⣀⣀⣀⣀⣀⣸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿   1s   1/s   │
+│   7.3      u16   3           ?               ⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣸⣿⣿⣿⣿⣿⣿   1s   1/s   │
+│   9        u16   734         ?               ⣦⣦⣦⣾⣴⣤⣦⣤⣠⣰⣧⣧⣦⣴⣤⣄⣤⣤   1s   1/s   │
 │   12.1.2   u8    64          EQ band 1 freq  ⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀   1s   1/s   │
 │   210.2.1  u8    3           Firmware        ⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀   1s   1/s   │
-│   240.1    bool  false       ?               ⣀⣀⣀⣀⣀⣀⣀⣀⣀⠉⢁⣀⣀⣀⣀⣀⣀⣀   1s   1/s   │
+│   240.1    bool  false       ?               ⣀⣀⣀⣀⣀⣀⣀⣀⡈⠉⣀⣀⣀⣀⣀⣀⣀⣀   1s   1/s   │
 │                                                                              │
 │                                                                              │
 │                                                                              │
@@ -1922,7 +1922,7 @@ version, and three entries (four while the daemon keeps scenes, below):
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.39.4 │
+│                          v0.39.5 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -1942,7 +1942,7 @@ nothing in the menu there.
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.39.4 │
+│                          v0.39.5 │
 │                                  │
 │             Settings             │
 │             Scenes z             │

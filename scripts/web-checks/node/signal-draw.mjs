@@ -11,7 +11,7 @@ import { POINTS, logFreqs, responseDb, yOf } from '../../../bins/svolderd/web/co
 import { ampScreen, metersInPlace } from '../../../bins/svolderd/web/themes/signal/draw/amp.js';
 import { declaredScreen, editForm, hopTools, moves, plusSheet, unlinkedAmps } from '../../../bins/svolderd/web/themes/signal/draw/hop.js';
 import { choices, modeRow } from '../../../bins/svolderd/web/themes/signal/draw/choices.js';
-import { HOP_PX, line, slide, strip } from '../../../bins/svolderd/web/themes/signal/draw/line.js';
+import { HOP_PX, line, slide, strip, xOf } from '../../../bins/svolderd/web/themes/signal/draw/line.js';
 import { drawShelf } from '../../../bins/svolderd/web/themes/signal/draw/shelf.js';
 import { keeper } from '../../../bins/svolderd/web/core/freeze.js';
 import { drawSlim, volumeWords } from '../../../bins/svolderd/web/themes/signal/slim.js';
@@ -1101,10 +1101,10 @@ ok('a_linked_amp_shown_alone_draws_a_grey_way_in_then_a_thin_stretch_from_the_da
   const lines = html.match(/<line [^>]*>/g);
   const grey = lines.filter((l) => l.includes('class="sg-grey"'));
   assert.equal(grey.length, 1, 'one grey stretch');
-  assert.match(grey[0], /x1="10\.00%" x2="63\.33%"/, 'from the player to the DAC');
+  assert.match(grey[0], /x1="20\.00%" x2="60\.00%"/, 'from the player to the DAC');
   const after = lines.filter((l) => l.includes('sg-after'));
   assert.equal(after.length, 1);
-  assert.match(after[0], /x1="63\.33%" x2="90\.00%"/, 'thin from the DAC to the amp');
+  assert.match(after[0], /x1="60\.00%" x2="80\.00%"/, 'thin from the DAC to the amp');
   assert.ok(after[0].includes('data-flow="after"'));
   assert.ok(!html.includes('data-flow="before"') && !html.includes('sg-changes'), 'nothing flows before the DAC');
   assert.equal((html.match(/sg-grey-dot/g) ?? []).length, 2, 'the player and the computer are greyed');
@@ -1538,6 +1538,25 @@ ok('an_overlay_without_a_span_fills_nothing_and_none_or_another_mode_draws_none'
   for (const mode of ['flat', 'loudness']) {
     assert.doesNotMatch(toneBox((withOverlay("dac", overlayOn([[600, 1500]]), mode)).device), /sg-gap|sg-target|sg-fit/);
   }
+});
+
+ok('the_hops_stand_at_k_over_n_plus_1_of_the_line', () => {
+  for (let count = 1; count <= 5; count++) {
+    const hops = Array.from({ length: count }, (_, i) => ({
+      id: `h${i}`, kind: 'declared', name: `Hop ${i}`, words: [], live: false, changes: false, url: null, hopId: `h${i}`,
+    }));
+    const html = line(hops, 'h0', 'h0');
+    const labels = [...html.matchAll(/data-x="([\d.]+)"/g)].map((m) => Number(m[1]));
+    const dots = [...html.matchAll(/<circle [^>]*cx="([\d.]+)%"/g)].map((m) => Number(m[1]));
+    assert.equal(labels.length, count, `${count}: a label each`);
+    for (let k = 1; k <= count; k++) {
+      const want = (100 * k) / (count + 1);
+      assert.ok(Math.abs(xOf(k - 1, count) - want) < 1e-9, `${count} hops: hop ${k} at ${want}`);
+      assert.ok(Math.abs(labels[k - 1] - want) < 0.006, `${count} hops: label ${k} at ${want}`);
+      assert.ok(Math.abs(dots[k - 1] - want) < 0.006, `${count} hops: dot ${k} at ${want}`);
+    }
+  }
+  assert.deepEqual([1, 2, 3].map((i) => xOf(i - 1, 3)), [25, 50, 75], 'three hops: 1/4, 1/2, 3/4');
 });
 
 console.log(`signal-draw.mjs: ${n} passed`);

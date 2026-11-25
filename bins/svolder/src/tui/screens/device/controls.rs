@@ -979,8 +979,8 @@ fn spectrum_line(app: &App, theme: &Theme, columns: Columns) -> (Line<'static>, 
 /// where each button's click lands, as a column from the row's start and a width: its glyphs
 /// and the cell on either side of them it shares no button with. The button matching what the
 /// followed player is doing is drawn in the accent, bold; on the focused row the button under
-/// the row's own cursor is drawn out of the row's highlight, so it reads as the one `Enter`
-/// presses.
+/// the row's own cursor is drawn out of the row's highlight, over the whole of its click area,
+/// so the box is as wide as the key the mouse takes and reads as the one `Enter` presses.
 fn transport_line(
     app: &App,
     theme: &Theme,
@@ -996,9 +996,17 @@ fn transport_line(
     let mut at = columns.field();
     let mut buttons = Vec::with_capacity(host::GLYPHS.len());
     let last = host::GLYPHS.len() - 1;
+    // The cell either side of a glyph is the cursor's button's own when it has the cursor.
+    let boxed = |index: usize| focused && app.host.button() == Button::ALL[index];
     for (index, (glyph, button)) in host::GLYPHS.iter().zip(Button::ALL).enumerate() {
         if index > 0 {
-            spans.push(Span::raw(" ".repeat(host::BUTTON_GAP)));
+            // The gap's first cell belongs to the button before, its second to this one.
+            let pad = |boxed: bool| match boxed {
+                true => Span::styled(" ", lit),
+                false => Span::raw(" "),
+            };
+            spans.push(pad(boxed(index - 1)));
+            spans.push(pad(boxed(index)));
             at += host::BUTTON_GAP;
         }
         let state = theme.style(Role::Cursor).add_modifier(Modifier::BOLD);
@@ -1014,14 +1022,23 @@ fn transport_line(
         let width = span.width();
         spans.push(span);
         let before = usize::from(index > 0);
-        let after = usize::from(index < last);
         buttons.push((
             u16::try_from(at - before).unwrap_or(0),
-            u16::try_from(width + before + after).unwrap_or(0),
+            u16::try_from(width + before + 1).unwrap_or(0),
         ));
         at += width;
     }
-    spans.extend(track_clock(app, theme, columns.room().saturating_sub(at)));
+    let mut clock = track_clock(app, theme, columns.room().saturating_sub(at));
+    // The last button's cell after it is the first of the gap the clock opens with.
+    match (boxed(last), clock.first_mut()) {
+        (true, Some(gap)) if gap.content.len() == host::BUTTON_GAP => {
+            gap.content = " ".repeat(host::BUTTON_GAP - 1).into();
+            spans.push(Span::styled(" ", lit));
+        }
+        (true, None) => spans.push(Span::styled(" ", lit)),
+        (true, Some(_)) | (false, _) => {}
+    }
+    spans.extend(clock);
     (Line::from(spans), buttons)
 }
 

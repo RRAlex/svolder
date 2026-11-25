@@ -77,14 +77,14 @@ On a desktop (720 px and wider) the page has three bands. A DAC's first screen i
 tone curve, in two columns from 1020 px; between 720 and 1019 px, where the curve would be narrower
 than 300 px, it changes (below).
 
-- **The line band**, 140 px high: the dots on y = 60, labels from y = 74, hops spaced evenly
-  between 10 % and 90 % of the width. The chosen hop is a box 200 by 104 px with a 12 px notch
+- **The line band**, 140 px high: the dots on y = 60, labels from y = 74, hop k of n at k/(n+1) of
+  the width (three hops: 1/4, 1/2, 3/4; a name wider than its slot is cut with an ellipsis). The chosen hop is a box 200 by 104 px (narrower where a slot is, slot less 8 px) with a 12 px notch
   pointing down at the open area, filled faintly amber with the page's only glow. The menu
   button is anchored to a slot at the band's top right. There is no `+` on the line: adding a
   device is a row of the frame's menu (below).
 - **The open area**, under the band: what the chosen hop offers (below). A DAC's is the volume and
-  the curve (`310px 1fr`, a 40 px gap, from 1020 px; the computer's adds a third column from
-  1240 px, below). From 720 to 1019 px the tone curve (and an
+  the curve (`310px 1fr`, a 40 px gap, from 1020 px; the computer's meters sit beside the volume, with the
+  curve under both, below). From 720 to 1019 px the tone curve (and an
   amp's meters) take a full-width row of their own under the volume, so the curve is never
   narrower than 300 px and a point can be dragged on a portrait tablet. The input, the mode and
   the presets are in the shelf (below), not here, except the mode on a phone.
@@ -197,9 +197,8 @@ and writes to nothing that is gone.
 The computer's area (`#sg-cvu`) shows two needle dials, left and right, of what the computer plays,
 with the reading in VU under each, a peak lamp per channel and, under both, the reference. The rules of the
 needle, the scale and the lamp are in [the VU meter](vu-meter.md); this is how Signal draws and
-holds them. From 1240 px the area has a third column, 400 px, beside the volume and the curve
-(`310px 1fr 400px`, the curve keeps 300 px or more); from 720 px to 1239 the dials sit beside the
-volume in the first row and the curve takes its own row below; on a phone the order is volume,
+holds them. At every width the meters stand in the top area: from 720 px the dials sit beside the
+volume in the first row (the column is at most 640 px) and the curve takes its own row below; on a phone the order is volume,
 meters, curve. The dials are side by side in their column.
 
 - **Meters | Spectrum.** Two chips in the section's corner choose what it shows: the dials (the

@@ -1035,6 +1035,57 @@ fn a_click_on_a_transport_button_lands_on_it() {
     );
 }
 
+/// The box the focused Transport key is drawn in is the cell the mouse takes for it: the glyph
+/// and one cell either side, `▶` included, at every width.
+#[test]
+fn the_focused_transport_key_box_is_its_hit_area_with_a_cell_either_side() {
+    let theme = Theme::new(false);
+    let selected = theme.style(Role::Selected);
+    for width in [80u16, 100, 120] {
+        for button in 0..4usize {
+            let mut app = transporting(svolder_host::Status::Playing);
+            app.set_selected(app.rows().len());
+            app.host.button = button;
+            let mut terminal =
+                Terminal::new(TestBackend::new(width, 24)).expect("a test terminal opens");
+            let mut hits = HitMap::default();
+            terminal
+                .draw(|frame| {
+                    render::draw(frame, &app, &theme, &mut hits);
+                })
+                .expect("the frame draws");
+            let buffer = terminal.backend().buffer().clone();
+            let row = text(&buffer)
+                .iter()
+                .position(|line| line.contains("Transport"))
+                .expect("the Transport row") as u16;
+            let hit: Vec<u16> = (0..width)
+                .filter(|&x| hits.hit_at(x, row) == Some(&Hit::Transport(button)))
+                .collect();
+            let first = (0..width)
+                .find(|&x| hits.hit_at(x, row) == Some(&Hit::Transport(0)))
+                .expect("the first key");
+            let drawn: Vec<u16> = (first..width)
+                .filter(|&x| {
+                    let cell = buffer.cell((x, row)).expect("a cell");
+                    cell.modifier.contains(selected.add_modifier)
+                        && selected.fg.is_none_or(|fg| cell.fg == fg)
+                        && selected.bg.is_none_or(|bg| cell.bg == bg)
+                })
+                .collect();
+            assert_eq!(drawn, hit, "{width} wide, key {button}");
+            let glyph = [2, 1, 2, 2][button];
+            let after = 1;
+            let before = usize::from(button > 0);
+            assert_eq!(
+                hit.len(),
+                glyph + before + after,
+                "{width} wide, key {button}"
+            );
+        }
+    }
+}
+
 /// A route to a Gungnir 2 sink at 48 kHz, the player on the same rate and every volume at
 /// 100 %, with `edit` applied.
 pub(super) fn gungnir_route(
