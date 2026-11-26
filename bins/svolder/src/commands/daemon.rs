@@ -300,6 +300,7 @@ fn trouble(what: String, next: &str) -> Failure {
         what,
         next: next.to_string(),
         reason: None,
+        adapter_hint: None,
     }
 }
 

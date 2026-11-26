@@ -325,6 +325,10 @@ impl<O: Open> Opener<O> {
         landing: Landing,
         keep: Option<Kept>,
     ) -> Watching {
+        let landed_hint = match &landing {
+            Landing::Devices { why: Some(why) } => why.adapter_hint.as_deref().cloned(),
+            _ => None,
+        };
         let (waited, since, why, held) = match landing {
             Landing::Waiting {
                 device,
@@ -367,6 +371,7 @@ impl<O: Open> Opener<O> {
             rows,
         );
         app.config_path = self.path.clone();
+        app.devices.landed_hint = landed_hint;
         app.session.product = match &waited {
             Some(name) => name.clone(),
             None => "no device".to_string(),

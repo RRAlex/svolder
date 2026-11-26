@@ -246,7 +246,9 @@ refused, naming that device); the file is re-parsed after writing, before this r
 not load is never left behind. Without a `<UDID>`, on a terminal, `add` runs the same guided walk
 `setup` does (see "setup" above), starting from its Scan step, with `--name`, `--profile` and
 `--passphrase` pre-filling its answers; off a terminal it prints the hint toward `svolder scan`
-instead. While a daemon runs, `add` with a unit id is the daemon's own write (a `device_config` op,
+instead. On a machine with several adapters the walk listens on all of them and, when the adapter in
+use is not the one that hears the picked device best, asks `Add it and switch to hciN` or `Add it,
+keep hciM` before it tests the passphrase (see ["Choosing an adapter"](bluetooth.md#choosing-an-adapter)). While a daemon runs, `add` with a unit id is the daemon's own write (a `device_config` op,
 saying `through the daemon`) and never touches the file from this side; a daemon too old to take it
 is told to `svolder daemon restart`, and with none running the file is written here as before:
 
@@ -775,6 +777,16 @@ Status 12.5.2 u8 64   EQ band 5 frequency = 10000 Hz
 Status 12.5.3 u8 98   EQ band 5 gain = +0.0 dB
 Status 12.50 u8 1   Tone control mode = flat
 Status 12.52 u8 0   Loudness = 0
+```
+
+A device that is not connected, while its connects keep failing on one adapter and another adapter
+hears it, gets the pointer under the failure or the note about the last known readings, in two
+lines (`svolder devices --json` and the TUI carry the same facts; see
+["Choosing an adapter"](bluetooth.md#choosing-an-adapter)):
+
+```
+svolder: hci2 hears BF3 at −80 dBm and cannot hold a link; hci0 hears it at −74 dBm:
+         try adapter = "AA:BB:CC:DD:EE:01" (svolder adapters, or Settings → Bluetooth adapter)
 ```
 
 Exit code 5 if any fault control is active:
@@ -2244,7 +2256,7 @@ svolder: recording every frame for 2 s; press the device's buttons now (Ctrl-C e
 capture.txt
 $ head -4 capture.txt
 svolder capture
-svolder 0.39.10
+svolder 0.39.11
 taken 2026-10-23 07:33:02 UTC, frame window 2 s
 unit ids, passphrase bytes, the home directory and Bluetooth addresses are scrubbed (--keep-ids keeps them)
 $ grep -A5 '== adverts' capture.txt

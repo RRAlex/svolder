@@ -177,11 +177,11 @@ fn the_box_starts_at_91_27_at_120_by_40() {
         .find(|(id, _)| *id == FrameId::Pane(Pane::Tone))
         .expect("the Tone pane")
         .1;
-    assert_eq!(home_box(tone), Rect::new(91, 27, 27, 6));
+    assert_eq!(home_box(tone), Rect::new(91, 26, 27, 6));
     let (buffer, hits) = render_with(&app, 120, 40, &theme);
     let area = hits.area_of(Hit::Mascot).expect("the hit is recorded");
-    assert!(area.x >= 91 && area.y >= 27, "{area:?}");
-    assert!(sprite_cells(&buffer, Rect::new(91, 27, 27, 6)) > 20);
+    assert!(area.x >= 91 && area.y >= 26, "{area:?}");
+    assert!(sprite_cells(&buffer, Rect::new(91, 26, 27, 6)) > 20);
 }
 
 /// The room check looks at where each line's text ends in the rows the box covers: lines ending
@@ -412,7 +412,7 @@ fn shaded_greys(
     let mut seen = 0;
     for row in 0..6 {
         for (col, (upper, lower)) in pixels[2 * row].iter().zip(&pixels[2 * row + 1]).enumerate() {
-            let (x, y) = (91 + col as u16, 27 + row as u16);
+            let (x, y) = (91 + col as u16, 26 + row as u16);
             let c = cell(buffer, x, y);
             match (upper, lower) {
                 (None, None) => continue,

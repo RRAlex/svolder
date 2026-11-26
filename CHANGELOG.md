@@ -8,6 +8,30 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.39.11
+
+- **The TUI says which Bluetooth adapter to try, where you would look.** When a device keeps
+  failing to connect on one adapter while another hears it, the Devices screen's ` Not opened `
+  frame now names the failure, what each adapter hears, and offers `Switch to hci0  Enter` /
+  `Keep trying on hci2  Esc`; `Enter` saves that adapter by its address and a running daemon
+  switches to it at once. The device's row names the adapter it is tried on
+  (`disconnected · hci2`), and `svolder status` prints the same hint.
+- **Adding a device listens on every adapter.** With more than one adapter, the add walk (in the
+  TUI and `svolder add`) shows how loud each adapter hears each device, and asks
+  `Add it and switch to hciN` / `Add it, keep hciM` only when another adapter hears the device
+  better than the one in use.
+- **A hand-edited `adapter` is picked up without a restart.** The daemon watches its config file
+  and switches adapters when you change `adapter` in it; a file that does not parse is reported
+  in the log and left alone.
+- **Signal bars on the TUI's header.** After the connection word, four bars and the reading in
+  dBm, by the same rule as the GNOME panel's bars, dim when the reading is old; a narrow header
+  drops the dBm, then the bars.
+- **The `?` overlay fits.** One row per key, a key whose meaning differs on the computer's side
+  says so on one short dim line under it, and the columns are only as wide as the ordinary keys
+  need, so two columns fit at 120×40.
+- **The Status pane on a tall terminal is only as tall as its rows**, plus one blank row, so the
+  VU meters and the cover sit close to the bottom and the panes above get the room back.
+
 ## 0.39.10
 
 - **Pick the Bluetooth adapter, and name it by its address.** `adapter` in the config (and

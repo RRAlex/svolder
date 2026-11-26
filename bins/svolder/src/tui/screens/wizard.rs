@@ -267,7 +267,15 @@ fn answering(
         return (vec![field(step, theme)], Offered::default());
     }
     let choices = &step.prompt.choices;
-    let row = |at: usize| choice_line(&choices[at], at == step.choice, theme, max_width);
+    // The walk's question of which adapter names the key of each answer, in one column.
+    let keys = match crate::tui::wizard::keeps_the_adapter(&step.prompt) {
+        true => ["Enter", "k"],
+        false => ["", ""],
+    };
+    let row = |at: usize| {
+        let key = keys.get(at).copied().filter(|key| !key.is_empty());
+        choice_line(&choices[at], key, at == step.choice, theme, max_width)
+    };
     if choices.len() <= room {
         let offered = Offered {
             at: 0,
@@ -337,8 +345,34 @@ fn title_line(step: &ShownStep, theme: &Theme, area: Rect) -> Line<'static> {
 }
 
 /// One choice as a row, with the cursor on the one an answer would take.
-fn choice_line(choice: &str, focused: bool, theme: &Theme, max_width: usize) -> Line<'static> {
-    let line = widgets::rows::with_cursor(Line::from(choice.to_string()), focused, theme);
+///
+/// A choice that has a key says it in a column at the right, as `Enter` and `k` are on the
+/// walk's question of which adapter.
+fn choice_line(
+    choice: &str,
+    key: Option<&str>,
+    focused: bool,
+    theme: &Theme,
+    max_width: usize,
+) -> Line<'static> {
+    let mut spans = vec![Span::raw(choice.to_string())];
+    if let Some(key) = key {
+        let key_width = widgets::text::cells("Enter");
+        // The cursor's two cells come before the text, and a cell is left past the key.
+        let room = max_width.saturating_sub(key_width + 3);
+        spans = vec![
+            Span::raw(widgets::text::pad_cells(
+                &widgets::text::cut_to_cells(choice, room.saturating_sub(2)),
+                room.saturating_sub(2),
+            )),
+            Span::raw(" "),
+            Span::styled(
+                widgets::text::pad_cells(key, key_width),
+                theme.style(Role::Faint),
+            ),
+        ];
+    }
+    let line = widgets::rows::with_cursor(Line::from(spans), focused, theme);
     if !focused {
         return line;
     }

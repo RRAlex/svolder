@@ -91,18 +91,76 @@ pub(crate) struct DaemonEffects {
     registry: Arc<Registry>,
     /// The device the write configured, as `device_config` answered it.
     written: Mutex<Option<ConfiguredDevice>>,
+    /// Whether the scan listens on every adapter and the walk may ask which to use: a front end
+    /// of the socket (the CLI, the TUI) is asked, the web UI, MCP and MQTT are not.
+    on_all_adapters: bool,
+}
+
+/// How long every adapter listens beside the scan, for the readings the walk shows per adapter.
+const ADAPTER_WINDOW: Duration = Duration::from_secs(4);
+
+#[cfg(test)]
+thread_local! {
+    /// What the next scan hears on every adapter, where a test has no radios to ask.
+    pub(crate) static LISTENED: std::cell::RefCell<Option<Option<svolder_walk::Listened>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 impl DaemonEffects {
     /// The effects of a walk run as the job `ctx`, saying where it stands on `board`.
-    pub(crate) fn new(daemon: Arc<Daemon>, ctx: Arc<JobCtx>, board: Arc<Board>) -> DaemonEffects {
+    pub(crate) fn new(
+        daemon: Arc<Daemon>,
+        ctx: Arc<JobCtx>,
+        board: Arc<Board>,
+        on_all_adapters: bool,
+    ) -> DaemonEffects {
         DaemonEffects {
             registry: daemon.registry(),
             daemon,
             ctx,
             board,
             written: Mutex::new(None),
+            on_all_adapters,
         }
+    }
+
+    /// What every adapter hears while the scan listens, when the machine has several and this
+    /// walk asks which to use; `None` otherwise. The adapter in use is the one the daemon holds.
+    async fn listened(&self) -> Option<svolder_walk::Listened> {
+        if !self.on_all_adapters {
+            return None;
+        }
+        #[cfg(test)]
+        if let Some(told) = LISTENED.with(|told| told.take()) {
+            return told;
+        }
+        let in_use = self.daemon.adapter_in_use()?;
+        let present = svolder_ble::adapters::present().await.ok()?;
+        if present.len() < 2 {
+            return None;
+        }
+        let hearings = svolder_ble::adapters::hear_all(&present, ADAPTER_WINDOW).await;
+        Some(svolder_walk::Listened {
+            in_use,
+            adapters: hearings
+                .into_iter()
+                .map(|hearing| svolder_walk::ListenedOn {
+                    name: hearing.adapter.name,
+                    address: hearing.adapter.address,
+                    heard: hearing
+                        .heard
+                        .as_ref()
+                        .map(|heard| heard.iter().map(|h| (h.unit.clone(), h.rssi)).collect())
+                        .unwrap_or_default(),
+                    adverts: hearing
+                        .heard
+                        .iter()
+                        .flatten()
+                        .filter_map(|h| h.manufacturer)
+                        .collect(),
+                })
+                .collect(),
+        })
     }
 
     /// The device the walk wrote, once it has, as `device_config` answered it.
@@ -146,8 +204,10 @@ impl WalkEffects for DaemonEffects {
                 }
             });
         };
-        let heard = tokio::select! {
-            heard = self.daemon.listen_all(WALK_SCAN_WINDOW, &each) => heard,
+        let (heard, adapters) = tokio::select! {
+            both = async {
+                tokio::join!(self.daemon.listen_all(WALK_SCAN_WINDOW, &each), self.listened())
+            } => both,
             () = self.ctx.cancelled() => return Err(DaemonFailure::Cancelled),
         };
         let adverts = heard.map_err(|e| DaemonFailure::Failed {
@@ -161,6 +221,7 @@ impl WalkEffects for DaemonEffects {
                 .map(|advert| self.row(advert, &units).entry)
                 .collect(),
             notices: Vec::new(),
+            adapters,
         })
     }
 
@@ -180,6 +241,22 @@ impl WalkEffects for DaemonEffects {
             .probe(&seen.unit, passphrase, self.ctx.cancelled())
             .await
             .ok_or(DaemonFailure::Cancelled)
+    }
+
+    /// The adapter is written into the config and the daemon follows it as a reload does, so the
+    /// probe that tests the passphrase opens through the adapter that hears the device. A daemon
+    /// its command line pins, or one that cannot open the adapter, says so rather than carry on
+    /// as if it had.
+    async fn switch_adapter(&self, address: &str, name: &str) -> Result<(), DaemonFailure> {
+        self.board
+            .change(|state| state.working = Some(Working::Answering));
+        self.daemon
+            .switch_adapter_to(address, name)
+            .await
+            .map_err(|message| DaemonFailure::Failed {
+                message,
+                reason: Reason::Internal,
+            })
     }
 
     /// The `device_config` add: a name taken sends the walk back to its name, a unit another

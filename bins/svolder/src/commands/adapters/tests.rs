@@ -29,6 +29,7 @@ fn hearing(name: &str, address: &str, usb: Option<&str>, rssi: Option<i16>) -> H
             .map(|rssi| Heard {
                 unit: "0A1B2C3D4E5F6071".to_string(),
                 rssi: Some(rssi),
+                manufacturer: None,
             })
             .into_iter()
             .collect()),
@@ -275,4 +276,39 @@ fn under_a_daemon_the_adapter_in_use_is_the_one_it_holds() {
     assert_eq!(used.as_deref(), Some("hci2"), "the config's, not --adapter");
     let (used, _) = in_use_via(&Via::Direct, Some("hci0"), None, Some("hci2"), &there);
     assert_eq!(used.as_deref(), Some("hci0"));
+}
+
+/// What the walk shows of every adapter is made of the hearings: each adapter's reading per
+/// unit, the adapter a direct session opens marked in use (`--adapter`, else the configured
+/// one, else the first), and nothing at all with fewer than two adapters.
+#[test]
+fn the_walks_view_of_every_adapter_is_made_of_the_hearings() {
+    let hearings = [
+        hearing("hci0", "AA:BB:CC:DD:EE:01", None, Some(-74)),
+        hearing("hci2", "AA:BB:CC:DD:EE:02", None, Some(-80)),
+    ];
+    let listened = listened_from(&hearings, None, Some("AA:BB:CC:DD:EE:02")).expect("two adapters");
+    assert_eq!(listened.in_use, "hci2");
+    assert_eq!(listened.adapters.len(), 2);
+    assert_eq!(
+        listened.adapters[0].reading("0A1B2C3D4E5F6071"),
+        Some(Some(-74))
+    );
+    assert_eq!(listened.adapters[0].take(), "AA:BB:CC:DD:EE:01");
+    assert_eq!(
+        listened
+            .better_for("0A1B2C3D4E5F6071")
+            .map(|a| a.name.as_str()),
+        Some("hci0")
+    );
+    // `--adapter` outranks the config, and with neither the first adapter is the one in use.
+    assert_eq!(
+        listened_from(&hearings, Some("hci0"), Some("hci2")).map(|l| l.in_use),
+        Some("hci0".to_string())
+    );
+    assert_eq!(
+        listened_from(&hearings, None, None).map(|l| l.in_use),
+        Some("hci0".to_string())
+    );
+    assert_eq!(listened_from(&hearings[..1], None, None), None);
 }

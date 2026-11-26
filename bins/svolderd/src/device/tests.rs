@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
+use svolder_ble::adapters::Better;
 use svolder_ipc::CODE_NOT_FOUND;
 use svolder_ipc::{CODE_LINK, CODE_TIMEOUT, CODE_USAGE};
 
@@ -30,6 +31,8 @@ fn bare_handle(name: &str, unit: &str, product: Option<&str>) -> DeviceHandle {
             stale: false,
             next_attempt: None,
             passphrase_note: None,
+            adapter_hint: None,
+            hint_epoch: 0,
             refused: false,
             history: Arc::default(),
             ring: Arc::default(),
@@ -346,6 +349,8 @@ async fn connected_actor_over(
             stale: false,
             next_attempt: None,
             passphrase_note: None,
+            adapter_hint: None,
+            hint_epoch: 0,
             refused: false,
             history: Arc::default(),
             ring: Arc::default(),
@@ -531,6 +536,8 @@ async fn unproven_actor() -> Actor {
             stale: false,
             next_attempt: None,
             passphrase_note: None,
+            adapter_hint: None,
+            hint_epoch: 0,
             refused: false,
             history: Arc::default(),
             ring: Arc::default(),
@@ -581,3 +588,95 @@ mod reload;
 mod requests;
 mod schedule;
 mod signal;
+
+/// What `describe` says of the hint after the scan task has run, waiting under a deadline.
+async fn hint_of(actor: &Actor, wanted: bool) -> Option<svolder_ipc::AdapterHint> {
+    let handle_info = Arc::clone(&actor.info);
+    tokio::time::timeout(Duration::from_secs(5), async move {
+        loop {
+            let seen = locked(&handle_info).adapter_hint.clone();
+            if seen.is_some() == wanted {
+                return seen;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the hint settles")
+}
+
+fn louder_elsewhere() -> Better {
+    Better {
+        take: "AA:BB:CC:DD:EE:01".into(),
+        name: "hci0".into(),
+        rssi: Some(-74),
+        own: Some(Some(-80)),
+    }
+}
+
+/// A device that keeps failing to connect on one adapter while another hears it carries the
+/// hint in its row, with the failure and the count; it goes when the streak does.
+#[tokio::test]
+async fn a_failing_streak_with_a_louder_adapter_sets_the_hint_in_the_row() {
+    let mut actor = unproven_actor().await;
+    actor.failures = 4;
+    actor.hint_when("hci2".into(), "no connection within 20 s", async {
+        Some(louder_elsewhere())
+    });
+    let hint = hint_of(&actor, true).await.expect("a hint");
+    assert_eq!(
+        (
+            hint.failing.as_str(),
+            hint.better.as_str(),
+            hint.take.as_str(),
+            hint.tries
+        ),
+        ("hci2", "hci0", "AA:BB:CC:DD:EE:01", 4)
+    );
+    assert_eq!((hint.own_heard, hint.own_dbm), (true, Some(-80)));
+    assert_eq!(hint.better_dbm, Some(-74));
+    // The same streak going on only moves the count and the words.
+    actor.failures = 6;
+    actor.refresh_hint("no connection within 20 s (again)");
+    let again = hint_of(&actor, true).await.expect("still there");
+    assert_eq!(
+        (again.tries, again.failure.as_str()),
+        (6, "no connection within 20 s (again)")
+    );
+    // The row the `devices` verb answers with carries it.
+    let handle = bare_handle("fake", "0102030405060708", None);
+    locked(&handle.info).adapter_hint = Some(again.clone());
+    assert_eq!(handle.describe().adapter_hint, Some(again));
+    actor.clear_hint();
+    assert!(hint_of(&actor, false).await.is_none());
+}
+
+/// A scan that finishes after the streak ended sets nothing.
+#[tokio::test]
+async fn a_scan_that_outlives_its_streak_sets_no_hint() {
+    let mut actor = unproven_actor().await;
+    actor.failures = 3;
+    let (release, parked) = tokio::sync::oneshot::channel::<()>();
+    actor.hint_when("hci2".into(), "no connection within 20 s", async move {
+        let _ = parked.await;
+        Some(louder_elsewhere())
+    });
+    actor.clear_hint();
+    release.send(()).expect("the scan task waits");
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+    assert!(locked(&actor.info).adapter_hint.is_none());
+}
+
+/// The log's pointer and the row's hint come from the same scan: no louder adapter, no hint.
+#[tokio::test]
+async fn no_other_adapter_hearing_the_device_sets_no_hint() {
+    let mut actor = unproven_actor().await;
+    actor.failures = 3;
+    actor.hint_when("hci2".into(), "no connection within 20 s", async { None });
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+    assert!(locked(&actor.info).adapter_hint.is_none());
+}

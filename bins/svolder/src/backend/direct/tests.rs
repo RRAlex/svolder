@@ -1291,6 +1291,7 @@ fn hearing_at(name: &str, address: &str, rssi: Option<i16>) -> svolder_ble::adap
             .map(|rssi| svolder_ble::adapters::Heard {
                 unit: "0A1B2C3D4E5F6071".into(),
                 rssi: Some(rssi),
+                manufacturer: None,
             })
             .into_iter()
             .collect()),
@@ -1305,16 +1306,32 @@ fn a_failed_connect_names_the_adapter_that_hears_the_device_louder() {
         hearing_at("hci0", "AA:BB:CC:DD:EE:01", Some(-62)),
         hearing_at("hci2", "AA:BB:CC:DD:EE:02", Some(-74)),
     ];
-    let pointer = svolder_ble::adapters::pointer("hci2", "BF3", "0A1B2C3D4E5F6071", &hearings);
-    let failure = pointed(deadline_failure(), pointer);
+    let better = svolder_ble::adapters::better_than("hci2", "0A1B2C3D4E5F6071", &hearings);
+    let failure = pointed(deadline_failure(), "hci2", "BF3", better);
     assert!(connect_never_came_up(&failure));
-    assert!(
-        failure.what.ends_with(
-            "hci2 hears BF3 at −74 dBm and cannot hold a link; hci0 hears it at −62 dBm: try adapter = \"AA:BB:CC:DD:EE:01\""
-        ),
-        "{}",
-        failure.what
+    // The failure keeps its own words; a command prints the two hint lines under them.
+    assert_eq!(failure.what, deadline_failure().what);
+    assert_eq!(
+        failure.hint_lines(),
+        [
+            "svolder: hci2 hears BF3 at −74 dBm and cannot hold a link; hci0 hears it at −62 dBm:",
+            "         try adapter = \"AA:BB:CC:DD:EE:01\" (svolder adapters, or Settings → Bluetooth adapter)"
+        ]
     );
+    // The hint a front end offers the switch from rides with the failure, whose own words it
+    // keeps apart from the pointer.
+    let hint = failure.adapter_hint.expect("the hint");
+    assert_eq!(
+        (
+            hint.failing.as_str(),
+            hint.better.as_str(),
+            hint.take.as_str()
+        ),
+        ("hci2", "hci0", "AA:BB:CC:DD:EE:01")
+    );
+    assert_eq!((hint.own_heard, hint.own_dbm), (true, Some(-74)));
+    assert_eq!(hint.better_dbm, Some(-62));
+    assert_eq!(hint.failure, deadline_failure().what);
 }
 
 /// With no other adapter hearing the device the failure is the one it was.
@@ -1324,11 +1341,12 @@ fn a_failed_connect_is_unchanged_when_no_other_adapter_hears_the_device() {
         hearing_at("hci0", "AA:BB:CC:DD:EE:01", None),
         hearing_at("hci2", "AA:BB:CC:DD:EE:02", Some(-74)),
     ];
-    let pointer = svolder_ble::adapters::pointer("hci2", "BF3", "0A1B2C3D4E5F6071", &hearings);
-    assert_eq!(pointer, None);
+    let better = svolder_ble::adapters::better_than("hci2", "0A1B2C3D4E5F6071", &hearings);
+    assert_eq!(better, None);
     let before = deadline_failure();
-    let after = pointed(deadline_failure(), pointer);
+    let after = pointed(deadline_failure(), "hci2", "BF3", better);
     assert_eq!(after.what, before.what);
+    assert!(after.adapter_hint.is_none());
     assert_eq!(after.code, before.code);
 }
 
@@ -1346,7 +1364,7 @@ fn only_a_connect_deadline_is_pointed_elsewhere() {
 
 thread_local! {
     /// What the next [`point_elsewhere`] is told by a scan that no test has a radio for.
-    pub(super) static TOLD: std::cell::RefCell<Option<Option<String>>> = const { std::cell::RefCell::new(None) };
+    pub(super) static TOLD: std::cell::RefCell<Option<Option<svolder_ble::adapters::Better>>> = const { std::cell::RefCell::new(None) };
 }
 
 /// A transport that names an adapter and nothing else.
@@ -1362,6 +1380,16 @@ impl Transport for OnAdapter {
     }
     fn adapter(&self) -> Option<&str> {
         Some("hci2")
+    }
+}
+
+/// What a scan finds when hci0 hears the device at −62 dBm and the failing adapter at −74.
+fn louder() -> svolder_ble::adapters::Better {
+    svolder_ble::adapters::Better {
+        take: "AA:BB:CC:DD:EE:01".into(),
+        name: "hci0".into(),
+        rssi: Some(-62),
+        own: Some(Some(-74)),
     }
 }
 
@@ -1381,21 +1409,22 @@ fn bf3() -> DeviceConfig {
 async fn point_elsewhere_adds_the_pointer_to_a_connect_deadline_only() {
     let transport: Arc<dyn Transport> = Arc::new(OnAdapter);
     let device = bf3();
-    TOLD.with(|told| *told.borrow_mut() = Some(Some("hci0 hears it louder".into())));
+    TOLD.with(|told| *told.borrow_mut() = Some(Some(louder())));
     let said = point_elsewhere(deadline_failure(), Wire::Ble, &transport, Some(&device)).await;
+    assert_eq!(said.what, deadline_failure().what);
     assert!(
-        said.what.ends_with("; hci0 hears it louder"),
-        "{}",
-        said.what
+        said.hint_lines()[1].contains("try adapter = \"AA:BB:CC:DD:EE:01\""),
+        "{:?}",
+        said.hint_lines()
     );
 
-    TOLD.with(|told| *told.borrow_mut() = Some(Some("never".into())));
+    TOLD.with(|told| *told.borrow_mut() = Some(Some(louder())));
     let refused = Failure::from_ble(&BleError::PassphraseRejected);
     let before = refused.what.clone();
     let after = point_elsewhere(refused, Wire::Ble, &transport, Some(&device)).await;
     assert_eq!(after.what, before);
     let fake = point_elsewhere(deadline_failure(), Wire::Fake, &transport, Some(&device)).await;
-    assert!(!fake.what.contains("never"), "{}", fake.what);
+    assert!(fake.adapter_hint.is_none() && fake.hint_lines().is_empty());
     TOLD.with(|told| told.take());
 }
 
@@ -1434,15 +1463,19 @@ async fn open_over_points_a_connect_deadline_at_the_adapter_that_hears_the_devic
     let mut config = Config::default();
     config.devices.push(bf3());
     let transport: Arc<dyn Transport> = Arc::new(NeverUp);
-    TOLD.with(|told| *told.borrow_mut() = Some(Some("hci0 hears it louder".into())));
+    TOLD.with(|told| *told.borrow_mut() = Some(Some(louder())));
     let failure = open_over(&g, &config, transport, true, Wire::Ble, Some("hci2"))
         .await
         .err()
         .expect("the connect never comes up");
     TOLD.with(|told| told.take());
     assert!(
-        failure.what.ends_with("; hci0 hears it louder"),
-        "{}",
-        failure.what
+        failure.hint_lines()[1].contains("try adapter = \"AA:BB:CC:DD:EE:01\""),
+        "{:?}",
+        failure.hint_lines()
+    );
+    assert_eq!(
+        failure.adapter_hint.map(|hint| hint.take),
+        Some("AA:BB:CC:DD:EE:01".to_string())
     );
 }

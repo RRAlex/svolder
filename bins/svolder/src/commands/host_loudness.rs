@@ -94,6 +94,7 @@ async fn answer(
                     what: "the daemon serves no computer EQ (host audio is off for it)".to_string(),
                     next: "Restart it without SVOLDER_HOST=off, then try again".to_string(),
                     reason: None,
+                    adapter_hint: None,
                 }),
             };
         }
@@ -159,6 +160,7 @@ fn needs_a_daemon_for_loudness() -> Failure {
         what: format!("{NEEDS_A_DAEMON}, and none serves the computer EQ"),
         next: "Start it with `svolder daemon install`, then try again".to_string(),
         reason: None,
+        adapter_hint: None,
     }
 }
 

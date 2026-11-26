@@ -869,6 +869,12 @@ fn press(view: &mut ShownStep, key: KeyEvent) -> Asked {
             KeyCode::Up => view.step_choice(-1),
             KeyCode::Down => view.step_choice(1),
             KeyCode::Char('q') => return Asked::Quit,
+            // The walk's question of which adapter to add the device through keeps the one in
+            // use on `k`, the second of its two answers.
+            KeyCode::Char('k') if keeps_the_adapter(&view.prompt) => {
+                view.choice = 1;
+                return Asked::Answer;
+            }
             _ => {}
         },
         true => match key.code {
@@ -882,6 +888,14 @@ fn press(view: &mut ShownStep, key: KeyEvent) -> Asked {
         },
     }
     Asked::Nothing
+}
+
+/// Whether `prompt` is the walk's question of which adapter to add the device through, whose
+/// second answer keeps the adapter in use.
+pub(crate) fn keeps_the_adapter(prompt: &Prompt) -> bool {
+    prompt.step == Step::Adapter
+        && prompt.title == svolder_walk::ADAPTER_QUESTION
+        && prompt.choices.len() == 2
 }
 
 /// Whether `key` is held down with Ctrl or Alt, which is what makes it a combination rather
@@ -948,6 +962,7 @@ fn waiting_for(prompt: &Prompt, choice: usize) -> Option<String> {
         Step::Fixes => "applying the fixes…",
         Step::Scan => "listening…",
         Step::Name | Step::Passphrase => "connecting…",
+        Step::Adapter if choice == 0 => "switching the adapter…",
         Step::Daemon => "installing the user service…",
         Step::Health | Step::Linked | Step::Pick | Step::Adapter | Step::Done => return None,
     };

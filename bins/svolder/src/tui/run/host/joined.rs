@@ -1434,8 +1434,8 @@ async fn the_cover_of_the_track_playing_is_drawn_beside_its_title_and_follows_th
     watching.show_art(Some(ratatui_image::picker::Picker::halfblocks()));
 
     let served = &daemon;
-    // One row short of the size where the Status pane grows for a cover: the picture to build
-    // stays small (the grown one is a big box in a debug build).
+    // One row short of the size where the VU rows join the Status pane: the cover's box stays
+    // small (the taller one is a bigger picture to build in a debug build).
     let (end, _) = drive(watching, (TALL.0, 44), |frames, _| async move {
         let daemon = served;
         let started = Instant::now();

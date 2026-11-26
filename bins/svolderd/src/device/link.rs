@@ -7,9 +7,11 @@
 //! The actor's `run` is these two loops in turn, so a device that goes away is found again
 //! without a restart.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use svolder_ble::Session;
+use svolder_ble::adapters::{Better, better_for};
 use svolder_ipc::{Event, Response};
 use svolder_proto::Message;
 use tokio::sync::oneshot;
@@ -110,6 +112,7 @@ impl Actor {
                 AttemptEnd::Connected if std::mem::take(&mut self.drop_due) => {
                     self.release_for_adapter().await;
                     self.failures = 0;
+                    self.clear_hint();
                 }
                 AttemptEnd::Connected => {
                     let refused = locked(&self.info).refused;
@@ -118,6 +121,7 @@ impl Actor {
                     self.set_connected(true);
                     self.last_failure = None;
                     self.failures = 0;
+                    self.clear_hint();
                     let device = self.name.clone();
                     self.publish(Event::Connection {
                         device,
@@ -137,7 +141,12 @@ impl Actor {
                     self.log_failure(&message, wait);
                     self.failures = self.failures.saturating_add(1);
                     if pointer_due(self.failures, &message) {
-                        self.point_elsewhere();
+                        self.point_elsewhere(&message);
+                    } else if svolder_ble::adapters::is_connect_deadline(&message) {
+                        self.refresh_hint(&message);
+                    } else {
+                        // A refusal or an absent device says nothing of the adapter.
+                        self.clear_hint();
                     }
                     self.set_next_attempt(Some(tokio::time::Instant::now() + wait));
                     match self.idle(rx, wait).await {
@@ -146,7 +155,13 @@ impl Actor {
                         // Something said the device may be reachable before the schedule
                         // expected it ([`Command::ends_the_wait`]): the attempt this loop
                         // makes next starts the schedule over.
-                        Idled::Interrupted => self.failures = 0,
+                        Idled::Interrupted => {
+                            self.failures = 0;
+                            // A move to another adapter leaves what was said of the old one.
+                            if self.drop_due {
+                                self.clear_hint();
+                            }
+                        }
                     }
                 }
             }
@@ -155,6 +170,7 @@ impl Actor {
 
     /// Let go of the link because the daemon moved to another adapter, saying so once.
     async fn release_for_adapter(&mut self) {
+        self.clear_hint();
         log::info(&format!(
             "{}: the adapter changed; connecting again through it",
             self.name
@@ -167,20 +183,75 @@ impl Actor {
         });
     }
 
-    /// Where connects keep failing on an adapter and another one hears the device, say so in
-    /// the log, once per streak: the scan runs on a task of its own, so the actor's own
-    /// attempts and commands are not held for it. A transport with no adapter of its own (the
-    /// fake) has nothing to point away from.
-    fn point_elsewhere(&self) {
+    /// Where connects keep failing on an adapter and another one hears the device, say so: in
+    /// the log, once per streak, and in the device's row (the adapter hint) until the streak
+    /// ends. The scan runs on a task of its own, so the actor's own attempts and commands are
+    /// not held for it. A transport with no adapter of its own (the fake) has nothing to point
+    /// away from.
+    fn point_elsewhere(&self, failure: &str) {
         let Some(failing) = self.transport.adapter().map(str::to_string) else {
             return;
         };
-        let (name, unit) = (self.name.clone(), self.config.udid.clone());
+        let unit = self.config.udid.clone();
+        let heard = {
+            let failing = failing.clone();
+            async move { better_for(&failing, &unit).await }
+        };
+        self.hint_when(failing, failure, heard);
+    }
+
+    /// Wait for `heard`, the adapter that hears the device better than `failing`, on a task of
+    /// its own; when there is one, say so in the log and set the hint, unless the streak it is
+    /// about ended meanwhile.
+    pub(super) fn hint_when(
+        &self,
+        failing: String,
+        failure: &str,
+        heard: impl Future<Output = Option<Better>> + Send + 'static,
+    ) {
+        let name = self.name.clone();
+        let (info, tries) = (Arc::clone(&self.info), self.failures);
+        let (epoch, failure) = (locked(&info).hint_epoch, failure.to_string());
         tokio::spawn(async move {
-            if let Some(words) = svolder_ble::adapters::pointer_for(&failing, &name, &unit).await {
-                log::warn(&format!("{name}: {words}"));
+            let Some(better) = heard.await else {
+                return;
+            };
+            log::warn(&format!(
+                "{name}: {}",
+                svolder_ble::adapters::pointer_words(&failing, &name, &better)
+            ));
+            let (own_heard, own_dbm) = svolder_ipc::AdapterHint::own_from(better.own);
+            let mut info = locked(&info);
+            // A streak that ended while the adapters listened leaves nothing to point at.
+            if info.hint_epoch == epoch {
+                info.adapter_hint = Some(svolder_ipc::AdapterHint {
+                    device: name,
+                    failing,
+                    own_heard,
+                    own_dbm,
+                    better: better.name,
+                    better_dbm: better.rssi,
+                    take: better.take,
+                    failure,
+                    tries,
+                });
             }
         });
+    }
+
+    /// Keep the hint's count and failure words up to date while the same streak goes on.
+    pub(super) fn refresh_hint(&self, message: &str) {
+        if let Some(hint) = locked(&self.info).adapter_hint.as_mut() {
+            hint.tries = hint.tries.max(self.failures);
+            hint.failure = message.to_string();
+        }
+    }
+
+    /// Take the adapter hint back: the streak it was about is over.
+    pub(super) fn clear_hint(&self) {
+        let mut info = locked(&self.info);
+        info.adapter_hint = None;
+        info.hint_epoch = info.hint_epoch.wrapping_add(1);
     }
 
     /// Say how the first attempt ended, to a probe's caller, once.

@@ -18,7 +18,7 @@ use crate::tui::layout_tier::Tier;
 use crate::tui::mouse::{Hit, HitMap};
 use crate::tui::render::Logo;
 use crate::tui::theme::{Role, Theme};
-use crate::tui::widgets::spinner;
+use crate::tui::widgets::{graph, spinner};
 
 use super::{FIRMWARE, cells, cut_cells, raw_of};
 
@@ -318,18 +318,30 @@ pub(in crate::tui::screens) fn header_built(
     let faults = fault_spans(app, theme);
     let mouse = mouse_span(app, theme);
     let clock = Span::raw(app.clock.clone());
+    let fixed: usize = lead.iter().map(Span::width).sum::<usize>()
+        + after.iter().map(Span::width).sum::<usize>()
+        + words.width()
+        + faults.iter().map(Span::width).sum::<usize>()
+        + mouse.width()
+        + 1
+        + clock.width()
+        + CLOCK_MARGIN;
+    // The signal after the connection word is sized first, where the whole device name still
+    // fits: the bars, and the reading too where the shortest warning on the readings (while the
+    // link is down) still fits beside it. The reading goes first, then the bars.
+    let shortest = match app.readings_old() {
+        true => cells(&format!("{OLD_GAP}{STALE}")),
+        false => 0,
+    };
+    let spare = width.saturating_sub(fixed + cells(&app.session.product) + 1);
+    let signal = signal_spans(app, theme, spare, spare.saturating_sub(shortest));
+    let signal_w: usize = signal.iter().map(Span::width).sum();
     // While the link is down every value on screen is from before it dropped: the header says so
-    // in the warning role, in the longest words that leave the device's name [`NAME_KEPT`] cells.
+    // in the warning role, in the longest words that fit after the signal and leave the device's
+    // name [`NAME_KEPT`] cells, and in none where not even `stale` does.
     let old = app.readings_old().then(|| {
-        let fixed: usize = lead.iter().map(Span::width).sum::<usize>()
-            + after.iter().map(Span::width).sum::<usize>()
-            + words.width()
-            + faults.iter().map(Span::width).sum::<usize>()
-            + mouse.width()
-            + 1
-            + clock.width()
-            + CLOCK_MARGIN;
-        let room = width.saturating_sub(fixed + cells(&app.session.product).min(NAME_KEPT));
+        let room =
+            width.saturating_sub(fixed + signal_w + cells(&app.session.product).min(NAME_KEPT));
         [READINGS_OLD, READINGS_STALE, STALE]
             .into_iter()
             .map(|text| format!("{OLD_GAP}{text}"))
@@ -345,6 +357,7 @@ pub(in crate::tui::screens) fn header_built(
     let kept: usize = lead.iter().map(Span::width).sum::<usize>()
         + after.iter().map(Span::width).sum::<usize>()
         + words.width()
+        + signal.iter().map(Span::width).sum::<usize>()
         + old.width()
         + faults.iter().map(Span::width).sum::<usize>()
         + mouse.width()
@@ -360,10 +373,11 @@ pub(in crate::tui::screens) fn header_built(
     spans.extend(after);
     marks.push((
         Line::from(spans.clone()).width(),
-        words.width() + old.width(),
+        words.width() + signal.iter().map(Span::width).sum::<usize>() + old.width(),
         Hit::Connection,
     ));
     spans.push(words);
+    spans.extend(signal);
     spans.push(old);
     if !faults.is_empty() {
         let before = Line::from(spans.clone()).width();
@@ -381,6 +395,61 @@ pub(in crate::tui::screens) fn header_built(
     line.push_span(clock);
     line.push_span(Span::raw(" ".repeat(CLOCK_MARGIN)));
     (line, marks)
+}
+
+/// The blanks between the connection word and the bars.
+const SIGNAL_GAP: &str = "  ";
+/// The four bars, shortest first.
+const BARS: [char; 4] = ['\u{2582}', '\u{2584}', '\u{2586}', '\u{2588}'];
+
+/// The signal the header carries after the connection word: the bars (the lit
+/// ones in the text role, the others dim) and the reading, in the one the Status pane's
+/// `Device` row shows, the bars and the dim from the rule the GNOME panel draws
+/// ([`svolder_ipc::Signal::bars`], [`svolder_ipc::Signal::old`]). The reading is left out
+/// first where `reading_room` is short, then the bars where `bars_room` is; no signal heard
+/// leaves nothing.
+fn signal_spans(
+    app: &App,
+    theme: &Theme,
+    bars_room: usize,
+    reading_room: usize,
+) -> Vec<Span<'static>> {
+    let Some(signal) = app.session.facts.as_ref().and_then(|f| f.signal.as_ref()) else {
+        return Vec::new();
+    };
+    let old = signal.old(graph::wall_ms());
+    let lit = usize::from(signal.bars());
+    let reading = format!(
+        " {}{} dBm",
+        if signal.dbm < 0 {
+            svolder_ipc::SIGNAL_MINUS.to_string()
+        } else {
+            String::new()
+        },
+        signal.dbm.unsigned_abs()
+    );
+    let bars_w = SIGNAL_GAP.len() + BARS.len();
+    let dim = theme.style(Role::Dim);
+    let mut spans = Vec::new();
+    if bars_room < bars_w {
+        return spans;
+    }
+    spans.push(Span::raw(SIGNAL_GAP));
+    for (n, bar) in BARS.into_iter().enumerate() {
+        let style = match old || n >= lit {
+            true => dim,
+            false => theme.style(Role::Text),
+        };
+        spans.push(Span::styled(bar.to_string(), style));
+    }
+    if reading_room >= bars_w + cells(&reading) {
+        let style = match old {
+            true => dim,
+            false => theme.style(Role::Text),
+        };
+        spans.push(Span::styled(reading, style));
+    }
+    spans
 }
 
 /// The blank cells after the clock: the corner keeps off the window's right edge.

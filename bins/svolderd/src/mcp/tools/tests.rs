@@ -188,6 +188,7 @@ impl Fleet for Scripted {
             refused: false,
             recalled: self.recalled.lock().unwrap().clone(),
             key_readings: Vec::new(),
+            adapter_hint: None,
         })
     }
 

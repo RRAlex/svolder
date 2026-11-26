@@ -296,6 +296,8 @@ pub(super) fn stand(profile: &str, name: &str, unit: &str, extra: &[(&str, i64)]
             stale: false,
             next_attempt: None,
             passphrase_note: None,
+            adapter_hint: None,
+            hint_epoch: 0,
             refused: false,
             history: Arc::default(),
             ring: Arc::default(),

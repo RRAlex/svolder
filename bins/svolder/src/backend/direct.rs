@@ -809,10 +809,10 @@ async fn point_elsewhere(
     }
     #[cfg(test)]
     if let Some(told) = tests::TOLD.with(|told| told.take()) {
-        return pointed(failure, told);
+        return pointed(failure, failing, &device.name, told);
     }
-    let pointer = svolder_ble::adapters::pointer_for(failing, &device.name, &device.udid).await;
-    pointed(failure, pointer)
+    let better = svolder_ble::adapters::better_for(failing, &device.udid).await;
+    pointed(failure, failing, &device.name, better)
 }
 
 /// Whether `failure` is a connect that ran out its deadline, which is what a dongle that hears
@@ -821,10 +821,28 @@ fn connect_never_came_up(failure: &Failure) -> bool {
     svolder_ble::adapters::is_connect_deadline(&failure.what)
 }
 
-/// `failure` with `pointer` after its words, or as it was when there is none.
-fn pointed(mut failure: Failure, pointer: Option<String>) -> Failure {
-    if let Some(words) = pointer {
-        failure.what = format!("{}; {words}", failure.what);
+/// `failure` with the adapter hint `better` makes: what each adapter hears and the step, which a
+/// command prints under the failure ([`Failure::report`]) and the TUI offers the switch from. The
+/// failure's own words stay its own; as it was when there is none.
+fn pointed(
+    mut failure: Failure,
+    failing: &str,
+    device: &str,
+    better: Option<svolder_ble::adapters::Better>,
+) -> Failure {
+    if let Some(better) = better {
+        let (own_heard, own_dbm) = svolder_ipc::AdapterHint::own_from(better.own);
+        failure.adapter_hint = Some(Box::new(svolder_ipc::AdapterHint {
+            device: device.to_string(),
+            failing: failing.to_string(),
+            own_heard,
+            own_dbm,
+            better: better.name.clone(),
+            better_dbm: better.rssi,
+            take: better.take.clone(),
+            failure: failure.what.clone(),
+            tries: 1,
+        }));
     }
     failure
 }

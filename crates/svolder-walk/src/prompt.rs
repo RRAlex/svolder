@@ -8,9 +8,10 @@ use serde::{Deserialize, Serialize};
 /// The steps of a guided run, in the order it walks them.
 ///
 /// The device walk ([`crate::DeviceWalk`]) walks [`Step::Linked`], [`Step::Scan`],
-/// [`Step::Pick`], [`Step::Name`] and [`Step::Passphrase`]; a front end's first run walks the
-/// others itself around it (the host's health and fixes before it, the adapter, the daemon and
-/// what was written after it), so one vocabulary names every step a person is shown.
+/// [`Step::Pick`], [`Step::Name`] and [`Step::Passphrase`], and [`Step::Adapter`] between the pick
+/// and the name when several adapters heard the device and the one in use is not the best. A front
+/// end's first run walks the others itself around it (the host's health and fixes before it, the
+/// daemon and what was written after it), so one vocabulary names every step a person is shown.
 ///
 /// A step that has nothing to ask is not walked: a walk with no device linked skips
 /// [`Step::Linked`], a device that connects on the advertised passphrase skips

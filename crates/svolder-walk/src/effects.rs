@@ -18,6 +18,9 @@ pub struct Heard {
     pub entries: Vec<ScanEntry>,
     /// what opening the radio had to say, as lines to show above the rows
     pub notices: Vec<String>,
+    /// what every adapter heard, when the machine has more than one and the walk listened on
+    /// all of them; `None` otherwise, which leaves the walk as it was
+    pub adapters: Option<crate::Listened>,
 }
 
 /// Why a write of the device was refused.
@@ -73,6 +76,16 @@ pub trait WalkEffects {
 
     /// The profiles devices are read through, or nothing when they could not be read.
     fn registry(&self) -> Option<&Registry>;
+
+    /// Make `adapter` the one svolder connects through: written into the config as `adapter`
+    /// (`address` is what to name there, `name` its kernel name), and followed by whatever holds
+    /// the links. The walk asks for it before the device's passphrase is tested, so the test runs
+    /// on the adapter that hears the device.
+    fn switch_adapter(
+        &self,
+        address: &str,
+        name: &str,
+    ) -> impl Future<Output = Result<(), Self::Failure>>;
 
     /// The names of the configured devices that hold a link now, which the scan and the
     /// passphrase test may disturb. None by default: a walk with nothing linked starts at its

@@ -244,6 +244,10 @@ pub struct Failure {
     /// Why the daemon says it happened, for a failure that is its answer: the reason it sent, or
     /// the one its words give a 0.32.x daemon ([`reason_of`]).
     pub reason: Option<Reason>,
+    /// For a connect that never came up on one adapter while another hears the device: what each
+    /// hears and the adapter to switch to. A front end offers the switch; the words of `what`
+    /// carry it for one that does not.
+    pub adapter_hint: Option<Box<svolder_ipc::AdapterHint>>,
 }
 
 impl std::fmt::Display for Failure {
@@ -266,6 +270,7 @@ impl From<svolder_host::eq::EqFailure> for Failure {
             what: failure.what,
             next: failure.next,
             reason: None,
+            adapter_hint: None,
         }
     }
 }
@@ -284,6 +289,7 @@ impl Failure {
             what: detail.into(),
             next: next_step(kind).to_string(),
             reason: None,
+            adapter_hint: None,
         }
     }
 
@@ -315,6 +321,7 @@ impl Failure {
             },
             next: ble_next_step(err).to_string(),
             reason: None,
+            adapter_hint: None,
         }
     }
 
@@ -333,6 +340,7 @@ impl Failure {
             what,
             next,
             reason,
+            adapter_hint: None,
         }
     }
 
@@ -362,13 +370,30 @@ impl Failure {
                 socket.display()
             ),
             next: NO_DEVICE_STEP.replace("SOCKET", &shell_word(socket)),
+            adapter_hint: None,
         }
     }
 
     /// Say this on stderr, as a CLI verb does, and hand back the exit code to leave with.
     pub fn report(self) -> ExitCode {
         eprintln!("svolder: {self}");
+        for line in self.hint_lines() {
+            eprintln!("{line}");
+        }
         ExitCode::from(self.code)
+    }
+
+    /// The lines a command prints under the failure when it carries an adapter hint its own words
+    /// do not already say: the first behind `svolder: `, the second under it.
+    pub fn hint_lines(&self) -> Vec<String> {
+        let Some(hint) = &self.adapter_hint else {
+            return Vec::new();
+        };
+        if self.what.contains(&hint.step()) {
+            return Vec::new();
+        }
+        let [hears, step] = hint.lines();
+        vec![format!("svolder: {hears}"), format!("         {step}")]
     }
 }
 

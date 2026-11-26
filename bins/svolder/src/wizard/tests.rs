@@ -1006,3 +1006,89 @@ async fn the_wizard_path_is_refused_by_the_writer_for_a_configured_unit() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
     assert!(fx.written_device().is_none());
 }
+
+/// What two adapters heard of the unit `seen_product` makes, `hci0` louder than `hci2`, which is
+/// the one in use.
+fn heard_on_two() -> svolder_walk::Listened {
+    let on = |name: &str, address: &str, rssi: i16| svolder_walk::ListenedOn {
+        name: name.into(),
+        address: address.into(),
+        heard: vec![("0102030405060708".to_string(), Some(rssi))],
+        adverts: Vec::new(),
+    };
+    svolder_walk::Listened {
+        in_use: "hci2".into(),
+        adapters: vec![
+            on("hci0", "AA:BB:CC:DD:EE:01", -74),
+            on("hci2", "AA:BB:CC:DD:EE:02", -80),
+        ],
+    }
+}
+
+/// A walk that listened on every adapter asks which to use between the pick and the name, writes
+/// the adapter when the answer is to switch (before the passphrase is tested, so the test runs on
+/// it) and does not grade the adapters again afterwards.
+#[tokio::test]
+async fn the_walk_asks_which_adapter_and_the_wizard_does_not_grade_them_again() {
+    let fx = FakeEffects::healthy()
+        .with_scan(vec![seen_product("0102030405060708", "Bifrost 3", -80)])
+        .with_adapters([("hci0", 2), ("hci2", 5)])
+        .hearing_on(heard_on_two());
+    let mut wizard = Wizard::starting_at(fx.clone(), Step::Scan, Given::default());
+    wizard.answer(0, None).await.unwrap(); // scan
+    let pick = wizard.prompt().await.unwrap();
+    assert!(
+        pick.choices[0].contains("hci0 \u{2212}74 dBm  hci2 \u{2212}80 dBm"),
+        "{pick:?}"
+    );
+    wizard.answer(0, None).await.unwrap();
+    let ask = wizard.prompt().await.unwrap();
+    assert_eq!(ask.step, Step::Adapter);
+    assert_eq!(ask.choices[0], "Add it and switch to hci0");
+    wizard.answer(0, None).await.unwrap();
+    assert_eq!(fx.written_adapter(), Some("hci0".into()));
+    assert!(
+        fx.written_device().is_none(),
+        "the switch comes before the write"
+    );
+    assert_eq!(wizard.prompt().await.unwrap().step, Step::Name);
+    wizard.answer(0, Some("dac".into())).await.unwrap();
+    assert_eq!(fx.written_device().unwrap().name, "dac");
+    // The walk asked, so the wizard goes on to the daemon without grading the adapters.
+    assert_eq!(wizard.prompt().await.unwrap().step, Step::Daemon);
+    assert_eq!(fx.graded(), 0);
+    wizard.answer(1, None).await.unwrap();
+    let done = wizard.prompt().await.unwrap();
+    assert!(
+        done.body
+            .iter()
+            .any(|line| line == "Set adapter = \"hci0\"."),
+        "{done:?}"
+    );
+}
+
+/// Keeping the adapter in use writes no adapter, and a walk on a machine that listened on one
+/// adapter only keeps the grading step it had.
+#[tokio::test]
+async fn keeping_the_adapter_writes_none_and_one_adapter_keeps_the_grading_step() {
+    let fx = FakeEffects::healthy()
+        .with_scan(vec![seen_product("0102030405060708", "Bifrost 3", -80)])
+        .with_adapters([("hci0", 2), ("hci2", 5)])
+        .hearing_on(heard_on_two());
+    let mut wizard = Wizard::starting_at(fx.clone(), Step::Scan, Given::default());
+    wizard.answer(0, None).await.unwrap();
+    wizard.answer(0, None).await.unwrap();
+    wizard.answer(1, None).await.unwrap(); // keep
+    assert_eq!(fx.written_adapter(), None);
+    wizard.answer(0, Some("dac".into())).await.unwrap();
+    assert_eq!(wizard.prompt().await.unwrap().step, Step::Daemon);
+
+    let plain = FakeEffects::healthy()
+        .with_scan(vec![seen_product("0102030405060708", "Bifrost 3", -80)])
+        .with_adapters([("hci0", 2), ("hci2", 5)]);
+    let mut wizard = Wizard::starting_at(plain.clone(), Step::Scan, Given::default());
+    wizard.answer(0, None).await.unwrap();
+    wizard.answer(0, None).await.unwrap();
+    wizard.answer(0, Some("dac".into())).await.unwrap();
+    assert_eq!(wizard.prompt().await.unwrap().step, Step::Adapter);
+}

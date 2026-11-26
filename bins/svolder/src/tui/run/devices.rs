@@ -633,6 +633,7 @@ pub(super) async fn relist_held(watching: &mut Watching) {
             row.clone_from(fresh);
         }
     }
+    watching.app.devices.forget_cleared_dismissal();
     // The device the TUI is on is one of them: its Status pane takes the same answer, so it
     // and the list agree.
     if let Some(own) = heard

@@ -56,6 +56,7 @@ impl Stub {
             refused: false,
             recalled: None,
             key_readings: Vec::new(),
+            adapter_hint: None,
         };
         let feed = Feed {
             heard_at: Default::default(),

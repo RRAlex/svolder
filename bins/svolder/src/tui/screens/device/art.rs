@@ -3,28 +3,21 @@
 
 //! The cover art at the right of the Status pane's rows, beside the track's title.
 //!
-//! The picture takes the pane's interior height and as many columns as a square of that height
+//! The picture takes the height of the pane's rows and as many columns as a square of that height
 //! is wide in the terminal's own cells, and the pane's rows are fit to what it leaves, so it is
 //! never over a value. It goes when the rows would have less than [`MIN_WORDS`] columns left,
 //! which is before the title does at any narrower width.
 //!
-//! On a terminal of [`GROW_COLS`] by [`GROW_ROWS`] or more the Status pane grows upward while a
-//! cover is on show ([`growth`]): it takes only the rows the Controls and Tone panes do not
-//! draw something in, and no more than the picture can use at the width the words leave it, so
-//! the cover is a larger square. Below that size, or with no cover, the pane keeps its usual height.
+//! The picture's height is the Status pane's rows: the pane is as tall as its rows (and a blank
+//! row at the end in the tall tier) whatever the cover, so the cover never grows the pane.
 
 use ratatui::layout::{Rect, Size};
-use svolder_ipc::{ColorDepth, TuiConfig};
 
 use crate::tui::app::{App, Screen};
 use crate::tui::layout_tier::Tier;
-use crate::tui::theme::Theme;
 
-use super::controls::{controls_lines, room};
-use super::path_line;
+use super::rows_of;
 use super::status::now_playing_drawn;
-use super::tone_pane::tone_lines_in;
-use super::{panes_of, rows_of};
 
 /// Columns between the picture and the rows' words.
 pub(super) const GAP: u16 = 2;
@@ -32,14 +25,6 @@ pub(super) const GAP: u16 = 2;
 /// The fewest columns the rows' words keep beside the art: what the Device row and the readouts
 /// need to say what they say at their usual length.
 const MIN_WORDS: u16 = 64;
-
-/// The terminal size from which the Status pane grows for a cover.
-pub(super) const GROW_COLS: u16 = 100;
-pub(super) const GROW_ROWS: u16 = 45;
-
-/// The fewest rows of cover worth taking the panes' blank lines for: a Controls pane whose
-/// spaced lines would leave less than this to the cover is packed instead.
-const USEFUL_ROWS: u16 = 8;
 
 /// The fewest columns and rows a picture is worth drawing in.
 const MIN_COLS: u16 = 4;
@@ -57,80 +42,8 @@ fn wanted(app: &App) -> Option<(u16, u16)> {
     .then_some(cell)
 }
 
-/// The rows the Controls and Tone panes of a frame whose panes band is `panes` wide draw their
-/// content in, borders and blank top row included: `spaced` sets the Controls pane's groups a
-/// blank line apart as it does when it has room. The drawn-state flags the build writes are put
-/// back, as a layout question is no draw.
-fn panes_need(app: &App, tier: Tier, panes: Rect, spaced: bool) -> u16 {
-    // Line counts do not depend on colour: the plainest theme builds them.
-    let theme = Theme::from_config(&TuiConfig::default(), true, ColorDepth::Ansi16);
-    let (controls, tone) = panes_of(
-        Rect { height: 1, ..panes },
-        app.profile.eq.is_some(),
-        tier,
-        app.tui.device_split,
-    );
-    let kept = (
-        app.drawn.controls_switch.get(),
-        app.drawn.controls_pending.get(),
-    );
-    let lines = controls_lines(app, &theme, room(controls, tier), tier, spaced, true, &[])
-        .lines_reserving(path_line::MAX_LINES);
-    app.drawn.controls_switch.set(kept.0);
-    app.drawn.controls_pending.set(kept.1);
-    let tone = match (app.profile.eq.as_ref(), tone) {
-        (Some(eq), Some(area)) => {
-            let inner = tier.block().inner(area);
-            let size = (usize::from(inner.width), usize::MAX);
-            tone_lines_in(app, eq, &theme, size).lines.len()
-        }
-        _ => 0,
-    };
-    let frame = 2 + tier.top();
-    u16::try_from(lines.max(tone))
-        .unwrap_or(u16::MAX)
-        .saturating_add(frame)
-}
-
-/// The rows the Status pane grows by in a frame `area` whose body is `body` tall below the
-/// header, for a pane of `base` rows with `gap` rows over it: the rows the Controls and Tone
-/// panes do not draw in (each pane's lines, its groups a blank line apart, with its borders),
-/// held to the height the picture can use at the width the words leave it. Where the blanks
-/// would leave the cover under [`USEFUL_ROWS`], the Controls pane's packed lines are the floor.
-/// Nothing below [`GROW_COLS`] by [`GROW_ROWS`] or with no cover on show.
-pub(super) fn growth(area: Rect, body: Rect, tier: Tier, base: u16, gap: u16, app: &App) -> u16 {
-    if area.width < GROW_COLS || area.height < GROW_ROWS {
-        return 0;
-    }
-    let Some((cell_w, cell_h)) = wanted(app) else {
-        return 0;
-    };
-    // The interior the picture's width allows, and what the pane's own rows already have.
-    let inner = tier.block().inner(Rect {
-        height: base,
-        ..body
-    });
-    let trail = u16::try_from(tier.trail()).unwrap_or(u16::MAX);
-    let room = inner.width.saturating_sub(trail + GAP + MIN_WORDS);
-    let tall = u32::from(room) * u32::from(cell_w) / u32::from(cell_h);
-    let tall = u16::try_from(tall)
-        .unwrap_or(u16::MAX)
-        .saturating_sub(inner.height);
-    let free = body.height.saturating_sub(gap + base);
-    let by = |spaced: bool| {
-        free.saturating_sub(panes_need(app, tier, body, spaced))
-            .min(tall)
-    };
-    let spaced = by(true);
-    if inner.height + spaced >= USEFUL_ROWS {
-        spaced
-    } else {
-        by(false)
-    }
-}
-
 /// The most picture the Status pane at `status` (in a frame of `tier`) can take beside its rows
-/// for `app`: its interior height by the columns that make a square in the terminal's cells,
+/// for `app`: its rows' height (the pane's interior less its blank end row) by the columns that make a square in the terminal's cells,
 /// held to what leaves the words [`MIN_WORDS`]. `None` with no cover to show, art off, no
 /// `Now playing` row to be beside, or no room.
 pub(super) fn box_in(status: Rect, tier: Tier, app: &App) -> Option<Size> {
@@ -138,11 +51,13 @@ pub(super) fn box_in(status: Rect, tier: Tier, app: &App) -> Option<Size> {
     let inner = tier.block().inner(status);
     let trail = u16::try_from(tier.trail()).unwrap_or(u16::MAX);
     let room = inner.width.saturating_sub(trail + GAP + MIN_WORDS);
-    let square = u32::from(inner.height) * u32::from(cell_h);
+    // The picture is as tall as the pane's rows: the tall tier's blank row at the pane's end stays blank.
+    let rows = inner.height.saturating_sub(tier.end_blank());
+    let square = u32::from(rows) * u32::from(cell_h);
     let square = u16::try_from(square.div_ceil(u32::from(cell_w))).unwrap_or(u16::MAX);
     let size = Size {
         width: square.min(room),
-        height: inner.height,
+        height: rows,
     };
     (size.width >= MIN_COLS && size.height >= MIN_ROWS).then_some(size)
 }
@@ -207,8 +122,8 @@ pub(crate) fn art_reserved(app: &App) -> usize {
 
 /// Whether the picture is held back from this frame because something is drawn over its first
 /// cell: a box (while one is open, whatever it covers), or, until the picture has been written
-/// once, a toast or a tooltip over its corner. All of them `Clear` the cell the kitty protocol
-/// sends the picture in, which wipes it unseen.
+/// once, a toast or a tooltip over any part of it. All of them `Clear` cells of the picture, which
+/// the kitty protocol sends once, and that wipes it unseen.
 pub(super) fn held(frame: Rect, slot: Rect, picture: &crate::tui::art::Picture, app: &App) -> bool {
     if app.modal_open() {
         return true;
@@ -216,12 +131,13 @@ pub(super) fn held(frame: Rect, slot: Rect, picture: &crate::tui::art::Picture, 
     if picture.sent.load(std::sync::atomic::Ordering::Relaxed) {
         return false;
     }
-    let corner = ratatui::layout::Position::new(slot.x, slot.y);
+    // The toast clears every cell it covers, not only the slot's first: the upload is held while
+    // the toast's box meets any part of the slot.
     let toast = app.toast().is_some_and(|toast| {
         let (_, [_, body]) = crate::tui::layout_tier::split(frame);
         crate::tui::boxes::toast::area(body, &toast.text)
             .0
-            .contains(corner)
+            .intersects(slot)
     });
     // A tooltip is placed under the pointer, up to its widest line wide and two lines high.
     let reach = u16::try_from(crate::tui::boxes::tooltip::MAX_WIDTH).unwrap_or(u16::MAX);

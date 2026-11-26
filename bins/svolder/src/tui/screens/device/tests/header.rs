@@ -310,3 +310,155 @@ fn a_device_never_heard_has_no_old_readings() {
     assert!(top.contains("○ disconnected"), "{top}");
     assert!(!top.contains("readings") && !top.contains("stale"), "{top}");
 }
+
+/// The wall clock the signal cases hold, in unix milliseconds.
+const SIGNAL_WALL: u64 = 1_800_000_000_000;
+
+/// `mockup_app` with the facts of a device whose signal is `dbm` heard `secs` ago, the link
+/// `connected` or not.
+fn signal_app(dbm: Option<i16>, secs: u64, connected: bool) -> App {
+    crate::tui::widgets::graph::hold_wall_ms(SIGNAL_WALL);
+    let mut app = mockup_app();
+    app.session.connected = connected;
+    app.session.facts = Some(crate::backend::DeviceRow {
+        name: "gungnir".into(),
+        signal: dbm.map(|dbm| svolder_ipc::Signal {
+            dbm,
+            source: svolder_ipc::SignalSource::Advert,
+            heard_at_ms: SIGNAL_WALL - secs * 1000,
+        }),
+        ..crate::backend::DeviceRow::default()
+    });
+    app
+}
+
+/// The header's text row of `app` at `width` columns.
+fn header_row(app: &App, width: u16) -> String {
+    let rows = text(&frame(app, width, 24));
+    match width >= 100 {
+        true => rows[1].clone(),
+        false => rows[0].clone(),
+    }
+}
+
+/// Four bars and the reading follow the connection word, by the rule the GNOME panel draws
+/// (svolder-ipc `Signal::bars`): 4 bars from -55 dBm, 3 from -67, 2 from -80, 1 below, the unlit
+/// ones dim.
+#[test]
+fn the_header_carries_four_bars_and_the_reading_after_the_connection_word() {
+    for (dbm, lit) in [
+        (-50, 4),
+        (-55, 4),
+        (-56, 3),
+        (-67, 3),
+        (-68, 2),
+        (-80, 2),
+        (-81, 1),
+    ] {
+        let at = signal_app(Some(dbm), 7, true);
+        let buffer = frame(&at, 120, 24);
+        let row = text(&buffer)[1].clone();
+        let start = row.chars().position(|c| c == '▂').unwrap() as u16;
+        let lit_now = (0..4u16)
+            .filter(|n| {
+                !buffer
+                    .cell((start + n, 1))
+                    .unwrap()
+                    .modifier
+                    .contains(Modifier::DIM)
+            })
+            .count();
+        assert_eq!(lit_now, lit, "{dbm} dBm");
+    }
+    let app = signal_app(Some(-50), 7, true);
+    assert_eq!(
+        header_row(&app, 80),
+        " svolder  Gungnir 2 · fw 3 · 0102…08  ● connected  ▂▄▆█ −50 dBm  mouse:on 14:02 "
+    );
+    let row = header_row(&signal_app(Some(-74), 7, true), 120);
+    assert!(row.contains("● connected  ▂▄▆█ −74 dBm"), "|{row}|");
+    let buffer = frame(&signal_app(Some(-74), 7, true), 80, 24);
+    let start = text(&buffer)[0].chars().position(|c| c == '▂').unwrap() as u16;
+    let styles: Vec<Modifier> = (0..4)
+        .map(|n| buffer.cell((start + n, 0)).unwrap().modifier)
+        .collect();
+    assert!(
+        !styles[0].contains(Modifier::DIM) && !styles[1].contains(Modifier::DIM),
+        "{styles:?}"
+    );
+    assert!(
+        styles[2].contains(Modifier::DIM) && styles[3].contains(Modifier::DIM),
+        "{styles:?}"
+    );
+}
+
+/// A reading older than 120 seconds (the panel's rule) is drawn dim, bars and number; a fresh one is not.
+#[test]
+fn an_old_reading_is_drawn_dim_and_a_fresh_one_is_not() {
+    let dim_of = |secs: u64| {
+        let buffer = frame(&signal_app(Some(-50), secs, true), 80, 24);
+        let row = text(&buffer)[0].clone();
+        let at = row.chars().position(|c| c == '▂').unwrap() as u16;
+        (0..12)
+            .map(|n| {
+                buffer
+                    .cell((at + n, 0))
+                    .unwrap()
+                    .modifier
+                    .contains(Modifier::DIM)
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(dim_of(119).iter().all(|d| !d), "a fresh reading is not dim");
+    assert!(
+        dim_of(121).iter().all(|d| *d),
+        "an old one is dim, the bars and the number"
+    );
+}
+
+/// No signal heard draws nothing, and a narrow header drops the reading first, then the bars,
+/// before it cuts the device name.
+#[test]
+fn a_narrow_header_drops_the_reading_then_the_bars_before_the_name() {
+    assert_eq!(
+        header_row(&signal_app(None, 0, true), 80),
+        " svolder  Gungnir 2 · fw 3 · 0102…08  ● connected                mouse:on 14:02 "
+    );
+    // As the name grows: the whole line, then no reading, then no bars, and the name is cut
+    // only once nothing of the signal is left.
+    let mut app = signal_app(Some(-80), 7, true);
+    let mut seen = Vec::new();
+    for len in 1..40 {
+        app.session.product = "N".repeat(len);
+        let row = header_row(&app, 80);
+        let state = (
+            row.contains("dBm"),
+            row.contains('▂'),
+            row.contains(&app.session.product),
+        );
+        if seen.last() != Some(&state) {
+            seen.push(state);
+        }
+    }
+    assert_eq!(
+        seen,
+        vec![
+            (true, true, true),
+            (false, true, true),
+            (false, false, true),
+            (false, false, false)
+        ],
+        "reading, then bars, then the name"
+    );
+    // With the link down and the readings old the signal is sized first: at 120 columns the bars
+    // and the reading both stay beside the warning; at 80 the bars stay and the warning takes the
+    // longest form that fits after them.
+    let down = signal_app(Some(-80), 7, false);
+    let row = header_row(&down, 120);
+    assert!(row.contains("○ disconnected  ▂▄▆█ −80 dBm"), "|{row}|");
+    assert!(row.contains("stale"), "the warning is still there: |{row}|");
+    let row = header_row(&down, 80);
+    assert!(row.contains("○ disconnected  ▂▄▆█"), "|{row}|");
+    assert!(!row.contains("dBm"), "|{row}|");
+    assert!(row.contains("Gungnir 2"), "the name stays: |{row}|");
+}

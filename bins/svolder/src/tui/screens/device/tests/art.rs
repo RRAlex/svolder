@@ -327,73 +327,112 @@ fn computer_side_playing() -> App {
     app
 }
 
-/// Every non-blank line the Controls and Tone panes draw without a cover, they draw with one in
-/// the grown layout of `area`, and the Status pane is taller.
-fn assert_panes_lose_nothing(make: fn() -> App, area: Rect) {
-    let bare = make();
-    let app = with_cover(make());
-    let base = frames_of(area, &bare);
-    let grown = frames_of(area, &app);
-    assert!(
-        grown[grown.len() - 1].1.height > base[base.len() - 1].1.height,
-        "{area:?}"
-    );
-    let before = text(&frame(&bare, area.width, area.height));
-    let after = text(&frame(&app, area.width, area.height));
-    for ((_, was), (_, now)) in base.iter().zip(&grown).take(base.len() - 1) {
-        assert_eq!(lines_in(&before, *was), lines_in(&after, *now), "{area:?}");
+/// The Status pane is as tall as its rows, with one blank row at its end in the tall tier only,
+/// whatever the cover and the terminal: the cover is as tall as the rows, the pane is the same
+/// with a cover, with none and with a failed one, and the rows it does not need are the Controls
+/// and Tone panes'.
+#[test]
+fn the_status_pane_is_its_rows_and_in_the_tall_tier_a_blank_row() {
+    for (width, height) in [
+        (80, 24),
+        (119, 39),
+        (100, 44),
+        (100, 45),
+        (160, 50),
+        (200, 60),
+        (160, 70),
+    ] {
+        let area = area(width, height);
+        let with_cover = covered();
+        let mut bare = covered();
+        bare.host.cover.hash = None;
+        let mut failed = covered();
+        failed.host.cover.failed = failed.host.cover.hash.clone();
+        let (with, with_box) = heights(&with_cover, area);
+        assert_eq!(
+            heights(&bare, area).0,
+            with,
+            "{area:?}: a cover moves a pane"
+        );
+        assert_eq!(heights(&failed, area).0, with, "{area:?}: a failed cover");
+        let tier = crate::tui::layout_tier::Tier::of(area);
+        let status = super::super::rows_of(area, &with_cover).1[2];
+        let rows = text(&frame(&with_cover, width, height));
+        let inside = |y: u16| rows[usize::from(y)].trim_matches(['│', ' ']).to_string();
+        let last = status.y + status.height - 1;
+        let blank = tier.end_blank();
+        assert_eq!(blank, u16::from(height >= 40), "{area:?}");
+        if blank == 1 {
+            assert!(
+                inside(last - 1).is_empty(),
+                "{area:?}: no blank row at the end"
+            );
+        }
+        assert!(
+            !inside(last - 1 - blank).is_empty(),
+            "{area:?}: the last row is a row"
+        );
+        let lines = status.height - 2 - tier.top() - blank;
+        assert_eq!(
+            with_box.map(|size| size.height),
+            Some(lines),
+            "{area:?}: the cover is the rows"
+        );
+        let body = height - super::super::header_height(width);
+        assert_eq!(with[0] + tier.row_gap() + with[2], body, "{area:?}");
     }
+    assert_eq!(
+        heights(&covered(), area(200, 60)),
+        (
+            [44, 44, 12],
+            Some(Size {
+                width: 16,
+                height: 8
+            })
+        )
+    );
+    assert_eq!(
+        heights(&covered(), area(100, 45)),
+        (
+            [29, 29, 12],
+            Some(Size {
+                width: 16,
+                height: 8
+            })
+        )
+    );
+    assert_eq!(
+        heights(&covered(), area(100, 44)),
+        (
+            [31, 31, 9],
+            Some(Size {
+                width: 10,
+                height: 5
+            })
+        )
+    );
 }
 
+/// The rows the Status pane no longer takes for a cover stay with the panes above: every
+/// non-blank line they draw without a cover they draw with one, and the Kraken's Host group,
+/// the computer side's path and the Crossfeed row all show on a big terminal.
 #[test]
-fn the_status_pane_grows_upward_from_100_by_45_and_the_cover_with_it() {
-    let app = covered();
-    let (usual, usual_box) = heights(&app, area(100, 44));
-    // One column or one row short of 100 by 45: the pane the height it was.
-    assert_eq!(heights(&app, area(99, 45)).0[2], usual[2]);
-    assert_eq!(usual, [32, 32, 8]);
-    assert_eq!(
-        usual_box,
-        Some(Size {
-            width: 10,
-            height: 5
-        })
-    );
-    // From 100 by 45 the pane takes the rows the panes do not draw in.
-    let (grown, grown_box) = heights(&app, area(100, 45));
-    assert_eq!(grown, [22, 22, 19]);
-    assert_eq!(
-        grown_box,
-        Some(Size {
-            width: 32,
-            height: 16
-        })
-    );
-    // The pane takes what the Tone pane (its lines and frame) leaves of the 160 by 50 body.
-    let (wide, wide_box) = heights(&app, area(160, 50));
-    assert_eq!(wide, [15, 15, 31]);
-    assert_eq!(
-        wide_box,
-        Some(Size {
-            width: 56,
-            height: 28
-        })
-    );
-    // More rows than the cover can use at that width stay with the panes.
-    let (tall, tall_box) = heights(&app, area(160, 70));
-    assert_eq!(tall_box.map(|size| size.height), Some(tall[2] - 3));
-    assert!(tall[0] > 15, "{tall:?}");
-}
-
-#[test]
-fn the_status_pane_takes_no_row_a_pane_draws_in() {
+fn a_cover_costs_the_panes_above_no_row() {
     for (width, height) in [(100, 45), (160, 50), (160, 70)] {
         let area = area(width, height);
-        assert_panes_lose_nothing(kraken_playing, area);
-        assert_panes_lose_nothing(computer_side_playing, area);
-        assert_panes_lose_nothing(host_mockup_app, area);
+        for make in [kraken_playing, computer_side_playing, host_mockup_app] {
+            let bare = make();
+            let app = with_cover(make());
+            let base = frames_of(area, &bare);
+            let covered = frames_of(area, &app);
+            assert_eq!(base, covered, "{area:?}: a cover moved a pane");
+            let before = text(&frame(&bare, area.width, area.height));
+            let after = text(&frame(&app, area.width, area.height));
+            for ((_, was), (_, now)) in base.iter().zip(&covered).take(base.len() - 1) {
+                assert_eq!(lines_in(&before, *was), lines_in(&after, *now), "{area:?}");
+            }
+        }
     }
-    // The rows the old fixed floor cut: the Kraken's Host group and the computer side's path.
     let kraken = with_cover(kraken_playing());
     let rows = text(&frame(&kraken, 160, 50));
     let controls = lines_in(&rows, frames_of(area(160, 50), &kraken)[0].1);
@@ -421,26 +460,62 @@ fn the_status_pane_takes_no_row_a_pane_draws_in() {
 #[test]
 fn a_cover_that_failed_keeps_the_usual_layout() {
     let mut app = with_cover(kraken_playing());
-    let grown = heights(&app, area(160, 50)).0;
+    let with = heights(&app, area(160, 50)).0;
     app.host.cover.failed = app.host.cover.hash.clone();
     let failed = heights(&app, area(160, 50));
     assert_eq!(failed.1, None, "no cover box for a failed cover");
     app.host.cover.hash = None;
     assert_eq!(failed.0, heights(&app, area(160, 50)).0);
-    assert!(grown[2] > failed.0[2], "{grown:?} {failed:?}");
-    // Another track's cover is not the failed one.
+    assert_eq!(with, failed.0, "{with:?} {failed:?}");
     app.host.cover.hash = Some("fedcba9876543210".into());
-    assert_eq!(heights(&app, area(160, 50)).0, grown);
+    assert_eq!(heights(&app, area(160, 50)).0, with);
 }
 
 #[test]
-fn the_status_pane_does_not_grow_with_no_cover_to_show() {
+fn the_status_pane_does_not_change_with_no_cover_to_show() {
     let mut app = covered();
     app.host.cover.hash = None;
     let plain = heights(&app, area(100, 45)).0;
-    // The pane's usual eight rows and the VU meter's three.
-    assert_eq!(plain[2], 8 + 3);
+    // The pane's usual eight rows, the VU meter's three, and the blank row at its end.
+    assert_eq!(plain[2], 8 + 3 + 1);
     let mut app = covered();
     app.host.cover.font = None;
-    assert_eq!(heights(&app, area(160, 50)).0[2], 8 + 3);
+    assert_eq!(heights(&app, area(160, 50)).0[2], 8 + 3 + 1);
+}
+
+/// A toast that meets the picture anywhere holds the kitty upload, not only one that covers its
+/// first cell: a one-line toast at the right edge of 80×24 overlaps the slot's last rows and
+/// columns but not its corner, and clears cells the picture is sent in.
+#[test]
+fn a_kitty_picture_is_held_by_a_toast_that_misses_its_corner() {
+    let mut picker = Picker::halfblocks();
+    picker.set_protocol_type(ratatui_image::picker::ProtocolType::Kitty);
+    let mut app = covered();
+    let size = art_box(area(80, 24), &app).expect("a box");
+    let protocol = build(&picker, gradient(), size).expect("a picture");
+    app.host.cover.picture = Some(Picture {
+        protocol,
+        hash: "0123456789abcdef".into(),
+        sent: Default::default(),
+    });
+    let slot = art_slot(area(80, 24), &app).expect("a slot");
+    app.notify("ab");
+    let (_, [_, body]) = crate::tui::layout_tier::split(area(80, 24));
+    let toast = crate::tui::boxes::toast::area(body, "ab").0;
+    assert!(toast.intersects(slot), "{toast:?} {slot:?}");
+    assert!(
+        !toast.contains(ratatui::layout::Position::new(slot.x, slot.y)),
+        "the corner is clear"
+    );
+    let sent = |app: &App| {
+        screen(app)
+            .cell((slot.x, slot.y))
+            .expect("the cell")
+            .symbol()
+            .contains("\x1b_G")
+    };
+    assert!(!sent(&app), "uploaded under a toast that meets the slot");
+    app.tick(std::time::Instant::now() + std::time::Duration::from_secs(3600));
+    assert!(app.toast().is_none());
+    assert!(sent(&app), "not uploaded once the toast was gone");
 }

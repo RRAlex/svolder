@@ -29,7 +29,7 @@ fn entries(app: &App) -> Vec<Entry> {
 fn as_key(entry: &Entry) -> Option<(&str, &str)> {
     match entry {
         Entry::Key { label, does, .. } => Some((label, does.as_str())),
-        Entry::Heading(_) | Entry::Gap => None,
+        Entry::Heading(_) | Entry::Cont { .. } | Entry::Gap => None,
     }
 }
 
@@ -165,7 +165,7 @@ fn the_tone_keys_say_they_need_an_eq_on_a_device_without_one() {
         .take_while(|entry| !matches!(entry, Entry::Gap | Entry::Heading(_)))
         .filter_map(|entry| match entry {
             Entry::Key { label, reason, .. } => Some((*label, *reason)),
-            Entry::Heading(_) | Entry::Gap => None,
+            Entry::Heading(_) | Entry::Cont { .. } | Entry::Gap => None,
         })
         .collect();
     for label in ["1-N", ", . ⇧←→", "[ ] ⇧↑↓", "L-drag", "R-drag", "wheel"] {
@@ -188,7 +188,7 @@ fn the_curve_gestures_say_so_while_mouse_capture_is_off() {
             .iter()
             .filter_map(|entry| match entry {
                 Entry::Key { label, reason, .. } => Some((*label, *reason)),
-                Entry::Heading(_) | Entry::Gap => None,
+                Entry::Heading(_) | Entry::Cont { .. } | Entry::Gap => None,
             })
             .filter(|(label, _)| TONE_GESTURES.iter().any(|(gesture, _)| gesture == label))
             .collect();
@@ -890,6 +890,8 @@ fn an_entrys_width_counts_display_cells() {
         label: "世",
         does: "界 x".into(),
         reason: None,
+        faint: false,
+        computer: false,
     };
     assert_eq!(key.label_width(), 2);
     assert_eq!(key.width(2), 2 + LABEL_GAP + 4);
@@ -956,4 +958,275 @@ fn the_scenes_key_is_listed_only_where_scenes_are_offered() {
         .expect("the table names z");
     assert!(keys::hidden_in(hint, KeyContext::of(&plain)));
     assert!(!keys::hidden_in(hint, KeyContext::of(&scenic)));
+}
+
+/// A Gungnir 2 with the computer's controls there, the overlay open on a `width` by `height`
+/// terminal.
+fn with_computer(width: u16, height: u16) -> App {
+    let mut app = app_showing(Screen::Device);
+    app.overlays.help_open = true;
+    app.tui.host_audio = true;
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+        false,
+        &[("PK", 1000.0, 0.0, 1.0)],
+    ));
+    app.size = (width, height);
+    app
+}
+
+/// The overlay's rows of `app` on a `width` by `height` terminal with the box's border and
+/// padding cut off.
+fn inner(app: &App, width: u16, height: u16) -> Vec<String> {
+    let area = view(
+        Rect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        },
+        app,
+    )
+    .area;
+    let rows = text(&frame(app, width, height));
+    (area.y + 1..area.y + area.height - 1)
+        .map(|y| {
+            rows[usize::from(y)]
+                .chars()
+                .skip(usize::from(area.x) + 2)
+                .take(usize::from(area.width) - 4)
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect()
+}
+
+/// With the computer's controls there, a key the computer side means differently takes ONE row
+/// and a dim `computer:` line under it, the keys only the computer side takes end with
+/// `· computer`, the EQ section does not repeat Tab, and 120 columns keep two columns: no
+/// line is longer than the column.
+#[test]
+fn a_120_by_40_overlay_keeps_two_columns_one_f_row_and_one_line_notes() {
+    let app = with_computer(120, 40);
+    let rows = inner(&app, 120, 40);
+    let heading = rows
+        .iter()
+        .find(|row| row.starts_with("Everywhere"))
+        .unwrap_or_else(|| panic!("no Everywhere row:\n{rows:#?}"));
+    assert!(heading.contains("Controls"), "two columns: |{heading}|");
+    let f_rows: Vec<usize> = (0..rows.len())
+        .filter(|at| rows[*at].starts_with("f  "))
+        .collect();
+    assert_eq!(f_rows.len(), 1, "f is one row: {rows:#?}");
+    assert!(
+        rows[f_rows[0]].starts_with("f                  flat on/off")
+            && rows[f_rows[0] + 1]
+                .trim_start()
+                .starts_with("computer: bypass"),
+        "|{}| then |{}|",
+        rows[f_rows[0]],
+        rows[f_rows[0] + 1]
+    );
+    let tab = rows
+        .iter()
+        .position(|row| row.starts_with("Tab/⇧Tab"))
+        .expect("a Tab row");
+    assert!(rows[tab].contains("pane"), "|{}|", rows[tab]);
+    assert!(
+        rows[tab + 1]
+            .trim_start()
+            .starts_with("computer: next stage"),
+        "|{}|",
+        rows[tab + 1]
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.contains("Tab/⇧Tab") && !row.contains("category"))
+            .count(),
+        1,
+        "the EQ section does not repeat Tab: {rows:#?}"
+    );
+    for key in [
+        "add point · computer",
+        "point type · computer",
+        "remove point · computer",
+    ] {
+        assert!(
+            rows.iter().any(|row| row.contains(key)),
+            "no `{key}`: {rows:#?}"
+        );
+    }
+    let sections = sections(&app);
+    let wide = description_width(&sections);
+    assert_eq!(
+        wide,
+        "scenes (↵ n u c x inside)".chars().count(),
+        "the longest ordinary description"
+    );
+    // Every description fits its column on one line: the notes are not wrapped.
+    for entry in wrapped(sections, wide).iter().flatten() {
+        if let Entry::Cont { text, .. } = entry {
+            assert!(
+                text.starts_with("computer: "),
+                "a description wrapped: {text:?}"
+            );
+        }
+    }
+    // The keys are many with the computer's controls on: 67 lines into two columns of 32 rows,
+    // so the box scrolls exactly two rows at 120×40 (Telemetry's heading and key, last in the
+    // first column). The user accepted that scroll.
+    assert_eq!(scroll_of(&app), (32, 2), "rows and rows past the box");
+    let tall = with_computer(120, 43);
+    assert_eq!(scroll_of(&tall).1, 0, "no scrolling where the keys fit");
+    let rows = inner(&tall, 120, 43);
+    assert!(
+        rows.iter().any(|row| row.starts_with("Telemetry")),
+        "{rows:#?}"
+    );
+}
+
+/// A description longer than the ordinary ones wraps under its own text in the column, and does
+/// not widen the column.
+#[test]
+fn a_long_description_wraps_under_its_own_text() {
+    let long = "open the Loudness panel on the tone screen (again: back to the strip)";
+    let key = |does: &str| Entry::Key {
+        label: "L",
+        does: does.to_string(),
+        reason: None,
+        faint: false,
+        computer: false,
+    };
+    let sections = vec![vec![
+        Entry::Heading("EQ"),
+        key("scenes (↵ n u c x inside)"),
+        key(long),
+    ]];
+    let wide = description_width(&sections);
+    assert_eq!(wide, 25, "the sentence does not set the width");
+    let wrapped = wrapped(sections, wide);
+    let rows = &wrapped[0];
+    assert!(rows.len() > 3, "the sentence wrapped: {rows:?}");
+    let theme = Theme::new(false);
+    for entry in &rows[1..] {
+        let drawn: String = entry
+            .spans(&theme, 1, 1 + LABEL_GAP + wide + COLUMN_GAP)
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(
+            drawn.chars().count() <= 1 + LABEL_GAP + wide + COLUMN_GAP,
+            "|{drawn}|"
+        );
+    }
+    assert!(matches!(rows[3], Entry::Cont { .. }), "{rows:?}");
+}
+
+/// Without the computer's controls the 120×40 overlay holds every key in two columns and never
+/// scrolls.
+#[test]
+fn a_120_by_40_overlay_without_the_computer_never_scrolls() {
+    let mut app = app_showing(Screen::Device);
+    app.overlays.help_open = true;
+    app.size = (120, 40);
+    assert_eq!(scroll_of(&app).1, 0);
+    let rows = inner(&app, 120, 40);
+    let heading = rows
+        .iter()
+        .find(|row| row.starts_with("Everywhere"))
+        .expect("a heading");
+    assert!(heading.contains("Controls"), "two columns: |{heading}|");
+}
+
+/// The computer side's row is found by the key's label and `When::OnComputer`, not by the words
+/// of its description: reworded descriptions fold all the same.
+#[test]
+fn the_fold_matches_by_label_and_side_not_by_description() {
+    let app = with_computer(120, 40);
+    let key = |does: &str, computer: bool| Entry::Key {
+        label: "f",
+        does: does.to_string(),
+        reason: None,
+        faint: false,
+        computer,
+    };
+    let mut sections = vec![vec![
+        key("a reworded device meaning", false),
+        key("a reworded computer meaning", true),
+    ]];
+    fold_computer_means(&mut sections, &app);
+    assert_eq!(sections[0].len(), 2, "{:?}", sections[0]);
+    assert!(matches!(&sections[0][1], Entry::Cont { text, .. } if text == "computer: bypass"));
+}
+
+fn key_entry(label: &'static str) -> Entry {
+    Entry::Key {
+        label,
+        does: label.to_string(),
+        reason: None,
+        faint: false,
+        computer: false,
+    }
+}
+
+fn cont() -> Entry {
+    Entry::Cont {
+        text: "more".into(),
+        faint: false,
+    }
+}
+
+/// A key whose continuation lines would start the next column goes there whole, with the heading
+/// right above it when it is the section's first key, and the column it leaves never ends on a
+/// heading or a blank, nor is left empty.
+#[test]
+fn a_key_and_its_lines_move_together_with_their_heading_and_leave_no_empty_column() {
+    let sound = |columns: &[Vec<Entry>]| {
+        for column in columns {
+            assert!(!column.is_empty(), "an empty column: {columns:?}");
+            assert!(
+                !matches!(column.last(), Some(Entry::Heading(_) | Entry::Gap)),
+                "a column ends on a heading or a gap: {column:?}"
+            );
+            assert!(
+                !matches!(column.first(), Some(Entry::Cont { .. } | Entry::Gap)),
+                "{column:?}"
+            );
+        }
+    };
+    // The first key's lines run past a column of three: nothing to carry it into but its own column.
+    let one = vec![vec![Entry::Heading("H"), key_entry("k"), cont(), cont()]];
+    let columns = pack(&one, 3, 0);
+    sound(&columns);
+    assert_eq!(columns.len(), 1, "{columns:?}");
+    // Room is left in the first column: the key goes down with its heading and the blank before.
+    let two = vec![
+        vec![Entry::Heading("A"), key_entry("a")],
+        vec![
+            Entry::Heading("B"),
+            key_entry("k"),
+            cont(),
+            cont(),
+            cont(),
+            cont(),
+            cont(),
+            cont(),
+            cont(),
+        ],
+    ];
+    let columns = pack(&two, 6, 0);
+    sound(&columns);
+    for column in &columns {
+        for (at, entry) in column.iter().enumerate() {
+            if matches!(entry, Entry::Cont { .. }) {
+                assert!(at > 0, "{columns:?}");
+            }
+        }
+    }
+    assert!(
+        columns[1]
+            .first()
+            .is_some_and(|entry| matches!(entry, Entry::Heading("B"))),
+        "{columns:?}"
+    );
 }

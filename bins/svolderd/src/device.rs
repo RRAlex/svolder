@@ -211,6 +211,11 @@ pub struct LiveInfo {
     /// How the configured passphrase disagrees with the advertisement the actor holds, while
     /// it does and the device has not shown the code works.
     pub passphrase_note: Option<PassphraseNote>,
+    /// While the connects keep failing on one adapter and another hears the device: what each
+    /// hears and the adapter to switch to.
+    pub adapter_hint: Option<svolder_ipc::AdapterHint>,
+    /// Bumped whenever the hint is cleared, so a scan that began before cannot set one after.
+    pub hint_epoch: u64,
     /// True while the link the actor holds has been refused its code and no changed code has
     /// lifted it.
     pub refused: bool,
@@ -433,6 +438,7 @@ impl DeviceHandle {
             recalled: self.writer.recalled().borrow().clone(),
             signal: info.signal,
             key_readings: self.key_readings(),
+            adapter_hint: info.adapter_hint,
         }
     }
 }
@@ -501,6 +507,8 @@ fn spawn_reporting(
         stale: true,
         next_attempt: None,
         passphrase_note: None,
+        adapter_hint: None,
+        hint_epoch: 0,
         refused: false,
         signal: None,
         history: Arc::default(),

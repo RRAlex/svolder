@@ -106,12 +106,40 @@ pub(crate) fn frames_of(area: Rect, app: &App) -> Vec<(FrameId, Rect)> {
     vec![(FrameId::Screen, split_notice(body, app).1)]
 }
 
-/// The failure a start ended in, as the panel above the list says it: what happened, then the
-/// step that follows.
-fn notice_of(app: &App) -> Option<&(String, String)> {
-    match &app.session.holding {
+/// What the panel above the list tells: the failure a start ended in with the step that follows
+/// it, or the adapter step while a device keeps failing to connect on one adapter and another
+/// hears it.
+enum Notice<'a> {
+    /// The failure's words, then the step.
+    Failed(&'a (String, String)),
+    /// The failure's words, what each adapter hears, and the switch the hint offers.
+    Adapter {
+        /// The failure's own words, without the pointer a direct session's failure ends in.
+        failed: String,
+        /// The hint.
+        hint: &'a svolder_ipc::AdapterHint,
+    },
+}
+
+/// The panel's notice: the adapter step while one is offered, else the failure a start ended in.
+fn notice_of(app: &App) -> Option<Notice<'_>> {
+    let failed = match &app.session.holding {
         Some(Holding::Nothing { why: Some(why) }) => Some(why),
         _ => None,
+    };
+    // The step is for a session with no device open: with one open, the list's own `Enter` is
+    // the way to another device and the frame stays away, as it always has.
+    let step = app.devices.hint().filter(|_| app.session.holding.is_some());
+    match (step, failed) {
+        (Some(hint), failed) => Some(Notice::Adapter {
+            failed: match failed {
+                Some((what, _)) => svolder_ble::adapters::without_pointer(what).to_string(),
+                None => hint.failed(),
+            },
+            hint,
+        }),
+        (None, Some(why)) => Some(Notice::Failed(why)),
+        (None, None) => None,
     }
 }
 
@@ -121,15 +149,36 @@ fn notice_room(width: u16) -> usize {
     usize::from(width.saturating_sub(4))
 }
 
+/// The rows after the adapter step's sentences: a blank, then the two answers.
+const STEP_ROWS: usize = 3;
+
+/// The words of a notice, wrapped to `room` columns: the failure's own, then the step or what
+/// each adapter hears.
+fn notice_words(notice: &Notice, room: usize) -> Vec<String> {
+    match notice {
+        Notice::Failed((what, next)) => widgets::text::wrap(what, room)
+            .into_iter()
+            .chain(widgets::text::wrap(next, room))
+            .collect(),
+        Notice::Adapter { failed, hint } => widgets::text::wrap(failed, room)
+            .into_iter()
+            .chain(widgets::text::wrap(&format!("{}.", hint.hears()), room))
+            .collect(),
+    }
+}
+
 /// `body` split into the panel above the list, when a failure is to be told, and the list's own
 /// block under it. The panel is as tall as its words need, its frame included, and never more
 /// than half of `body`.
 fn split_notice(body: Rect, app: &App) -> (Option<Rect>, Rect) {
-    let Some((what, next)) = notice_of(app) else {
+    let Some(notice) = notice_of(app) else {
         return (None, body);
     };
-    let room = notice_room(body.width);
-    let words = widgets::text::wrap(what, room).len() + widgets::text::wrap(next, room).len();
+    let words = notice_words(&notice, notice_room(body.width)).len()
+        + match notice {
+            Notice::Adapter { .. } => STEP_ROWS,
+            Notice::Failed(_) => 0,
+        };
     let height = u16::try_from(words + 2)
         .unwrap_or(u16::MAX)
         .min(body.height / 2);
@@ -142,12 +191,40 @@ fn split_notice(body: Rect, app: &App) -> (Option<Rect>, Rect) {
     (Some(panel), list)
 }
 
-/// Draw the panel that tells why no device opened: the failure's words, then its step, in a frame
-/// of their own over the list. Words that do not fit end in `…`.
+/// The adapter step's two answers, `Enter` and `Esc` in one column at the right: the switch with
+/// the cursor on it, and the choice to keep trying where it is.
+fn step_lines(hint: &svolder_ipc::AdapterHint, room: usize, theme: &Theme) -> Vec<Line<'static>> {
+    let key_width = widgets::text::cells("Enter");
+    let text_room = room.saturating_sub(key_width + 3);
+    let switch = match hint.take == hint.better {
+        true => format!("Switch to {}", hint.better),
+        false => format!("Switch to {}   {}", hint.better, hint.take),
+    };
+    let keep = format!("Keep trying on {}", hint.failing);
+    [("\u{25b6} ", switch, "Enter"), ("  ", keep, "Esc")]
+        .into_iter()
+        .map(|(cursor, text, key)| {
+            let text = widgets::text::cut_to_cells(&format!("{cursor}{text}"), text_room);
+            let padded = widgets::text::pad_cells(&text, text_room);
+            Line::from(vec![
+                Span::raw(format!(" {padded} ")),
+                Span::styled(
+                    widgets::text::pad_cells(key, key_width),
+                    theme.style(Role::Faint),
+                ),
+                Span::raw(" "),
+            ])
+        })
+        .collect()
+}
+
+/// Draw the panel above the list: the failure's words, then the step that follows them, in a
+/// frame of their own over the list. Words that do not fit end in `…`. The adapter step adds a
+/// blank row and its two answers under what each adapter hears.
 fn draw_notice(
     frame: &mut Frame,
     panel: Rect,
-    (what, next): &(String, String),
+    notice: &Notice,
     (app, theme, tier): (&App, &Theme, Tier),
 ) {
     let block = tier
@@ -156,17 +233,27 @@ fn draw_notice(
         .title(Span::styled(" Not opened ", pane_title(theme, false)));
     let inner = block.inner(panel);
     let room = notice_room(panel.width);
-    let mut lines: Vec<Line<'static>> = widgets::text::wrap(what, room)
+    let mut lines: Vec<Line<'static>> = notice_words(notice, room)
         .into_iter()
-        .chain(widgets::text::wrap(next, room))
         .map(|words| Line::from(format!(" {words}")))
         .collect();
     let rows = usize::from(inner.height);
-    if lines.len() > rows && rows > 0 {
-        lines.truncate(rows);
+    let step = match notice {
+        Notice::Adapter { hint, .. } => Some(hint),
+        Notice::Failed(_) => None,
+    };
+    // The answers keep their rows when the words above them have to give some up.
+    let kept = step.map_or(0, |_| STEP_ROWS);
+    let above = rows.saturating_sub(kept);
+    if lines.len() > above && rows > 0 {
+        lines.truncate(above);
         if let Some(last) = lines.last_mut() {
             *last = Line::from(format!("{}…", last));
         }
+    }
+    if let Some(hint) = step.filter(|_| rows >= kept) {
+        lines.push(Line::default());
+        lines.extend(step_lines(hint, usize::from(inner.width), theme));
     }
     frame.render_widget(Paragraph::new(lines).block(block), panel);
 }
@@ -196,8 +283,8 @@ pub fn draw(
         hits,
     );
     push_marks(hits, header, marks);
-    if let (Some(panel), Some(why)) = (notice, notice_of(app)) {
-        draw_notice(frame, panel, why, (app, theme, tier));
+    if let (Some(panel), Some(notice)) = (notice, notice_of(app)) {
+        draw_notice(frame, panel, &notice, (app, theme, tier));
     }
 
     // The keys are always in the list. With the notice over it, the list's title says so.
@@ -293,6 +380,7 @@ fn list_lines(
                         signal: signals
                             .as_ref()
                             .map(|(texts, wide)| (texts[index].as_str(), *wide)),
+                        tried: app.devices.tried_on(row),
                     },
                     theme,
                     width,
@@ -585,7 +673,10 @@ fn signal_column(
             let flags = link_flags(row.stale, row.refused).map_or(0, |flags| {
                 widgets::text::cells(FLAG_GAP) + widgets::text::cells(&flags)
             });
-            widgets::text::cells(&state_of(row, glyph).0) + flags
+            let tried = app.devices.tried_on(row).map_or(0, |tried| {
+                widgets::text::cells(FLAG_GAP) + widgets::text::cells(tried)
+            });
+            widgets::text::cells(&state_of(row, glyph).0) + flags + tried
         })
         .max()
         .unwrap_or(0);
@@ -619,6 +710,8 @@ struct Fields<'a> {
     product: usize,
     /// the signal text of this row and the signal field's width
     signal: Option<(&'a str, usize)>,
+    /// the adapter the device is being tried on, when the hint names it
+    tried: Option<&'a str>,
 }
 
 /// One device's row: its name, what it is, how strong its signal is when the list has a signal
@@ -650,6 +743,12 @@ fn device_line(
     if let Some(flags) = link_flags(row.stale, row.refused) {
         spans.push(Span::styled(
             format!("{FLAG_GAP}{flags}"),
+            theme.style(Role::Warn),
+        ));
+    }
+    if let Some(tried) = fields.tried {
+        spans.push(Span::styled(
+            format!("{FLAG_GAP}{tried}"),
             theme.style(Role::Warn),
         ));
     }

@@ -367,6 +367,7 @@ fn two_presses_before_the_echo_move_two_steps() {
         what: "the device is not answering".into(),
         next: "try again".into(),
         reason: None,
+        adapter_hint: None,
     });
     assert_eq_set(&press(&mut app, KeyCode::Right), 1, "g", step(102));
 

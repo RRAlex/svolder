@@ -800,6 +800,93 @@ async fn a_disconnected_device_over_the_daemon_is_named_on_stderr() {
     .expect("test timed out");
 }
 
+/// A device the daemon cannot connect on its adapter, while another hears it, says so under the
+/// readings' note: what each adapter hears, then the step, in the two lines the CLI keeps for it.
+#[tokio::test]
+async fn status_over_a_daemon_that_cannot_hold_a_link_prints_the_adapter_hint() {
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let dir = TempDir::short("stub");
+        let socket = dir.join("s.sock");
+        let stub = stub_daemon_saying(
+            socket.clone(),
+            Stub {
+                listed: true,
+                hint: Some(stub_hint()),
+                ..Stub::default()
+            },
+        )
+        .await;
+        let (code, out, err) = run_svolder(&socket, &["status"]).await;
+        stub.abort();
+        assert_eq!(code, Some(0), "out={out} err={err}");
+        assert!(
+            err.contains(
+                "svolder: hci2 hears fake at \u{2212}80 dBm and cannot hold a link; hci0 hears it at \u{2212}74 dBm:\n         try adapter = \"AA:BB:CC:DD:EE:01\" (svolder adapters, or Settings \u{2192} Bluetooth adapter)\n"
+            ),
+            "out={out} err={err}"
+        );
+        assert_over_the_daemon(&socket, &err);
+    })
+    .await
+    .expect("test timed out");
+}
+
+/// The same when the daemon has no readings to give and refuses `status` as the link being away:
+/// the failure's line, then the hint's two lines, exit code 3 as it was.
+#[tokio::test]
+async fn status_refused_by_a_daemon_with_a_hint_prints_it_under_the_failure() {
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let dir = TempDir::short("stub");
+        let socket = dir.join("s.sock");
+        let stub = stub_daemon_saying(
+            socket.clone(),
+            Stub {
+                listed: true,
+                hint: Some(stub_hint()),
+                state_down: true,
+            },
+        )
+        .await;
+        let (code, out, err) = run_svolder(&socket, &["status"]).await;
+        stub.abort();
+        assert_eq!(code, Some(3), "out={out} err={err}");
+        assert!(
+            err.contains(svolder_ipc::NOT_CONNECTED),
+            "out={out} err={err}"
+        );
+        assert!(
+            err.contains("         try adapter = \"AA:BB:CC:DD:EE:01\" (svolder adapters"),
+            "out={out} err={err}"
+        );
+    })
+    .await
+    .expect("test timed out");
+}
+
+/// A daemon that sends no hint (an older one) leaves `status` as it was: no hint line.
+#[tokio::test]
+async fn status_over_a_daemon_with_no_hint_prints_none() {
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let dir = TempDir::short("stub");
+        let socket = dir.join("s.sock");
+        let stub = stub_daemon_saying(
+            socket.clone(),
+            Stub {
+                listed: true,
+                state_down: true,
+                ..Stub::default()
+            },
+        )
+        .await;
+        let (code, out, err) = run_svolder(&socket, &["status"]).await;
+        stub.abort();
+        assert_eq!(code, Some(3), "out={out} err={err}");
+        assert!(!err.contains("try adapter"), "out={out} err={err}");
+    })
+    .await
+    .expect("test timed out");
+}
+
 /// The `identify` verb prints no readings, so against a daemon that has lost the link it does not
 /// say that the readings are the last known: it says the device is not connected, and nothing
 /// else about the link.
@@ -1464,14 +1551,53 @@ async fn stub_daemon(path: PathBuf) -> tokio::task::JoinHandle<()> {
     stub_daemon_listing(path, true).await
 }
 
+/// The adapter hint of the device the stub daemon lists.
+fn stub_hint() -> svolder_ipc::AdapterHint {
+    svolder_ipc::AdapterHint {
+        device: "fake".into(),
+        failing: "hci2".into(),
+        own_heard: true,
+        own_dbm: Some(-80),
+        better: "hci0".into(),
+        better_dbm: Some(-74),
+        take: "AA:BB:CC:DD:EE:01".into(),
+        failure: "no connection within 20 s".into(),
+        tries: 4,
+    }
+}
+
 /// [`stub_daemon`], with `listed` false for a daemon whose `devices` answer no longer carries
 /// the device its `state` answer still names: the moment a device is removed between the two.
 async fn stub_daemon_listing(path: PathBuf, listed: bool) -> tokio::task::JoinHandle<()> {
+    stub_daemon_saying(
+        path,
+        Stub {
+            listed,
+            ..Stub::default()
+        },
+    )
+    .await
+}
+
+/// What a stub daemon answers beyond the plain case.
+#[derive(Clone, Default)]
+struct Stub {
+    /// whether `devices` lists the device
+    listed: bool,
+    /// the adapter hint the device's row carries
+    hint: Option<svolder_ipc::AdapterHint>,
+    /// whether `state` is refused as the link being away, as a device never connected is
+    state_down: bool,
+}
+
+/// [`stub_daemon`] answering as `stub` says.
+async fn stub_daemon_saying(path: PathBuf, stub: Stub) -> tokio::task::JoinHandle<()> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     let listener = tokio::net::UnixListener::bind(&path).expect("bind the stub socket");
     tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
+            let stub = stub.clone();
             tokio::spawn(async move {
                 let (read, mut write) = stream.into_split();
                 let mut lines = BufReader::new(read).lines();
@@ -1479,7 +1605,7 @@ async fn stub_daemon_listing(path: PathBuf, listed: bool) -> tokio::task::JoinHa
                     let Ok(request) = serde_json::from_str::<RequestLine>(&line) else {
                         continue;
                     };
-                    let response = stub_response(&request.request, listed);
+                    let response = stub_response(&request.request, &stub);
                     let reply = Reply::Response {
                         id: request.id,
                         response,
@@ -1495,8 +1621,12 @@ async fn stub_daemon_listing(path: PathBuf, listed: bool) -> tokio::task::JoinHa
 }
 
 /// The stub daemon's answer to one request.
-fn stub_response(request: &Request, listed: bool) -> Response {
+fn stub_response(request: &Request, stub: &Stub) -> Response {
+    let listed = stub.listed;
     match request {
+        Request::State { .. } if stub.state_down => {
+            Response::error(CODE_LINK, svolder_ipc::NOT_CONNECTED)
+        }
         Request::State { .. } => Response::Values {
             device: "fake".into(),
             values: vec![ValueObject {
@@ -1530,6 +1660,7 @@ fn stub_response(request: &Request, listed: bool) -> Response {
                 refused: false,
                 recalled: None,
                 key_readings: Vec::new(),
+                adapter_hint: stub.hint.clone(),
             }],
         },
         // Answers with the window it was asked for as the one device's unit, so a case can read

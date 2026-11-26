@@ -38,6 +38,7 @@ fn a_device_line_says_how_long_the_daemon_is_waiting_before_it_tries_again() {
         refused: false,
         recalled: None,
         key_readings: Vec::new(),
+        adapter_hint: None,
     };
     assert_eq!(device_line(&device), "device bf3: connected (Gungnir 2)");
 

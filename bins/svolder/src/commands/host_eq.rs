@@ -130,6 +130,7 @@ fn child_needs_a_daemon() -> Failure {
         what: "in a container the computer EQ runs with the daemon".to_string(),
         next: "start svolderd, then try again".to_string(),
         reason: None,
+        adapter_hint: None,
     }
 }
 

@@ -153,9 +153,10 @@ fn the_wide_and_tall_tiers_give_the_device_screen_room_and_air() {
         "│  Sample rate 48 kHz   fw 3                                                                                                 │",
         "│  Raw: 9=u8 64   9.1=u8 0   9.2=u8 1   (3 unknown functions)                                                                │",
         "│  Link                                                                                                                12 h  │",
+        &format!("│{}│", " ".repeat(124)),
         "└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘",
     ];
-    assert_eq!(&rows[54..62], bottom);
+    assert_eq!(&rows[53..62], bottom);
 }
 
 /// At 300×60 the body is held to 256 columns in the middle of the terminal, while the
@@ -184,8 +185,8 @@ fn a_very_wide_terminal_centres_the_body_and_keeps_the_header_full_width() {
     assert_eq!((chars[149], chars[150], chars[151]), ('┐', ' ', '┌'));
     assert_eq!(chars[277], '┐', "the Tone pane does not end the body");
     assert_eq!(chars[278], ' ', "the body runs past 256 columns");
-    let status: Vec<char> = rows[54].chars().collect();
-    assert_eq!((status[22], status[277]), ('┌', '┐'), "|{}|", rows[54]);
+    let status: Vec<char> = rows[53].chars().collect();
+    assert_eq!((status[22], status[277]), ('┌', '┐'), "|{}|", rows[53]);
 }
 
 /// At 256 columns the body takes the whole width: the cap is reached, not passed.

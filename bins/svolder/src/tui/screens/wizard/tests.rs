@@ -628,3 +628,42 @@ async fn the_wizard_paints_the_ground() {
         .count();
     assert_eq!(unpainted, 0, "every cell has a background");
 }
+
+/// The walk's question of which adapter draws the key of each answer in one column, as the
+/// approved mockup does: `Enter` for the switch, `k` for keeping the adapter in use.
+#[tokio::test(start_paused = true)]
+async fn the_adapter_question_draws_its_keys_in_one_column() {
+    let unit = "0102030405060708";
+    let on = |name: &str, address: &str, rssi: i16| svolder_walk::ListenedOn {
+        name: name.into(),
+        address: address.into(),
+        heard: vec![(unit.to_string(), Some(rssi))],
+        adverts: Vec::new(),
+    };
+    let fx = FakeEffects::healthy()
+        .with_scan(vec![seen_product(unit, "Bifrost 3", -80)])
+        .with_adapters([("hci0", 2), ("hci2", 5)])
+        .hearing_on(svolder_walk::Listened {
+            in_use: "hci2".into(),
+            adapters: vec![
+                on("hci0", "AA:BB:CC:DD:EE:01", -74),
+                on("hci2", "AA:BB:CC:DD:EE:02", -80),
+            ],
+        });
+    let mut wizard = Wizard::starting_at(fx, Step::Scan, crate::wizard::Given::default());
+    wizard.answer(0, None).await.unwrap();
+    wizard.answer(0, None).await.unwrap();
+    let step = showing_now(&mut wizard).await;
+    let rows = text(&frame(&step, 80, 24));
+    let switch = rows
+        .iter()
+        .find(|row| row.contains("Add it and switch to hci0"))
+        .expect("the switch");
+    let keep = rows
+        .iter()
+        .find(|row| row.contains("Add it, keep hci2"))
+        .expect("the keep");
+    let column = |row: &str, word: &str| row[..row.rfind(word).expect(word)].chars().count();
+    assert!(switch.contains("Enter"), "{switch:?}");
+    assert_eq!(column(switch, "Enter"), column(keep, "k"), "{rows:#?}");
+}

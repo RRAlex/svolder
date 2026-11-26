@@ -997,3 +997,69 @@ async fn the_tooltip_on_a_footer_key_says_what_the_key_line_says_on_the_passphra
     );
     assert!(!text.contains("move · ←→"), "the table's word");
 }
+
+/// What two adapters heard of the device `host_hearing_one`'s scan finds, `hci0` louder than the
+/// `hci2` in use.
+fn heard_on_two(unit: &str) -> svolder_walk::Listened {
+    let on = |name: &str, address: &str, rssi: i16| svolder_walk::ListenedOn {
+        name: name.into(),
+        address: address.into(),
+        heard: vec![(unit.to_string(), Some(rssi))],
+        adverts: Vec::new(),
+    };
+    svolder_walk::Listened {
+        in_use: "hci2".into(),
+        adapters: vec![
+            on("hci0", "AA:BB:CC:DD:EE:01", -74),
+            on("hci2", "AA:BB:CC:DD:EE:02", -80),
+        ],
+    }
+}
+
+/// The walk's question of which adapter is answered with `Enter` for the switch and `k` for
+/// keeping the one in use.
+#[tokio::test(start_paused = true)]
+async fn the_adapter_question_takes_enter_to_switch_and_k_to_keep() {
+    let unit = "0102030405060708";
+    let switching = FakeEffects::healthy()
+        .with_scan(vec![seen_product(unit, "Bifrost 3", -80)])
+        .with_adapters([("hci0", 2), ("hci2", 5)])
+        .hearing_on(heard_on_two(unit));
+    let mut wizard = Wizard::starting_at(switching.clone(), Step::Scan, Given::default());
+    wizard.answer(0, None).await.unwrap(); // scan
+    wizard.answer(0, None).await.unwrap(); // the device
+    assert_eq!(wizard.prompt().await.unwrap().step, Step::Adapter);
+    let (end, _) = walked(
+        &mut wizard,
+        vec![
+            key(KeyCode::Enter), // add it and switch to hci0
+            key(KeyCode::Enter), // the name it advertises
+            key(KeyCode::Enter), // the daemon
+            key(KeyCode::Enter), // done
+        ],
+    )
+    .await;
+    assert!(added(&end).is_some(), "the run did not end on the device");
+    assert_eq!(switching.written_adapter(), Some("hci0".into()));
+
+    let keeping = FakeEffects::healthy()
+        .with_scan(vec![seen_product(unit, "Bifrost 3", -80)])
+        .with_adapters([("hci0", 2), ("hci2", 5)])
+        .hearing_on(heard_on_two(unit));
+    let mut wizard = Wizard::starting_at(keeping.clone(), Step::Scan, Given::default());
+    wizard.answer(0, None).await.unwrap();
+    wizard.answer(0, None).await.unwrap();
+    let (end, _) = walked(
+        &mut wizard,
+        vec![
+            key(KeyCode::Char('k')), // add it, keep hci2
+            key(KeyCode::Enter),     // the name
+            key(KeyCode::Enter),     // the daemon
+            key(KeyCode::Enter),     // done
+        ],
+    )
+    .await;
+    assert!(added(&end).is_some());
+    assert_eq!(keeping.written_adapter(), None, "k switched the adapter");
+    assert!(keeping.written_device().is_some());
+}

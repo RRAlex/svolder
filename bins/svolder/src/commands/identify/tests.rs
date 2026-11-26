@@ -157,6 +157,7 @@ async fn a_device_the_daemon_has_not_found_says_not_connected_with_the_wait() {
         what: "b has not been found yet".into(),
         next: String::new(),
         reason: None,
+        adapter_hint: None,
     };
     let none = not_connected(failure, Some("c"), &other);
     assert_eq!(none.what, "device not connected", "no wait is known");
@@ -237,6 +238,7 @@ fn the_wait_comes_from_the_device_the_daemon_names() {
         what: "b has not been found yet".into(),
         next: String::new(),
         reason: None,
+        adapter_hint: None,
     };
     let said = not_connected(failure, None, &rows);
     assert_eq!(said.what, "device not connected, next attempt in 12 s");

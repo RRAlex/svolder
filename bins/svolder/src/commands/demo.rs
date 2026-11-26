@@ -341,6 +341,7 @@ impl Demo {
                     what,
                     next: format!("The demo daemon's log is {}", log.display()),
                     reason: None,
+                    adapter_hint: None,
                 }
                 .into());
             }

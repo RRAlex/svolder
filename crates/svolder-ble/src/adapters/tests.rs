@@ -82,6 +82,7 @@ fn heard(unit: &str, rssi: Option<i16>) -> Heard {
     Heard {
         unit: unit.to_string(),
         rssi,
+        manufacturer: None,
     }
 }
 
@@ -267,4 +268,26 @@ fn a_remembered_address_follows_its_dongle_to_the_new_number() {
     ];
     assert_eq!(resolve(&remembered, &swapped), Ok("hci0".to_string()));
     assert_eq!(resolve("hci2", &swapped), Ok("hci2".to_string()));
+}
+
+#[test]
+fn the_pointer_comes_off_a_failure_that_carries_it_and_only_then() {
+    let hearings = vec![
+        hearing(two()[0].clone(), &[(UNIT, Some(-62))]),
+        hearing(two()[1].clone(), &[(UNIT, Some(-74))]),
+    ];
+    let words = pointer("hci2", "BF3", UNIT, &hearings).expect("a pointer");
+    let said = "no connection within 20 s (le-connection-abort-by-local)";
+    assert_eq!(without_pointer(&format!("{said}; {words}")), said);
+    // A failure with no pointer, and one whose own words hold a semicolon, are left whole.
+    assert_eq!(without_pointer(said), said);
+    let semi = "refused; try again";
+    assert_eq!(without_pointer(semi), semi);
+    let none = pointer(
+        "hci2",
+        "BF3",
+        UNIT,
+        &[hearing(two()[1].clone(), &[(UNIT, Some(-74))])],
+    );
+    assert_eq!(none, None);
 }

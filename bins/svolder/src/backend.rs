@@ -201,6 +201,10 @@ pub struct DeviceRow {
     pub stale: bool,
     /// Whether the device has refused the passphrase on the link the daemon holds.
     pub refused: bool,
+    /// While the connects keep failing on one adapter and another hears the device: what each
+    /// hears and the adapter to switch to. Only a daemon that lists
+    /// [`svolder_ipc::FEATURE_ADAPTER_HINT`] says.
+    pub adapter_hint: Option<svolder_ipc::AdapterHint>,
 }
 
 impl DeviceRow {
@@ -266,6 +270,7 @@ impl WriteError {
                 what: message.clone(),
                 next: (*next).to_string(),
                 reason: None,
+                adapter_hint: None,
             },
         }
     }
@@ -460,6 +465,7 @@ impl Backend {
                     ),
                     next: "`svolder devices` lists them".to_string(),
                     reason: None,
+                    adapter_hint: None,
                 }
             })?),
             (None, []) => None,

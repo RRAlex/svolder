@@ -58,6 +58,8 @@ pub(crate) struct FakeEffects {
     notices: Vec<String>,
     /// How well each adapter hears the device.
     grades: Vec<Grade>,
+    /// What every adapter hears of the devices a scan finds, when the case has several.
+    listened: Option<svolder_walk::Listened>,
     /// The only passphrase a connection is accepted with, or `None` to accept any.
     accepts: Option<String>,
     /// The names the configuration already carries.
@@ -112,6 +114,7 @@ impl FakeEffects {
             },
             writes: true,
             scan_takes: Duration::ZERO,
+            listened: None,
             write_takes: Duration::ZERO,
             path: None,
             registry: Some(Registry::builtin().expect("the built-in profiles load")),
@@ -132,6 +135,12 @@ impl FakeEffects {
     }
 
     /// The same host, where a scan cannot run at all, for the reason it gives.
+    /// A machine whose adapters hear what `listened` says of the devices a scan finds.
+    pub(crate) fn hearing_on(mut self, listened: svolder_walk::Listened) -> FakeEffects {
+        self.listened = Some(listened);
+        self
+    }
+
     pub(crate) fn scan_failing(mut self, why: &str) -> FakeEffects {
         self.scan_fails = Some(why.to_string());
         self
@@ -324,6 +333,10 @@ impl Radio for FakeEffects {
             entries: self.seen.clone(),
             notices: self.notices.clone(),
         })
+    }
+
+    async fn listen_on_all(&self, _units: &[String]) -> Option<svolder_walk::Listened> {
+        self.listened.clone()
     }
 
     fn adapters(&self) -> Vec<String> {

@@ -614,6 +614,7 @@ fn sample_response_replies() -> Vec<(&'static str, Reply)> {
         refused: false,
         recalled: None,
         key_readings: Vec::new(),
+        adapter_hint: None,
     };
 
     let scan_entry = ScanEntry {
@@ -1158,6 +1159,16 @@ fn the_oldest_shapes_still_decode() {
     assert_eq!(device.retry_in_secs, None);
     assert_eq!(device.passphrase_note, None);
     assert!(!device.refused);
+    assert_eq!(device.adapter_hint, None);
+    // A hint as 0.39.11 writes it, with no reading of the failing adapter's own.
+    let hint: AdapterHint = serde_json::from_str(
+        r#"{"device":"d","failing":"hci2","better":"hci0","take":"hci0","failure":"x","tries":3}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        (hint.own_heard, hint.own_dbm, hint.better_dbm),
+        (false, None, None)
+    );
     let entry: ScanEntry = serde_json::from_str(
         r#"{"unit":"0102030405060708","product":null,"firmware":100,"passphrase":false}"#,
     )

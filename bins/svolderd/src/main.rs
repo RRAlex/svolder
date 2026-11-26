@@ -36,6 +36,7 @@
 //! scans or opens a link.
 
 mod activity;
+mod config_watch;
 mod device;
 mod fleet;
 mod handler;
@@ -161,6 +162,7 @@ async fn run() -> ExitCode {
 struct Started {
     daemon: Arc<Daemon>,
     reloader: JoinHandle<()>,
+    adapter_edits: JoinHandle<()>,
     health: JoinHandle<()>,
 }
 
@@ -383,6 +385,10 @@ async fn start(
     daemon.mcp_to(&config.mcp).await;
     daemon.web_to(&config.web).await;
     let reloader = tokio::spawn(watch_hangups(hangups, Arc::clone(&daemon)));
+    let adapter_edits = tokio::spawn(watch_adapter_edits(
+        args.config.clone(),
+        Arc::clone(&daemon),
+    ));
 
     // The health of the host is worth a line in the journal but nothing waits on it: it is
     // asked for beside the accept loop, so a bus or a `systemctl` that does not answer delays
@@ -410,6 +416,7 @@ async fn start(
     Started {
         daemon,
         reloader,
+        adapter_edits,
         health,
     }
 }
@@ -425,6 +432,7 @@ async fn serve_until_stopped(
     let Started {
         daemon,
         reloader,
+        adapter_edits,
         health,
     } = started;
     // A socket the service manager handed over is the service manager's path to keep; one this
@@ -453,6 +461,7 @@ async fn serve_until_stopped(
         host::fake_speakers::remove();
     }
     reloader.abort();
+    adapter_edits.abort();
     // Whatever the transport is still taking off the radio (a connection an actor cut short a
     // connect attempt on) runs on a task of its own, and the runtime is about to stop: the
     // last thing the daemon does is give that work the same grace a session gives it.
@@ -679,6 +688,26 @@ async fn watch_hangups(hangups: Option<Signal>, daemon: Arc<Daemon>) {
             Ok(devices) => log::info(&format!("reloaded, serving {}", listed(&devices))),
             Err(message) => log::error(&message),
         }
+    }
+}
+
+/// Follow a hand edit of the configuration's `adapter` while the daemon runs: the file is
+/// watched (inotify, nothing polled), and each edit moves the daemon to the adapter the file now
+/// names, as a reload does. Nothing else of the file is applied; that stays a reload's work.
+async fn watch_adapter_edits(path: PathBuf, daemon: Arc<Daemon>) {
+    let watch = match config_watch::ConfigWatch::start(&path) {
+        Ok(watch) => watch,
+        Err(e) => {
+            log::warn(&format!(
+                "cannot watch {} for an adapter change: {e}; `svolder daemon reload` applies one",
+                path.display()
+            ));
+            return;
+        }
+    };
+    while watch.edited().await.is_ok() {
+        tokio::time::sleep(config_watch::SETTLE).await;
+        daemon.follow_adapter_edit().await;
     }
 }
 

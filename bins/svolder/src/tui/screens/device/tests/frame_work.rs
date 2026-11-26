@@ -32,7 +32,8 @@ fn work_of(app: &App, width: u16, height: u16) -> std::collections::BTreeMap<&'s
 
 /// A frame lays the screen out once, however many of its parts (the panes, their frames for the
 /// animation layer, the squirrel's home, the cover) ask where they are, and builds each pane's
-/// lines no more than twice: once to measure the room the cover grows into and once to draw.
+/// lines no more than twice (the cover no longer asks the panes for their room, so once is what a
+/// frame does today; the bound stays loose).
 #[test]
 fn a_frame_of_the_device_screen_lays_it_out_once_and_builds_each_pane_at_most_twice() {
     for (width, height) in [(80, 24), (120, 36), (200, 60)] {

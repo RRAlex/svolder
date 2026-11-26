@@ -725,8 +725,9 @@ fn a_track_change_redraws_the_cover() {
             let raw = tui.raw();
             assert!(
                 raw[raw_before..].windows(4).any(|w| w == b"\x1b[2J"),
-                "the screen was not cleared under the old sixel picture: {:?}",
-                String::from_utf8_lossy(&raw[raw_before..raw.len().min(raw_before + 1500)])
+                "the screen was not cleared under the old sixel picture: {:?}\n{}",
+                String::from_utf8_lossy(&raw[raw_before..raw.len().min(raw_before + 1500)]),
+                tui.screen_text()
             );
         }
         tui.quit();
@@ -820,12 +821,11 @@ fn a_cover_that_goes_takes_the_picture_off_the_screen() {
         tui.wait_for_text("Now playing: Test Pressing — The Fakes");
         assert_clean_device_screen(&tui);
         if responder == Responder::Sixel {
-            let raw = tui.raw();
-            assert!(
-                raw[raw_before..].windows(4).any(|w| w == b"\x1b[2J"),
-                "the screen was not cleared under the old sixel picture: {:?}",
-                String::from_utf8_lossy(&raw[raw_before..raw.len().min(raw_before + 1500)])
-            );
+            // A sixel picture has no glyph on the screen to wait for, so the repaint that takes
+            // it off is waited for in the bytes, however long the cue takes to be read.
+            tui.wait_tap("a repaint under the old sixel picture", WAIT, |tap| {
+                count_bytes(&tap.raw[raw_before..], b"\x1b[2J") > 0
+            });
         }
         tui.quit();
     }
@@ -1853,6 +1853,24 @@ fn a_quit_during_a_slow_connect_write_ends_the_run_and_loses_no_write() {
     assert!(text.contains("svolder"), "the write was lost:\n{text}");
 }
 
+/// Whether the Status pane on the screen as text keeps a blank row at its top and one at its end
+/// with a row of its own right above that: the tall tier's two blank rows around the pane's rows.
+fn status_pane_is_rows_between_blanks(text: &str) -> bool {
+    let lines: Vec<&str> = text.lines().collect();
+    let Some(top) = lines.iter().position(|line| line.contains("┌ Status")) else {
+        return false;
+    };
+    let Some(bottom) = lines[top..].iter().position(|line| line.starts_with('└')) else {
+        return false;
+    };
+    let inside = |line: &str| line.trim_matches(['│', ' ', '\u{2800}']).is_empty();
+    let pane = &lines[top + 1..top + bottom];
+    pane.len() > 3
+        && inside(pane[0])
+        && inside(pane[pane.len() - 1])
+        && !inside(pane[pane.len() - 2])
+}
+
 /// The rows of the Status pane that carry picture cells (kitty placeholders or half-blocks) on
 /// the screen as text, and the pane's own height from its top border to the bottom one.
 fn status_art_rows(text: &str) -> (usize, usize) {
@@ -1875,12 +1893,13 @@ fn status_art_rows(text: &str) -> (usize, usize) {
     (art, bottom.map_or(0, |bottom| bottom + 1))
 }
 
-/// From 100 by 45 the Status pane grows upward and its cover with it, the kitty picture and the
-/// half-block one alike; one row or column short of that the pane and the cover are as they
-/// were.
+/// From 100 by 45 the Status pane has the VU rows and its cover is as tall as its rows, the
+/// kitty picture and the half-block one alike (the cover is at most the pane less its border and its
+/// blank top and end rows); one row or column short of that the
+/// pane has no VU rows and the cover is shorter by as many.
 #[test]
 #[ignore = "runs the real binary in a pty: make tui-harness"]
-fn the_cover_grows_with_the_status_pane_from_100_by_45() {
+fn the_cover_is_the_status_panes_rows_from_100_by_45() {
     for responder in [Responder::None, Responder::Kitty] {
         let drawn = |cols: u16, rows: u16| {
             let tui = Tui::start(cols, rows, responder);
@@ -1890,30 +1909,43 @@ fn the_cover_grows_with_the_status_pane_from_100_by_45() {
             // that shows them, so a count is taken once the cell count has settled.
             settled_art_cells(&tui);
             assert_clean_device_screen(&tui);
-            let counts = status_art_rows(&tui.screen_text());
+            let text = tui.screen_text();
+            assert!(
+                status_pane_is_rows_between_blanks(&text),
+                "{cols}x{rows}: the pane is not its rows between two blank rows:\n{text}"
+            );
+            let counts = status_art_rows(&text);
             tui.quit();
             counts
         };
         let (small_art, small_pane) = drawn(100, 44);
         let (grown_art, grown_pane) = drawn(100, 45);
         assert!(
-            grown_pane > small_pane + 4,
+            grown_pane > small_pane + 2,
             "{responder:?}: {small_pane} {grown_pane}"
         );
-        assert!(small_art <= small_pane - 2, "{responder:?}: {small_art}");
+        assert!(small_art <= small_pane - 4, "{responder:?}: {small_art}");
         assert!(
-            grown_art > small_art + 4,
+            grown_art > small_art + 2,
             "{responder:?}: {small_art} {grown_art}"
         );
-        assert!(grown_art <= grown_pane - 2, "{responder:?}: {grown_art}");
+        assert!(grown_art <= grown_pane - 4, "{responder:?}: {grown_art}");
+        // A big terminal: the pane is no taller than its rows, and the cover is as tall as the
+        // rows, so it is no taller than the 100 by 45 one plus what the 200 by 60 rows add.
+        let (big_art, big_pane) = drawn(200, 60);
+        assert_eq!(
+            big_pane, grown_pane,
+            "{responder:?}: the pane grew with the terminal"
+        );
+        assert!(big_art <= big_pane - 4, "{responder:?}: {big_art}");
     }
 }
 
-/// A resize across the 100 by 45 line, both ways, grows the Status pane and its cover and then
-/// takes them back, leaving no picture above the shrunk pane.
+/// A resize across the 100 by 45 line, both ways, gives the Status pane its VU rows and its cover
+/// their height and then takes them back, leaving no picture above the shrunk pane.
 #[test]
 #[ignore = "runs the real binary in a pty: make tui-harness"]
-fn a_resize_across_100_by_45_grows_and_shrinks_the_cover() {
+fn a_resize_across_100_by_45_adds_and_removes_the_vu_rows_and_the_cover_follows() {
     for responder in [Responder::Kitty, Responder::None] {
         let tui = Tui::start(100, 44, responder);
         tui.wait_for_text("Now playing: Test Pressing");
@@ -1922,7 +1954,7 @@ fn a_resize_across_100_by_45_grows_and_shrinks_the_cover() {
         tui.resize(100, 45);
         tui.wait_for("the cover in the grown pane", WAIT, |screen| {
             let (art, pane) = status_art_rows(&screen.contents());
-            pane > small_pane + 4 && art > small_art + 4
+            pane > small_pane + 2 && art > small_art + 2
         });
         assert_clean_device_screen(&tui);
         tui.resize(100, 44);

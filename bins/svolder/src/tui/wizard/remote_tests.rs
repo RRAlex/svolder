@@ -389,6 +389,7 @@ impl svolder_walk::WalkEffects for Shots {
                 crate::wizard::fake::seen_product("0807060504030201", "Gungnir 2", -58),
             ],
             notices: Vec::new(),
+            adapters: None,
         })
     }
 
@@ -402,6 +403,10 @@ impl svolder_walk::WalkEffects for Shots {
         _passphrase: &str,
     ) -> Result<svolder_ipc::Connect, String> {
         Ok(svolder_ipc::Connect::Accepted)
+    }
+
+    async fn switch_adapter(&self, _address: &str, _name: &str) -> Result<(), String> {
+        Ok(())
     }
 
     async fn write_device(

@@ -341,6 +341,7 @@ pub(in crate::commands) async fn serving_daemon(
             what: "the daemon serves no computer EQ (host audio is off for it)".to_string(),
             next: "Restart it without SVOLDER_HOST=off, then try again".to_string(),
             reason: None,
+            adapter_hint: None,
         }),
         Reach::Silent => Err(Failure::of(
             Kind::DaemonError,
@@ -351,6 +352,7 @@ pub(in crate::commands) async fn serving_daemon(
             what: "the computer EQ needs a running svolderd".to_string(),
             next: "Start it with `svolder daemon install`, then try again".to_string(),
             reason: None,
+            adapter_hint: None,
         }),
     }
 }

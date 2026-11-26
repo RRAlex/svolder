@@ -64,8 +64,9 @@ pub(crate) use tone_pane::computer_folds;
 use tone_pane::tone_lines;
 use tone_pane::{LOUDNESS_BAR_AT, TonePane, tone_lines_in};
 
-/// Lines the Status pane takes: two of its own inside a frame. The tall tier's blank top row
-/// comes on top of these, added where the pane is laid out.
+/// Lines the Status pane takes: two of its own inside a frame. The tall tier's blank top row and
+/// the tall tier's blank row at the end ([`Tier::end_blank`]) come on top of these, added where the pane is laid
+/// out.
 const STATUS_HEIGHT: u16 = 4;
 
 /// The interior line the Tone pane draws the mode row on.
@@ -618,8 +619,9 @@ fn draw_holding(
 /// The tiers `area` falls in, and the three bands this screen is laid out in over it: the
 /// header, the panes between, and the Status frame — a row under the panes in the tall tier,
 /// and a line taller for each of the `Link`, `Level from`, `Now playing` and `Passphrase` rows
-/// it draws, and the rows [`art::growth`] gives it for a larger cover — down to the terminal's
-/// last row.
+/// it draws, with one blank row at its end in the tall tier — down to the terminal's last row. The Status pane
+/// is only as tall as its own rows need (and, in the tall tier, a blank row) whatever cover shows: the panes above
+/// it take every row it does not.
 fn rows_of(area: Rect, app: &App) -> (Tier, [Rect; 3]) {
     if let Some(laid) = app.drawn.device_rows(area) {
         // A kept layout is only ever the one the app would give now.
@@ -657,12 +659,11 @@ fn lay_out(area: Rect, app: &App) -> (Tier, [Rect; 3]) {
         + u16::from(now_playing_drawn(app))
         + u16::from(passphrase_drawn(app))
         + vu_rows(area, app);
-    let base = STATUS_HEIGHT + extra_lines + tier.top();
-    let grown = art::growth(area, body, tier, base, tier.row_gap(), app);
+    let height = STATUS_HEIGHT + extra_lines + tier.top() + tier.end_blank();
     let [panes, _, status] = Layout::vertical([
         Constraint::Min(0),
         Constraint::Length(tier.row_gap()),
-        Constraint::Length(base + grown),
+        Constraint::Length(height),
     ])
     .areas(body);
     (tier, [header, panes, status])

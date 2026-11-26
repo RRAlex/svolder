@@ -558,6 +558,7 @@ fn daemon_with_dac(route: RouteFacts, input: &str) -> std::path::PathBuf {
         recalled: None,
         signal: None,
         key_readings: Vec::new(),
+        adapter_hint: None,
     };
     let socket = crate::test_support::short_socket("svolder-check-fake");
     let _ = std::fs::remove_file(&socket);

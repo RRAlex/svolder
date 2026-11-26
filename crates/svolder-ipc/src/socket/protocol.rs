@@ -22,6 +22,7 @@
 use serde::{Deserialize, Serialize};
 
 mod activity;
+mod adapter_hint;
 mod autoeq;
 mod codes;
 mod device_config;
@@ -39,6 +40,7 @@ mod timeouts;
 mod walk;
 
 pub use activity::{Activity, DAY_SECS, ServerActivity};
+pub use adapter_hint::AdapterHint;
 pub use autoeq::{
     AUTOEQ_GROUPS_MAX, AUTOEQ_QUERY_MAX, AutoEqGroup, AutoEqMeasurement, AutoEqOp, AutoEqPreview,
     AutoEqSaved, AutoEqSearch, AutoEqTarget, AutoEqVariant,
@@ -47,10 +49,11 @@ pub use autoeq::{
 pub(crate) use codes::FEATURE_REASONS;
 pub use codes::{
     CODE_COMPUTER_UNAVAILABLE, CODE_LINK, CODE_NOT_FOUND, CODE_TIMEOUT, CODE_UNKNOWN_REQUEST,
-    CODE_USAGE, FEATURE_ADAPTER_SWITCH, FEATURE_AUTOEQ, FEATURE_DEVICE_CRUD, FEATURE_GUEST_SWITCH,
-    FEATURE_HOST_COVER, FEATURE_MQTT_SET, FEATURE_PRESET_WRITE, FEATURE_SCENES,
-    FEATURE_SERVER_SWITCH, FEATURE_SPEAKERS, FEATURE_UNKNOWN_REQUEST_CODE, FEATURE_WALK, FEATURES,
-    NO_DEVICES_CONFIGURED, NOT_CONNECTED, NOT_FOUND_YET, WEB_OFF, not_found_yet,
+    CODE_USAGE, FEATURE_ADAPTER_HINT, FEATURE_ADAPTER_SWITCH, FEATURE_AUTOEQ, FEATURE_DEVICE_CRUD,
+    FEATURE_GUEST_SWITCH, FEATURE_HOST_COVER, FEATURE_MQTT_SET, FEATURE_PRESET_WRITE,
+    FEATURE_SCENES, FEATURE_SERVER_SWITCH, FEATURE_SPEAKERS, FEATURE_UNKNOWN_REQUEST_CODE,
+    FEATURE_WALK, FEATURES, NO_DEVICES_CONFIGURED, NOT_CONNECTED, NOT_FOUND_YET, WEB_OFF,
+    not_found_yet,
 };
 pub use device_config::{ConfiguredDevice, DeviceConfigOp, PassphraseKind, ProfileChoice};
 pub use host_cover::{COVER_CHUNK_BYTES, CoverReader, cover_chunk};
@@ -152,6 +155,11 @@ pub struct DeviceInfo {
     /// old to say
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub key_readings: Vec<String>,
+    /// while the connects to the device keep failing on one adapter and another adapter hears
+    /// it: what each hears and the adapter to switch to; absent otherwise, and from a daemon
+    /// that does not list [`FEATURE_ADAPTER_HINT`]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter_hint: Option<AdapterHint>,
 }
 
 /// The id of a device's signal-strength series, in dBm: the first of every device's key

@@ -104,6 +104,11 @@ pub const FEATURE_SCENES: &str = "scenes";
 /// no restart. A daemon without it reads `adapter` only when it starts.
 pub const FEATURE_ADAPTER_SWITCH: &str = "adapter_switch";
 
+/// The feature a daemon lists when it publishes the adapter hint with a device's row
+/// ([`DeviceInfo::adapter_hint`](super::DeviceInfo::adapter_hint)): while a device keeps failing
+/// to connect on one adapter and another adapter hears it, the row says so.
+pub const FEATURE_ADAPTER_HINT: &str = "adapter_hint";
+
 /// Everything this build's daemon supports, as its `version` answer lists it: the one place the
 /// list is kept. A front end asks through `DaemonInfo::supports`.
 pub const FEATURES: &[&str] = &[
@@ -120,6 +125,7 @@ pub const FEATURES: &[&str] = &[
     FEATURE_SPEAKERS,
     FEATURE_SCENES,
     FEATURE_ADAPTER_SWITCH,
+    FEATURE_ADAPTER_HINT,
 ];
 
 /// The message of the code-3 [`Response::Error`] a daemon answers a command with while it holds no

@@ -48,23 +48,24 @@ pub use host::{
 pub use passphrase_note::{PassphraseNote, passphrase_verdict};
 pub use socket::client::{Client, is_running, request_on_own_connection};
 pub use socket::protocol::{
-    ACTOR_STOP_MARGIN, AUTOEQ_GROUPS_MAX, AUTOEQ_QUERY_MAX, Activity, AutoEqGroup,
+    ACTOR_STOP_MARGIN, AUTOEQ_GROUPS_MAX, AUTOEQ_QUERY_MAX, Activity, AdapterHint, AutoEqGroup,
     AutoEqMeasurement, AutoEqOp, AutoEqPreview, AutoEqSaved, AutoEqSearch, AutoEqTarget,
     AutoEqVariant, BRIDGE_STOP_BOUND, CODE_COMPUTER_UNAVAILABLE, CODE_LINK, CODE_NOT_FOUND,
     CODE_TIMEOUT, CODE_UNKNOWN_REQUEST, CODE_USAGE, COMMAND_DEADLINE, COVER_CHUNK_BYTES,
     ConfiguredDevice, Connect, ConnectFailure, CoverReader, DAY_SECS, DEFAULT_REQUEST_TIMEOUT,
-    DeviceConfigOp, DeviceInfo, Event, FEATURE_ADAPTER_SWITCH, FEATURE_AUTOEQ, FEATURE_DEVICE_CRUD,
-    FEATURE_GUEST_SWITCH, FEATURE_HOST_COVER, FEATURE_MQTT_SET, FEATURE_PRESET_WRITE,
-    FEATURE_SCENES, FEATURE_SERVER_SWITCH, FEATURE_SPEAKERS, FEATURE_UNKNOWN_REQUEST_CODE,
-    FEATURE_WALK, FEATURES, HostEqOp, JOB_RESULT_MAX_BYTES, JOB_STOP_BOUND, JobEvent, JobId,
-    JobState, LinkChange, MAX_SCAN_WINDOW, McpStatus, MqttOp, MqttProblem, MqttStatus,
-    NO_DEVICES_CONFIGURED, NOT_CONNECTED, NOT_FOUND_YET, PartOutcome, PartRow, PartStatus,
-    PassphraseKind, PresetOp, ProfileChoice, READINGS_SPAN_SECS, RELOAD_TIMEOUT,
-    RUNTIME_STOP_BOUND, Reason, RecallOut, Reply, Request, RequestLine, Response, SERIES_SIGNAL,
-    SPEAKERS_OFF_PREFIX, ScanEntry, SceneOp, SceneRow, ScenesView, SeriesOut, Server,
-    ServerActivity, SpeakersAngles, SpeakersCatalogue, SpeakersOp, SpeakersProgress, SpeakersRoom,
-    SpeakersSaved, SpeakersSet, TokenInfo, TokenKind, ValueObject, WALK_IDLE_BOUND, WEB_OFF,
-    WRITE_SETTLE_BOUND, WalkOp, WebStatus, cover_chunk, not_found_yet, raw_json, to_line,
+    DeviceConfigOp, DeviceInfo, Event, FEATURE_ADAPTER_HINT, FEATURE_ADAPTER_SWITCH,
+    FEATURE_AUTOEQ, FEATURE_DEVICE_CRUD, FEATURE_GUEST_SWITCH, FEATURE_HOST_COVER,
+    FEATURE_MQTT_SET, FEATURE_PRESET_WRITE, FEATURE_SCENES, FEATURE_SERVER_SWITCH,
+    FEATURE_SPEAKERS, FEATURE_UNKNOWN_REQUEST_CODE, FEATURE_WALK, FEATURES, HostEqOp,
+    JOB_RESULT_MAX_BYTES, JOB_STOP_BOUND, JobEvent, JobId, JobState, LinkChange, MAX_SCAN_WINDOW,
+    McpStatus, MqttOp, MqttProblem, MqttStatus, NO_DEVICES_CONFIGURED, NOT_CONNECTED,
+    NOT_FOUND_YET, PartOutcome, PartRow, PartStatus, PassphraseKind, PresetOp, ProfileChoice,
+    READINGS_SPAN_SECS, RELOAD_TIMEOUT, RUNTIME_STOP_BOUND, Reason, RecallOut, Reply, Request,
+    RequestLine, Response, SERIES_SIGNAL, SPEAKERS_OFF_PREFIX, ScanEntry, SceneOp, SceneRow,
+    ScenesView, SeriesOut, Server, ServerActivity, SpeakersAngles, SpeakersCatalogue, SpeakersOp,
+    SpeakersProgress, SpeakersRoom, SpeakersSaved, SpeakersSet, TokenInfo, TokenKind, ValueObject,
+    WALK_IDLE_BOUND, WEB_OFF, WRITE_SETTLE_BOUND, WalkOp, WebStatus, cover_chunk, not_found_yet,
+    raw_json, to_line,
 };
 pub use socket::server::{Bound, Handler, bind, listen_fds, serve, serve_bound, serve_on};
 pub use socket::signal::{

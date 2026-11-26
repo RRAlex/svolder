@@ -515,6 +515,7 @@ async fn do_save(
             what: "not every tone-control reading has arrived yet".to_string(),
             next: crate::recovery::INSPECT.to_string(),
             reason: None,
+            adapter_hint: None,
         }
         .report());
     };

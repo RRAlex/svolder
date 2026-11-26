@@ -128,6 +128,25 @@ impl Radio for LiveEffects {
         scanning::find_any(&self.g.borrow()).await
     }
 
+    /// Every adapter listens at once for the window the adapters list uses, and what each heard of
+    /// the units a scan found is what the walk shows; the adapter in use is the one a session
+    /// opens, as `svolder adapters` marks it.
+    async fn listen_on_all(&self, units: &[String]) -> Option<svolder_walk::Listened> {
+        let g = self.g.borrow();
+        if g.transport != "fake" && self.adapters().len() < 2 {
+            return None;
+        }
+        let hearings =
+            crate::commands::adapters::hearings_of(&g, units, crate::commands::adapters::WINDOW)
+                .await
+                .ok()?;
+        crate::commands::adapters::listened_from(
+            &hearings,
+            g.adapter,
+            self.config.adapter.as_deref(),
+        )
+    }
+
     fn adapters(&self) -> Vec<String> {
         self.snapshot
             .bluez()

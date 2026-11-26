@@ -297,6 +297,79 @@ impl Daemon {
         .await;
     }
 
+    /// The kernel name of the adapter the daemon holds, when its transport has one.
+    pub(crate) fn adapter_in_use(&self) -> Option<String> {
+        self.transport.adapter().map(str::to_string)
+    }
+
+    /// Make `address` the adapter every device connects through: written into the configuration
+    /// file as `adapter`, then followed as a reload follows it. A daemon its command line pins
+    /// refuses in words, and so does one that is still on another adapter afterwards (it could
+    /// not open the one named), so a walk never goes on over an adapter it did not reach.
+    pub(crate) async fn switch_adapter_to(&self, address: &str, name: &str) -> Result<(), String> {
+        if let Some(switch) = self.adapter_switch.get()
+            && switch.pinned
+        {
+            return Err(format!(
+                "this daemon is pinned to {} by --adapter or SVOLDER_ADAPTER",
+                self.adapter_in_use()
+                    .unwrap_or_else(|| "its adapter".into())
+            ));
+        }
+        let (path, wanted) = (self.config_path.clone(), address.to_string());
+        tokio::task::spawn_blocking(move || Config::set_adapter(&path, Some(&wanted)))
+            .await
+            .map_err(|_| "the configuration write stopped".to_string())?
+            .map_err(|e| e.to_string())?;
+        self.reload_all().await?;
+        match self.adapter_in_use() {
+            Some(now) if now != name => Err(format!(
+                "the daemon stays on {now}: it could not use {name} (see its log)"
+            )),
+            _ => Ok(()),
+        }
+    }
+
+    /// Move to the adapter the configuration file names now, when a hand edit changed it: the
+    /// file is read once, and only its `adapter` is applied, through [`Daemon::adapter_to`] (the
+    /// reload's own step). A file that is gone (after one was read), empty or unreadable leaves the
+    /// daemon where it is, as a reload leaves its devices: no defaults load and no adapter moves.
+    /// One that does not parse leaves it too, with a warning naming the file and the error. Taken
+    /// one at a time with the reloads, and nothing once the stop began.
+    pub(crate) async fn follow_adapter_edit(&self) {
+        let _reloading = self.reloading.lock().await;
+        if self.is_stopping() {
+            return;
+        }
+        let path = self.config_path.clone();
+        let held = config_write::held_stamp(self);
+        let loaded = tokio::task::spawn_blocking(move || {
+            if held.is_some() && config_write::gone(&path) {
+                return None;
+            }
+            // An absent or empty file reads as the defaults, which is no edit of `adapter`.
+            match std::fs::read_to_string(&path) {
+                Ok(text) if !text.trim().is_empty() => {
+                    Some(Config::load_from(&path).map_err(|e| format!("{}: {e}", path.display())))
+                }
+                _ => None,
+            }
+        })
+        .await;
+        let config = match loaded {
+            Ok(Some(Ok(config))) => config,
+            Ok(Some(Err(why))) => {
+                log::warn(&format!(
+                    "{why}; the adapter is left as it is until the file reads"
+                ));
+                return;
+            }
+            _ => return,
+        };
+        let registry = Arc::clone(&read(&self.registry));
+        self.adapter_to(config.adapter.as_deref(), &registry).await;
+    }
+
     /// The daemon with its host's sources taken from `mode` from the next
     /// [`Daemon::host_to`] on.
     pub fn with_host_mode(mut self, mode: HostMode) -> Self {

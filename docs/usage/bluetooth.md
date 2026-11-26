@@ -389,6 +389,34 @@ the daemon writes it to its log):
 hci2 hears BF3 at −74 dBm and cannot hold a link; hci0 hears it at −62 dBm: try adapter = "AA:BB:CC:DD:EE:01"
 ```
 
+The same pointer reaches every front end, not the log alone. The TUI's Devices screen shows it
+under the failure, in the ` Not opened ` frame (which shows while no device is open), as a step: `Enter` saves the adapter that hears the
+device (by its address, as the Settings chooser's `Enter` does; a daemon switches live and a direct
+session reopens on it) and `Esc` keeps trying where it is, until the failure clears and comes
+back; the device's row names the adapter it is tried on (`disconnected · hci2`). `svolder status`
+prints the pointer under a device that is not connected:
+
+```
+svolder: hci2 hears BF3 at −74 dBm and cannot hold a link; hci0 hears it at −62 dBm:
+         try adapter = "AA:BB:CC:DD:EE:01" (svolder adapters, or Settings → Bluetooth adapter)
+```
+
+Adding a device asks the same question up front. On a machine with several adapters the add walk
+(the TUI's `n` and `svolder add` without a unit id) listens on every adapter, shows each one's
+reading for every device it hears, and, when the adapter in use is not the one that hears the
+picked device best, asks before it tests the passphrase or writes the device: `Add it and switch to
+hci0` (`Enter`) saves that adapter as soon as the question is answered, so the passphrase test runs
+on the adapter that hears the device, and `Add it, keep hci2` (`k`) leaves `adapter` as it is. The
+switch is written when the question is answered: leaving at the Name step after it keeps the new
+adapter with no device added. A device only another adapter hears is listed too, and picking it
+asks the question. When the adapter in use hears the
+device best, or the machine has one adapter, nothing is asked. A daemon asks it of the TUI and the
+command line, not of the web UI, MCP or MQTT, whose walks are unchanged. Nothing switches on its
+own.
+
+An `adapter` edited by hand in `config.toml` is followed by a running daemon as it is saved, with
+no reload: see ["The daemon"](daemon.md) (the file is watched, not polled).
+
 `svolder doctor` says the same in its Adapter grade row where the adapter in use does not hear the
 device and another one does; another adapter that only hears it louder is a line of information
 there. Doctor only reports: it never writes `adapter` for a reading. Nothing switches adapters on

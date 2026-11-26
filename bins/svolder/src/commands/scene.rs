@@ -152,6 +152,7 @@ fn no_daemon() -> Failure {
         what: "scenes are kept by the daemon, and none is running".to_string(),
         next: "Start it with `svolder daemon install`, then try again".to_string(),
         reason: None,
+        adapter_hint: None,
     }
 }
 
@@ -162,6 +163,7 @@ fn refused(words: &str) -> Failure {
         what: words.to_string(),
         next: String::new(),
         reason: None,
+        adapter_hint: None,
     }
 }
 
@@ -472,6 +474,7 @@ fn no_such_scene(name: &str) -> Failure {
         what: format!("no scene named {:?}", name.trim()),
         next: "List them with `svolder scene list`".to_string(),
         reason: None,
+        adapter_hint: None,
     }
 }
 

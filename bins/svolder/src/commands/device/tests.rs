@@ -75,6 +75,7 @@ fn a_listed_device_says_when_the_daemon_tries_it_again() {
         refused: false,
         recalled: None,
         key_readings: Vec::new(),
+        adapter_hint: None,
     };
     let now_ms = Some(1_700_000_300_000);
     assert_eq!(
@@ -125,6 +126,7 @@ fn a_listed_device_says_its_signal() {
         refused: false,
         recalled: None,
         key_readings: Vec::new(),
+        adapter_hint: None,
     };
     assert_eq!(
         device_info_line(&info, Some(1_700_000_180_000)),

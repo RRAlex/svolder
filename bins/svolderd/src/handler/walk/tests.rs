@@ -517,3 +517,86 @@ async fn a_busy_refusal_names_a_terminals_walk_as_the_terminal() {
     }
     daemon.shutdown().await;
 }
+
+/// What two adapters heard of the new device: `hci0` louder than the `hci2` the daemon is on.
+fn heard_on_two() -> svolder_walk::Listened {
+    let on = |name: &str, address: &str, rssi: i16| svolder_walk::ListenedOn {
+        name: name.into(),
+        address: address.into(),
+        heard: vec![(NEW.to_string(), Some(rssi))],
+        adverts: Vec::new(),
+    };
+    svolder_walk::Listened {
+        in_use: "hci2".into(),
+        adapters: vec![
+            on("hci0", "AA:BB:CC:DD:EE:01", -74),
+            on("hci2", "AA:BB:CC:DD:EE:02", -80),
+        ],
+    }
+}
+
+/// Start a walk from `origin`, scan with what `LISTENED` holds, and pick the new device.
+async fn picked_new(daemon: &Daemon, origin: Origin) -> (Events, JobId, WalkState) {
+    super::effects::LISTENED.with(|told| *told.borrow_mut() = Some(Some(heard_on_two())));
+    let mut events = follow(daemon).await;
+    let Response::Job { job } = walk(daemon, origin, WalkOp::Start).await else {
+        panic!("the walk did not start");
+    };
+    waiting(&mut events, job).await;
+    let op = |choice| WalkOp::Answer {
+        job,
+        choice,
+        text: None,
+    };
+    assert_eq!(walk(daemon, origin, op(0)).await, Response::Ack);
+    let pick = waiting(&mut events, job).await;
+    assert_eq!(walk(daemon, origin, op(0)).await, Response::Ack);
+    let next = waiting(&mut events, job).await;
+    let _ = pick;
+    (events, job, next)
+}
+
+/// A walk a client of the socket runs shows what every adapter hears on the pick, and asks which
+/// adapter to add the device through when another hears it better: switching writes the adapter
+/// into the file by its address before the name is asked for.
+#[tokio::test]
+async fn a_socket_walk_asks_which_adapter_and_switching_writes_it_before_the_name() {
+    let (dir, config) = folder("adapter-switch", "");
+    let daemon = daemon_in(&dir.0, config, Arc::new(new_device()));
+    let (mut events, job, ask) = picked_new(&daemon, Origin::Socket).await;
+    assert_eq!(ask.prompt.step, Step::Adapter);
+    assert_eq!(
+        ask.prompt.choices,
+        ["Add it and switch to hci0", "Add it, keep hci2"]
+    );
+    assert_eq!(
+        ask.prompt.body.last().map(String::as_str),
+        Some("hci0 hears the Gungnir 2 best; svolder uses hci2.")
+    );
+    let op = WalkOp::Answer {
+        job,
+        choice: 0,
+        text: None,
+    };
+    assert_eq!(walk(&daemon, Origin::Socket, op).await, Response::Ack);
+    let name = waiting(&mut events, job).await;
+    assert_eq!(name.prompt.step, Step::Name);
+    let written = std::fs::read_to_string(dir.0.join("config.toml")).expect("the file reads");
+    assert!(
+        written.contains("adapter = \"AA:BB:CC:DD:EE:01\""),
+        "{written}"
+    );
+    daemon.shutdown().await;
+}
+
+/// The web UI, MCP and MQTT are not asked: their walks listen on the daemon's adapter alone and
+/// go from the pick to the name as they did.
+#[tokio::test]
+async fn a_walk_from_the_web_is_not_asked_which_adapter() {
+    let (dir, config) = folder("adapter-web", "");
+    let daemon = daemon_in(&dir.0, config, Arc::new(new_device()));
+    let (_events, _job, next) = picked_new(&daemon, Origin::Web).await;
+    assert_eq!(next.prompt.step, Step::Name);
+    super::effects::LISTENED.with(|told| told.take());
+    daemon.shutdown().await;
+}

@@ -388,6 +388,7 @@ impl Handler for Big {
                         refused: false,
                         recalled: None,
                         key_readings: Vec::new(),
+                        adapter_hint: None,
                     })
                     .collect(),
             },

@@ -253,6 +253,7 @@ async fn change(
                 what: "the daemon serves no computer EQ (host audio is off for it)".to_string(),
                 next: "Restart it without SVOLDER_HOST=off, then try again".to_string(),
                 reason: None,
+                adapter_hint: None,
             });
         }
         Reach::Silent => {
@@ -351,6 +352,7 @@ fn refusal(refused: Refused) -> Failure {
             what: refused.message,
             next: String::new(),
             reason: None,
+            adapter_hint: None,
         };
     }
     if refused.too_old {

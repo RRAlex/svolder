@@ -43,6 +43,13 @@ pub trait Radio {
     /// Listen for devices in range, with whatever opening a backend had to say.
     async fn scan(&self) -> Result<Scanned, Failure>;
 
+    /// What every adapter hears of `units`, when the machine has several adapters and a device
+    /// is to be added through them: the adapter in use and each adapter's reading per unit.
+    /// `None` on a machine with one adapter, which leaves the walk as it was.
+    async fn listen_on_all(&self, _units: &[String]) -> Option<svolder_walk::Listened> {
+        None
+    }
+
     /// The machine's adapters, as BlueZ names them: what says whether there is a choice to
     /// offer, before the grading that takes seconds is run.
     fn adapters(&self) -> Vec<String>;

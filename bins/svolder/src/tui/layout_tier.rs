@@ -61,6 +61,12 @@ impl Tier {
         u16::from(self.tall)
     }
 
+    /// Rows the Status pane keeps blank under its last row: one in the tall tier, none below it,
+    /// where every row is the Controls and Tone panes'.
+    pub fn end_blank(self) -> u16 {
+        u16::from(self.tall)
+    }
+
     /// The blank a pane keeps inside its border: one column on either side in the wide tier,
     /// which with the blank a row opens and closes on itself — the cursor's own column, a column
     /// title's leading space — sets the text two cells in; and a row at the top in the tall

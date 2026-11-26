@@ -41,6 +41,9 @@ pub struct Heard {
     pub unit: String,
     /// The signal strength in dBm, when the adapter said.
     pub rssi: Option<i16>,
+    /// What its advertisement said of the device, when it was heard rather than named: a row the
+    /// device walk can offer for a device only this adapter hears.
+    pub manufacturer: Option<svolder_proto::ManufacturerData>,
 }
 
 /// What one adapter heard in a listening window.
@@ -214,6 +217,7 @@ async fn hear_on(name: &str, window: Duration) -> Result<Vec<Heard>, String> {
             None => heard.push(Heard {
                 unit,
                 rssi: advert.rssi,
+                manufacturer: Some(advert.manufacturer),
             }),
         }
     }
@@ -249,6 +253,7 @@ pub fn fake_hearings(knob: Option<&str>, units: &[String]) -> Result<Vec<Hearing
             .map(|unit| Heard {
                 unit: unit.clone(),
                 rssi,
+                manufacturer: None,
             })
             .collect();
         out.push(Hearing {
@@ -318,6 +323,11 @@ pub fn better_than(failing: &str, unit: &str, hearings: &[Hearing]) -> Option<Be
 /// `device` is what the config calls it and `unit` its unit id.
 pub fn pointer(failing: &str, device: &str, unit: &str, hearings: &[Hearing]) -> Option<String> {
     let better = better_than(failing, unit, hearings)?;
+    Some(pointer_words(failing, device, &better))
+}
+
+/// The words of [`pointer()`] for the adapter `better` names.
+pub fn pointer_words(failing: &str, device: &str, better: &Better) -> String {
     let other_hears = match better.rssi {
         Some(rssi) => format!("{} hears it at {}", better.name, dbm(rssi)),
         None => format!("{} hears it", better.name),
@@ -330,10 +340,23 @@ pub fn pointer(failing: &str, device: &str, unit: &str, hearings: &[Hearing]) ->
         Some(None) => format!("{failing} hears {device} and cannot hold a link"),
         None => format!("{failing} does not hear {device}"),
     };
-    Some(format!(
+    format!(
         "{own_hears}; {other_hears}: try adapter = \"{}\"",
         better.take
-    ))
+    )
+}
+
+/// `what` without the pointer [`pointer_words`] added after it (`; <own>; <other>: try adapter =
+/// "…"`), or as it was when it carries none.
+pub fn without_pointer(what: &str) -> &str {
+    let Some(at) = what.find(": try adapter = \"") else {
+        return what;
+    };
+    let before = &what[..at];
+    match before.rmatch_indices("; ").nth(1) {
+        Some((start, _)) => &what[..start],
+        None => what,
+    }
 }
 
 /// Whether the words of a failed connect say it never came up within its deadline, which is what
@@ -347,19 +370,26 @@ pub fn is_connect_deadline(what: &str) -> bool {
 /// per streak of failures.
 pub const POINTER_WINDOW: Duration = Duration::from_secs(3);
 
-/// [`pointer()`] for a real machine: the adapters it has listen for [`POINTER_WINDOW`], and the
-/// pointer is made of what they heard. `None` with fewer than two adapters (there is nothing to
-/// point at) and when no other adapter hears the device.
+/// The adapter that hears the device `unit` for a failing connect on `failing`, for a real
+/// machine: the adapters it has listen for [`POINTER_WINDOW`], and the best of the others is
+/// answered. `None` with fewer than two adapters (there is nothing to point at) and when no other
+/// adapter hears the device.
 ///
 /// The failing adapter listens too, on a transport of its own: BlueZ lets several clients
 /// discover on one adapter, so the session that failed is not disturbed.
-pub async fn pointer_for(failing: &str, device: &str, unit: &str) -> Option<String> {
+pub async fn better_for(failing: &str, unit: &str) -> Option<Better> {
     let present = present().await.ok()?;
     if present.len() < 2 {
         return None;
     }
     let hearings = hear_all(&present, POINTER_WINDOW).await;
-    pointer(failing, device, unit, &hearings)
+    better_than(failing, unit, &hearings)
+}
+
+/// [`pointer()`] for a real machine, made of what [`better_for`] heard.
+pub async fn pointer_for(failing: &str, device: &str, unit: &str) -> Option<String> {
+    let better = better_for(failing, unit).await?;
+    Some(pointer_words(failing, device, &better))
 }
 
 #[cfg(test)]

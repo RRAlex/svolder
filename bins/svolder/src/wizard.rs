@@ -567,7 +567,9 @@ impl<E: Effects> Wizard<E> {
             // A machine with one adapter has no choice to offer, so it skips the step that
             // would grade them and never spends the seconds grading takes.
             Ok(Walked::Added) => {
-                match self.effects().adapters().len() >= 2 {
+                // A walk that listened on every adapter has asked which one to use, so grading
+                // them again would ask twice.
+                match self.walk.listened().is_none() && self.effects().adapters().len() >= 2 {
                     true => self.go(Step::Adapter),
                     false => self.on_to_the_daemon().await,
                 }
@@ -859,7 +861,7 @@ impl<E: Effects> Wizard<E> {
         if let Some(note) = self.after_note.as_deref() {
             body.push(note.to_string());
         }
-        if let Some(adapter) = self.adapter.as_deref() {
+        if let Some(adapter) = self.adapter.as_deref().or(self.walk.switched()) {
             body.push(format!("Set adapter = {adapter:?}."));
         }
         if let Some(installed) = self.installed.as_deref() {

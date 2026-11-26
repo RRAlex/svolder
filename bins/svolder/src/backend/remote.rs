@@ -131,9 +131,15 @@ impl RemoteBackend {
             let ask = Request::State {
                 device: device.clone(),
             };
-            let (name, read) = match request(&mut client, path, ask).await? {
-                Response::Values { device, values } => (device, values),
-                other => return Err(unexpected(&other)),
+            let (name, read) = match request(&mut client, path, ask).await {
+                Ok(Response::Values { device, values }) => (device, values),
+                Ok(other) => return Err(unexpected(&other)),
+                // A device the daemon cannot read yet says why it is not connected, when it
+                // knows: the adapter hint rides with the failure.
+                Err(mut failure) => {
+                    failure.adapter_hint = held_hint(path, selector).await.map(Box::new);
+                    return Err(failure);
+                }
             };
             values = read;
             device = Some(name.clone());
@@ -150,6 +156,10 @@ impl RemoteBackend {
                     // verb prints them and leaves with the code it would have anyway.
                     if !info.connected {
                         warnings.push(format!("{name} is disconnected; {LAST_KNOWN}"));
+                        if let Some(hint) = &info.adapter_hint {
+                            let [hears, step] = hint.lines();
+                            warnings.push(format!("{hears}\n         {step}"));
+                        }
                     }
                     refused = info.refused;
                     let registry = super::registry()?;
@@ -699,6 +709,17 @@ pub(super) async fn device_infos(path: &Path) -> Result<Vec<DeviceInfo>, Failure
     }
 }
 
+/// The adapter hint the daemon's list carries for the device `selector` names (the only device
+/// it lists, for none), from a list asked for over a connection of its own; `None` when it
+/// cannot be asked in time or the device has none.
+async fn held_hint(path: &Path, selector: Option<&str>) -> Option<svolder_ipc::AdapterHint> {
+    own_of(
+        tokio::time::timeout(NOTE_WAIT, device_infos(path)).await,
+        selector.map(str::to_string),
+    )?
+    .adapter_hint
+}
+
 /// The device the daemon's list `listed` has for `device`, the one device it names or, with no
 /// name, the only one it lists.
 fn own_of(
@@ -772,6 +793,7 @@ pub(super) fn device_row(info: &DeviceInfo) -> DeviceRow {
         product_id: Some(info.product_id),
         stale: info.stale,
         refused: info.refused,
+        adapter_hint: info.adapter_hint.clone(),
     }
 }
 

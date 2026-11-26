@@ -607,6 +607,8 @@ impl App {
                 default_device: None,
                 editor: None,
                 confirm: None,
+                landed_hint: None,
+                dismissed: None,
             },
             speakers_box: Box::default(),
             scenes: ScenesBox::default(),

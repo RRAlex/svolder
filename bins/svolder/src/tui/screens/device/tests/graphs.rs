@@ -54,8 +54,8 @@ fn the_wide_tier_draws_the_connection_strip_in_the_status_pane() {
 #[test]
 fn the_tall_tier_draws_the_strip_and_the_smallest_terminal_does_not() {
     let rows = text(&frame(&linked_app(), 80, 40));
-    assert_eq!(&rows[33..], STRIP_80X40);
-    crate::tui::test_support::assert_usage_md_shows(&rows[34..], "link strip mockup");
+    assert_eq!(&rows[32..], STRIP_80X40);
+    crate::tui::test_support::assert_usage_md_shows(&rows[33..], "link strip mockup");
 
     let app = linked_app();
     let small = text(&frame(&app, 80, 24));
@@ -112,13 +112,14 @@ fn a_clock_stepped_back_never_panics_or_overdraws() {
 }
 
 /// The Status pane of [`linked_app`] at 80×40.
-const STRIP_80X40: [&str; 7] = [
+const STRIP_80X40: [&str; 8] = [
     "                                                                                ",
     "┌ Status ────────────────────────────────────────────────────────────── advice ┐",
     "│                                                                              │",
     "│ Sample rate 48 kHz   fw 3                                                    │",
     "│ Raw: 9=u8 64   9.1=u8 0   9.2=u8 1   (3 unknown functions)                   │",
     "│ Link  ⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⣀⣀⣀⣀⣀⣀⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉  12 h│",
+    "│                                                                              │",
     "└──────────────────────────────────────────────────────────────────────────────┘",
 ];
 
@@ -366,7 +367,6 @@ const STEREO_FRAME_80: [&str; 40] = [
     "│                                                                              │",
     "│                                                                              │",
     "│                                                                              │",
-    "│                                                                              │",
     "└──────────────────────────────────────────────────────────────────────────────┘",
     "                                                                                ",
     "┌ Status ────────────────────────────────────────────────────────────── advice ┐",
@@ -374,6 +374,7 @@ const STEREO_FRAME_80: [&str; 40] = [
     "│ Faults: none                                                                 │",
     "│ Raw: none                                                                    │",
     "│ Link                                                                     12 h│",
+    "│                                                                              │",
     "└──────────────────────────────────────────────────────────────────────────────┘",
 ];
 

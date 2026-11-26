@@ -137,7 +137,9 @@ pub(super) async fn run_on(
     watch(&opener, &adder, opened, guard, events, look).await
 }
 
-/// How a start ended before the loop took over.
+/// How a start ended before the loop took over. One value lives for the start, so the size of
+/// the open's answer is not worth a box.
+#[allow(clippy::large_enum_variant)]
 enum Begun<T> {
     /// The open answered, with a device or with the failure a landing is made of, and the exit the
     /// intro hands the loop.

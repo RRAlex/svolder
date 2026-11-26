@@ -98,6 +98,7 @@ fn daemon_failure(what: String, next: String) -> Failure {
         what,
         next,
         reason: None,
+        adapter_hint: None,
     }
 }
 

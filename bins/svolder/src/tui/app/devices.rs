@@ -28,4 +28,61 @@ pub struct DevicesScreen {
     pub opened: Option<DeviceConfig>,
     /// The device a removal is waiting to be confirmed for, while one is.
     pub confirm: Option<String>,
+    /// The adapter hint a direct session's failed open carried: the daemon's rows say theirs
+    /// themselves, and a direct session has no rows that do.
+    pub landed_hint: Option<svolder_ipc::AdapterHint>,
+    /// The device whose adapter step `Esc` put away. It stays away while the hint lasts and is
+    /// forgotten once the hint is gone, so the step comes back with the next one.
+    pub dismissed: Option<String>,
+}
+
+impl DevicesScreen {
+    /// The adapter hint the Devices screen offers a switch from: a device's row that carries
+    /// one, else the one a failed open of this session carried, unless `Esc` put its device's
+    /// step away.
+    pub fn hint(&self) -> Option<&svolder_ipc::AdapterHint> {
+        self.rows
+            .iter()
+            .filter_map(|row| row.adapter_hint.as_ref())
+            .chain(self.landed_hint.as_ref())
+            .find(|hint| self.dismissed.as_deref() != Some(hint.device.as_str()))
+    }
+
+    /// The adapter a row's device is being tried on, while its connects keep failing there and
+    /// another adapter hears it: its own row says so under a daemon, and in a direct session the
+    /// failed open's hint names the device it was for.
+    pub fn tried_on<'a>(&'a self, row: &'a DeviceRow) -> Option<&'a str> {
+        row.adapter_hint
+            .as_ref()
+            .or(self
+                .landed_hint
+                .as_ref()
+                .filter(|hint| hint.device == row.name))
+            .map(|hint| hint.failing.as_str())
+    }
+
+    /// The hint the row under the cursor carries, unless `Esc` put its step away.
+    pub fn selected_hint(&self, selected: usize) -> Option<&svolder_ipc::AdapterHint> {
+        self.rows
+            .get(selected)?
+            .adapter_hint
+            .as_ref()
+            .filter(|hint| self.dismissed.as_deref() != Some(hint.device.as_str()))
+    }
+
+    /// Forget a dismissal whose hint has gone, so the step is offered again when it comes back.
+    pub fn forget_cleared_dismissal(&mut self) {
+        let Some(device) = self.dismissed.as_deref() else {
+            return;
+        };
+        let held = self
+            .rows
+            .iter()
+            .filter_map(|row| row.adapter_hint.as_ref())
+            .chain(self.landed_hint.as_ref())
+            .any(|hint| hint.device == device);
+        if !held {
+            self.dismissed = None;
+        }
+    }
 }

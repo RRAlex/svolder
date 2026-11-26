@@ -190,6 +190,7 @@ fn unreadable(off: bool) -> Failure {
         what: what.to_string(),
         next: next.to_string(),
         reason: None,
+        adapter_hint: None,
     }
 }
 

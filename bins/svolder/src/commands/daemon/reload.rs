@@ -64,6 +64,7 @@ async fn reload_on(socket: &Path) -> Result<String, Failure> {
                     .to_string(),
             },
             reason,
+            adapter_hint: None,
         }),
         Ok(other) => Err(Failure::of(
             Kind::DaemonError,

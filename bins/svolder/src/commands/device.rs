@@ -339,6 +339,7 @@ pub(crate) async fn refuse_if_daemon_misses(
             what: words,
             next: String::new(),
             reason: Some(svolder_ipc::Reason::ReadOnly),
+            adapter_hint: None,
         }),
         None => Ok(()),
     }
@@ -354,6 +355,7 @@ pub(crate) fn config_failure(e: ConfigError) -> Failure {
             what: e.to_string(),
             next: String::new(),
             reason: Some(svolder_ipc::Reason::ReadOnly),
+            adapter_hint: None,
         };
     }
     Failure::of(Kind::ConfigUnreadable, e.to_string())

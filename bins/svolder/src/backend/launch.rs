@@ -418,5 +418,6 @@ pub(crate) fn no_daemon(path: &std::path::Path) -> Failure {
         next: "Start it with `svolder daemon restart`, or `svolder daemon install` once"
             .to_string(),
         reason: None,
+        adapter_hint: None,
     }
 }

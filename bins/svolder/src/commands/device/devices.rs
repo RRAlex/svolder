@@ -358,6 +358,7 @@ fn scan_first() -> Failure {
         what: "add needs the unit id of a device".to_string(),
         next: "Run `svolder scan` and use the `add` line it prints under the device".to_string(),
         reason: None,
+        adapter_hint: None,
     }
 }
 

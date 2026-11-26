@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The VU rows of the Status pane: `VU L` and `VU R`, a needle on a track, its reading in VU and
-//! the over lamp, under the `Now playing` row on a terminal of [`art::GROW_COLS`] by
-//! [`art::GROW_ROWS`] or more.
+//! the over lamp, under the `Now playing` row on a terminal of [`VU_COLS`] by
+//! [`VU_ROWS`] or more.
 //!
 //! The needle is the engine's ([`svolder_host::vu`]) quantised to a cell of a 40-cell track: `─`
 //! below 0 VU, `┼` at 0 VU, `┄` above it, `┃` where the needle is. The glyphs carry the meaning
@@ -17,7 +17,9 @@ use crate::tui::host::vu::Channel;
 use crate::tui::theme::{Role, Theme};
 use crate::tui::widgets::MISSING;
 
-use super::art;
+/// The terminal size from which the Status pane draws the VU rows.
+pub(super) const VU_COLS: u16 = 100;
+pub(super) const VU_ROWS: u16 = 45;
 
 /// The rows the VU meter takes in the Status pane: a blank row, then the two channels.
 pub(super) const ROWS: u16 = 3;
@@ -37,7 +39,7 @@ const READING: usize = 5;
 
 /// Whether a frame of `size` (columns, rows) is large enough for the VU rows.
 pub(crate) fn vu_drawn_in(size: (u16, u16)) -> bool {
-    size.0 >= art::GROW_COLS && size.1 >= art::GROW_ROWS
+    size.0 >= VU_COLS && size.1 >= VU_ROWS
 }
 
 /// Whether the Status pane of a frame `size` large draws the VU rows: host audio shows and the

@@ -955,3 +955,227 @@ fn a_short_border_drops_refresh_first_then_x_remove() {
         "{fifty:?}"
     );
 }
+
+/// The hint of a device whose connects fail on hci2 while hci0 hears it, as the daemon's row
+/// carries it.
+fn hint_of(device: &str) -> svolder_ipc::AdapterHint {
+    svolder_ipc::AdapterHint {
+        device: device.into(),
+        failing: "hci2".into(),
+        own_heard: true,
+        own_dbm: Some(-80),
+        better: "hci0".into(),
+        better_dbm: Some(-74),
+        take: "AA:BB:CC:DD:EE:01".into(),
+        failure: "no connection within 20 s (le-connection-abort-by-local)".into(),
+        tries: 4,
+    }
+}
+
+/// Rows of a daemon that says `gungnir` cannot hold a link on hci2.
+fn hinted_rows() -> Vec<DeviceRow> {
+    let mut rows = daemon_rows();
+    rows[1].adapter_hint = Some(hint_of("gungnir"));
+    rows
+}
+
+/// An app with no device open, as a session whose only device cannot connect is.
+fn closed(rows: Vec<DeviceRow>) -> App {
+    use crate::tui::app::Holding;
+
+    let mut a = app(rows);
+    a.session.holding = Some(Holding::Nothing { why: None });
+    a
+}
+
+/// A device that keeps failing on one adapter while another hears it: the frame above the list
+/// names the failure, what each adapter hears and the two answers with their keys in one column,
+/// and the device's row names the adapter it is tried on.
+#[test]
+fn the_not_opened_frame_offers_the_adapter_switch_with_its_keys_in_one_column() {
+    let (rows, _) = drawn(&closed(hinted_rows()));
+    assert_eq!(
+        rows[2],
+        "┌ Not opened ──────────────────────────────────────────────────────────────────┐"
+    );
+    assert_eq!(
+        rows[3],
+        "│ gungnir: no connection within 20 s (le-connection-abort-by-local), 4 tries   │"
+    );
+    assert_eq!(
+        rows[4],
+        "│ on hci2.                                                                     │"
+    );
+    assert_eq!(
+        rows[5],
+        "│ hci2 hears gungnir at −80 dBm and cannot hold a link; hci0 hears it at −74   │"
+    );
+    assert_eq!(
+        rows[6],
+        "│ dBm.                                                                         │"
+    );
+    assert_eq!(
+        rows[7],
+        "│                                                                              │"
+    );
+    assert_eq!(
+        rows[8],
+        "│ ▶ Switch to hci0   AA:BB:CC:DD:EE:01                                   Enter │"
+    );
+    assert_eq!(
+        rows[9],
+        "│   Keep trying on hci2                                                  Esc   │"
+    );
+    let list = row_with_in(&rows, "Gungnir 2");
+    assert!(
+        list.contains("disconnected · hci2"),
+        "the row names the adapter it is tried on: {list:?}"
+    );
+}
+
+/// A daemon that sends no hint (an older one) leaves today's screen: no frame, no adapter on the
+/// row, and nothing to crash on.
+#[test]
+fn a_daemon_that_sends_no_hint_leaves_the_screen_as_it_was() {
+    let (rows, _) = drawn(&app(daemon_rows()));
+    assert!(
+        rows.iter().all(|row| !row.contains(" Not opened ")),
+        "{rows:#?}"
+    );
+    assert!(rows.iter().all(|row| !row.contains("hci")), "{rows:#?}");
+}
+
+/// `Enter` takes the other adapter by its address, as the Settings chooser's `Enter` does, and
+/// `Esc` keeps trying where it is: the frame goes, the screen stays, and the step comes back
+/// once the hint has gone and returns.
+#[test]
+fn enter_switches_the_adapter_and_esc_puts_the_step_away_until_the_hint_comes_back() {
+    use crate::tui::app::Intent;
+
+    let mut a = closed(hinted_rows());
+    assert_eq!(
+        a.key(KeyEvent::from(KeyCode::Enter)),
+        [Intent::PickAdapter {
+            address: "AA:BB:CC:DD:EE:01".into(),
+            name: "hci0".into()
+        }]
+    );
+    assert!(a.key(KeyEvent::from(KeyCode::Esc)).is_empty());
+    assert_eq!(a.screen, Screen::Devices, "Esc left the screen");
+    let (rows, _) = drawn(&a);
+    assert!(
+        rows.iter().all(|row| !row.contains(" Not opened ")),
+        "{rows:#?}"
+    );
+    // With the step away, Enter is the list's own again: it switches to the device.
+    assert_eq!(
+        a.key(KeyEvent::from(KeyCode::Enter)),
+        [Intent::SwitchDevice("bifrost".into())]
+    );
+    // The hint goes (the daemon stopped sending it), then comes back: the step is offered again.
+    a.devices.rows[1].adapter_hint = None;
+    a.devices.forget_cleared_dismissal();
+    a.devices.rows[1].adapter_hint = Some(hint_of("gungnir"));
+    let (rows, _) = drawn(&a);
+    assert!(
+        rows.iter().any(|row| row.contains(" Not opened ")),
+        "{rows:#?}"
+    );
+    // Esc, with the hint still there and nothing cleared, keeps it away.
+    a.key(KeyEvent::from(KeyCode::Esc));
+    a.devices.forget_cleared_dismissal();
+    let (rows, _) = drawn(&a);
+    assert!(
+        rows.iter().all(|row| !row.contains(" Not opened ")),
+        "{rows:#?}"
+    );
+}
+
+/// A healthy device is open and another row carries a hint: no frame is drawn, `Enter` on the
+/// healthy row switches to it as it always did and writes no adapter, and `Esc` is not the
+/// step's. With no frame drawn, `Enter` on the hinted device's own row switches to that device
+/// too: the step never writes an adapter the screen does not show.
+#[test]
+fn enter_on_another_row_keeps_its_meaning_while_a_device_is_open() {
+    use crate::tui::app::Intent;
+
+    let mut a = app(hinted_rows());
+    a.devices.rows[0].adapter_hint = None;
+    a.key(KeyEvent::from(KeyCode::Up));
+    assert_eq!(a.selected(), 0, "the cursor is on the healthy bifrost");
+    let (rows, _) = drawn(&a);
+    assert!(
+        rows.iter().all(|row| !row.contains(" Not opened ")),
+        "{rows:#?}"
+    );
+    assert_eq!(
+        a.key(KeyEvent::from(KeyCode::Enter)),
+        [Intent::SwitchDevice("bifrost".into())]
+    );
+    assert!(a.devices.dismissed.is_none());
+    a.key(KeyEvent::from(KeyCode::Esc));
+    assert!(a.devices.dismissed.is_none(), "Esc is not the step's here");
+    a.screen = Screen::Devices;
+    a.key(KeyEvent::from(KeyCode::Down));
+    assert_eq!(a.selected(), 1, "the cursor is on the hinted gungnir");
+    assert_eq!(
+        a.key(KeyEvent::from(KeyCode::Enter)),
+        [Intent::SwitchDevice("gungnir".into())]
+    );
+}
+
+/// With no device open the step takes `Enter` whichever row the cursor is on.
+#[test]
+fn with_no_device_open_enter_takes_the_step_on_any_row() {
+    use crate::tui::app::Intent;
+
+    let mut a = closed(hinted_rows());
+    a.key(KeyEvent::from(KeyCode::Up));
+    assert_eq!(a.selected(), 0);
+    assert_eq!(
+        a.key(KeyEvent::from(KeyCode::Enter)),
+        [Intent::PickAdapter {
+            address: "AA:BB:CC:DD:EE:01".into(),
+            name: "hci0".into()
+        }]
+    );
+}
+
+/// A direct session's failed open carries the hint itself: the frame leaves the pointer the
+/// failure's words end in to the hint's own two lines, and the same keys answer it.
+#[test]
+fn a_direct_sessions_failed_open_offers_the_same_step() {
+    use crate::tui::app::Holding;
+
+    let mut a = app(daemon_rows());
+    let hint = hint_of("gungnir");
+    let what = "no connection within 20 s (le-connection-abort-by-local)";
+    a.session.holding = Some(Holding::Nothing {
+        why: Some((what.into(), "Run `svolder adapters`".into())),
+    });
+    a.devices.landed_hint = Some(hint);
+    let (rows, _) = drawn(&a);
+    let joined = rows.join("\n");
+    assert!(
+        rows[3].starts_with("│ no connection within 20 s (le-connection-abort-by-local)"),
+        "{:?}",
+        rows[3]
+    );
+    assert_eq!(
+        joined.matches("try adapter").count(),
+        0,
+        "the pointer is the step's now"
+    );
+    assert!(
+        joined.contains("▶ Switch to hci0   AA:BB:CC:DD:EE:01"),
+        "{joined}"
+    );
+    assert!(joined.contains("Keep trying on hci2"), "{joined}");
+    let list = row_with_in(&rows, "Gungnir 2");
+    assert!(
+        list.contains("disconnected · hci2"),
+        "the row names the adapter from the failed open's hint: {list:?}"
+    );
+    let healthy = row_with_in(&rows, "Bifrost 3");
+    assert!(!healthy.contains("hci2"), "{healthy:?}");
+}

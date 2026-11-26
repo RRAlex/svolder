@@ -21,14 +21,25 @@ impl<E: Effects> WalkEffects for Local<E> {
 
     async fn scan(&self) -> Result<Heard, Failure> {
         let scanned = self.0.scan().await?;
+        let units: Vec<String> = scanned.entries.iter().map(|e| e.unit.clone()).collect();
+        let adapters = self.0.listen_on_all(&units).await;
         Ok(Heard {
             entries: scanned.entries,
             notices: scanned.notices,
+            adapters,
         })
     }
 
     fn scan_window(&self) -> Duration {
         crate::scanning::WINDOW.saturating_mul(u32::from(crate::scanning::WINDOWS))
+    }
+
+    /// The adapter is written into the config before the passphrase test, which opens its session
+    /// through the config's adapter, so it runs on the adapter that hears the device.
+    async fn switch_adapter(&self, _address: &str, name: &str) -> Result<(), Failure> {
+        self.0
+            .write_adapter(name)
+            .map_err(|why| Failure::of(Kind::ConfigUnreadable, why))
     }
 
     async fn try_connect(&self, seen: &ScanEntry, passphrase: &str) -> Result<Connect, Failure> {

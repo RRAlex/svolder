@@ -270,12 +270,25 @@ sink:
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
+The Status pane is as tall as its own rows, with one blank row at its end in the tall tier (from 40
+rows); the Controls and Tone panes above it have every other row.
+
 The tab strip under the header (its dashes and `┤ ├`), the `▶` cursor, and the key letters of a
 border's words are all drawn in the accent the device's family draws in. At 100 columns and wider
 the header grows to two rows — the small wordmark on the first, the device name and the rest of the
 header sharing the second, the device name cut short with `…` where it would push the connection
 words, the faults, `mouse:on` or the clock off the row — with the tab strip beneath both; the mockup
-above, at 80 columns, is the one-row header most terminals show. The Host group and the `Level from`
+above, at 80 columns, is the one-row header most terminals show. After the connection words the
+header carries the device's signal on every screen of the device: four bars (`▂▄▆█`, the ones the
+strength does not fill dim) and the reading where there is room (`▂▄▆█ −50 dBm`). The bars follow the
+same rule as the GNOME panel's: four bars from −55 dBm, three from −67, two from −80, one below. The
+reading is the one the Status pane's `Device` row shows: the strength of the advert the daemon heard
+before connecting, as BlueZ gives no strength for a connected device, so bars and number are drawn dim
+once it is more than 120 seconds old (the panel's rule); while the device is not connected it is the
+live advertisement. A device with no signal heard has no bars. The signal is sized before the warning
+on stale readings: with the link down the bars and the reading both stay at 120 columns; at 80 the bars
+stay and the warning takes the longest form that fits after them, or none. A narrow header drops the dBm first, then the bars, before it cuts the device's name. The
+tone-control and preset screens' headers say no connection words and carry no bars. The Host group and the `Level from`
 and `Now playing` rows are the host's own audio (see "Host audio" below); with `host_audio = false`,
 or `SVOLDER_HOST=off`, the screen is drawn without any of them.
 
@@ -552,6 +565,7 @@ back to the panes above. At 80×40:
 │ Sample rate 48 kHz   fw 3                                                    │
 │ Raw: 9=u8 64   9.1=u8 0   9.2=u8 1   (3 unknown functions)                   │
 │ Link  ⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⣀⣀⣀⣀⣀⣀⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉  12 h│
+│                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -656,15 +670,12 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
 - **Cover art**, at the right of the Status pane beside `Now playing`, while `[tui] cover_art` is
   `"auto"` (the default; the Settings box's **Host audio** category has the row): the cover of the
   track the daemon follows, as tall as the pane's rows and as wide as a square of that height is in
-  your terminal's own cells. On a terminal of at least 100 columns by 45 rows the Status pane
-  grows upward while a cover shows, taking only the rows the Controls and Tone panes do not draw
-  anything in (every row of both stays in sight, their groups a blank line apart where they have
-  room) and no more than the picture can use at the width the rows leave it, so the cover is a
-  larger square: half-block covers are readable there. A cover that could not be fetched or
-  decoded keeps the usual layout. Below that size, or with no cover, the pane keeps its usual
-  height. The rows are written to what the picture leaves, so it is never over a value, and it
-  goes before the title does: the rows always keep at least 64 columns, and a pane with no room
-  beyond that has no picture.
+  your terminal's own cells. The Status pane is only as tall as its own rows, and in the tall tier one blank row at
+  its end, whatever the cover (the tall tier's blank top row comes on top): the cover is as tall as those rows, a small square beside the lines and the VU on a big
+  terminal, and the rows the pane does not need go to the Controls and Tone panes above it. A cover
+  that could not be fetched or decoded changes no height. The rows are written to what the picture
+  leaves, so it is never over a value, and it goes before the title does: the rows always keep at
+  least 64 columns, and a pane with no room beyond that has no picture.
   It is the daemon's cover, so a TUI on another machine shows it too; a direct session (no daemon)
   has none, and neither has a daemon older than 0.34.0, which cannot send the picture. A new track
   clears the old picture at once and draws the next when it has arrived; a track with no cover has
@@ -1817,6 +1828,31 @@ daemon: `no daemon …`, then the step `svolder daemon install`, or drop `--tran
 never more than half the screen. The list under it is the configuration's. The device screen reads
 `No device is open` and how to pick one until a device opens.
 
+While a configured device keeps failing to connect on one adapter and another adapter hears it
+(["Choosing an adapter"](bluetooth.md#choosing-an-adapter)), the same frame is the adapter step: the
+failure, what each adapter hears, then the two answers with their keys in one column.
+
+```
+┌ Not opened ──────────────────────────────────────────────────────────────────┐
+│ BF3: no connection within 20 s (le-connection-abort-by-local), 4 tries on    │
+│ hci2.                                                                        │
+│ hci2 hears BF3 at −80 dBm and cannot hold a link; hci0 hears it at −74 dBm.  │
+│                                                                              │
+│ ▶ Switch to hci0   AA:BB:CC:DD:EE:01                                   Enter │
+│   Keep trying on hci2                                                  Esc   │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+`Enter` saves that adapter by its address, as the Settings chooser's `Enter` does (a daemon
+switches live and a direct session reopens on it); `Esc` keeps trying on the adapter in use and
+puts the step away until the hint has gone and comes back. The frame shows only while no device is
+open, as it always has; then `Enter` takes the step on any row and `Esc` puts it away. With a device
+open (and healthy) no frame is drawn and `Enter` keeps the list's meaning, switching to the
+selected row, the hinted device's own row included: the step never saves an adapter the screen
+does not show. With the step away the keys are the list's again. The device's row names the
+adapter it is tried on after its state (`disconnected · hci2`). A daemon from before this step sends no hint, and
+the screen is as above without it.
+
 The list's top border carries `new`, `update`, `b identify`, `x remove` and `refresh`, left of the
 `more ↑` mark while rows are hidden above. `b identify` (a click is the key) asks the device under
 the cursor to show itself, as `b` does everywhere; it is dim while that device's profile offers no
@@ -1855,13 +1891,17 @@ configuration file alone, and draw `-` for what it cannot say.
   its Scan step; the host is looked over first, under a frame that says so, with `q` and Ctrl-C read
   throughout; adding a device switches to it, leaving without adding one (`q`, or `Esc` on the Scan
   step) comes back to the list, an empty Devices screen included. With a daemon running the walk is
-  the daemon's: there is no Adapter step, a first prompt names the devices that hold a link (the
+  the daemon's: there is no grading step after the write, a first prompt names the devices that hold a link (the
   scan may briefly disturb them), a walk already running elsewhere is refused in a notice naming
   where it was started, leaving cancels only this walk, and a code is asked on an empty row each
   time, drawn masked as typed (`Tab` shows it). The editor's save, a removal, the default (`none`
   included) and the Web UI and MCP on/off rows are the daemon's writes too, a refusal worded from
   its reason (the name is taken, the device is gone, the file is busy, the daemon is stopping) and
-  a daemon too old for them told to restart
+  a daemon too old for them told to restart.
+  On a machine with several adapters the walk's scan listens on every adapter and the pick shows
+  each one's reading per device; when the adapter in use is not the one that hears the picked device
+  best it asks `Add it and switch to hci0` (`Enter`) or `Add it, keep hci2` (`k`) before the name,
+  and a walk that listened on every adapter does not grade them again after the write
 - `u` opens a small editor over the list, for the selected device's name, passphrase, profile, and
   whether it is the default, with everything around it dimmed:
 
@@ -1937,7 +1977,7 @@ version, and three entries (four while the daemon keeps scenes, below):
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                         v0.39.10 │
+│                         v0.39.11 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -1957,7 +1997,7 @@ nothing in the menu there.
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                         v0.39.10 │
+│                         v0.39.11 │
 │                                  │
 │             Settings             │
 │             Scenes z             │
@@ -2919,6 +2959,17 @@ one grey left inside it is a key that does nothing on this device, beside the re
 editor and the removal question do the same over the Devices screen, the preset list over the
 tone-control and device screens, a band's edit line over the tone-control screen, and the quit
 question `q` asks over any screen, and no animation plays over what they dim.
+
+A key the computer side gives another meaning takes one row, with one dim line under it that says
+what it does there, short enough for the column (`f  flat on/off` over `computer: bypass`,
+`Tab/⇧Tab  pane` over `computer: next stage`), so `f` and `Tab` are named once and the EQ section
+does not repeat Tab; a key only the computer side takes ends with `· computer` (`add point ·
+computer`). A column's descriptions are as wide as the longest ordinary one (`scenes (↵ n u c x
+inside)`, 25 cells), so two columns fit a 120-column terminal; a longer description (more than
+thirty cells) wraps under its own text in the column, and the three rules at the top wrap to
+the box. At 120×40 the overlay holds two columns; with the computer's controls on there are more keys
+than two columns of that height hold, so it scrolls two rows (the `Telemetry` section is the last
+in the first column), and without them it never scrolls.
 
 The sections run down two columns wherever two fit across the terminal, filling the first before the
 second and keeping the two about as long as each other, and take more columns only when the terminal

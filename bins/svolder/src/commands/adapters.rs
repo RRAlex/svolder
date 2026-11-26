@@ -185,10 +185,20 @@ pub(crate) async fn survey(
     config: &Config,
     window: Duration,
 ) -> Result<Vec<Hearing>, Failure> {
+    let units: Vec<String> = config.devices.iter().map(|d| d.udid.clone()).collect();
+    hearings_of(g, &units, window).await
+}
+
+/// [`survey`] for the units `units`: what a fake adapter hears (a real one hears whatever is
+/// there).
+pub(crate) async fn hearings_of(
+    g: &Globals<'_>,
+    units: &[String],
+    window: Duration,
+) -> Result<Vec<Hearing>, Failure> {
     if g.transport == "fake" {
-        let units: Vec<String> = config.devices.iter().map(|d| d.udid.clone()).collect();
         let knob = std::env::var("SVOLDER_FAKE_ADAPTERS").ok();
-        return adapters::fake_hearings(knob.as_deref(), &units)
+        return adapters::fake_hearings(knob.as_deref(), units)
             .map_err(|e| Failure::of(Kind::Usage, e));
     }
     let present = adapters::present()
@@ -201,6 +211,47 @@ pub(crate) async fn survey(
         ));
     }
     Ok(adapters::hear_all(&present, window).await)
+}
+
+/// What every adapter heard, as the device walk shows it: `None` with fewer than two adapters
+/// (there is no choice to offer), else each adapter's reading per unit and the adapter a direct
+/// session opens (`named`, else `configured`, else the first).
+pub(crate) fn listened_from(
+    hearings: &[Hearing],
+    named: Option<&str>,
+    configured: Option<&str>,
+) -> Option<svolder_walk::Listened> {
+    if hearings.len() < 2 {
+        return None;
+    }
+    let present: Vec<AdapterInfo> = hearings.iter().map(|h| h.adapter.clone()).collect();
+    let (used, _) = in_use(named, None, configured, &present);
+    Some(svolder_walk::Listened {
+        in_use: used?,
+        adapters: hearings
+            .iter()
+            .map(|hearing| svolder_walk::ListenedOn {
+                name: hearing.adapter.name.clone(),
+                address: hearing.adapter.address.clone(),
+                heard: hearing
+                    .heard
+                    .as_ref()
+                    .map(|heard| {
+                        heard
+                            .iter()
+                            .map(|h| (h.unit.clone(), h.rssi))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
+                adverts: hearing
+                    .heard
+                    .iter()
+                    .flatten()
+                    .filter_map(|h| h.manufacturer)
+                    .collect(),
+            })
+            .collect(),
+    })
 }
 
 /// The rows for a survey: [`survey`], with the one a session opens marked and `held` shown as

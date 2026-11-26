@@ -233,6 +233,7 @@ fn a_reported_device_becomes_a_row_carrying_its_link_state() {
         refused: false,
         recalled: None,
         key_readings: Vec::new(),
+        adapter_hint: None,
     };
     assert_eq!(
         device_row(&info),
@@ -246,8 +247,23 @@ fn a_reported_device_becomes_a_row_carrying_its_link_state() {
             product_id: Some(2),
             stale: false,
             refused: false,
+            adapter_hint: None,
         }
     );
+    // The hint the daemon publishes with the row reaches the front end's row whole.
+    info.adapter_hint = Some(svolder_ipc::AdapterHint {
+        device: "gungnir".into(),
+        failing: "hci2".into(),
+        own_heard: false,
+        own_dbm: None,
+        better: "hci0".into(),
+        better_dbm: Some(-74),
+        take: "AA:BB:CC:DD:EE:01".into(),
+        failure: "no connection within 20 s".into(),
+        tries: 4,
+    });
+    assert_eq!(device_row(&info).adapter_hint, info.adapter_hint);
+    info.adapter_hint = None;
     info.connected = false;
     info.retry_in_secs = Some(15);
     let away = device_row(&info);

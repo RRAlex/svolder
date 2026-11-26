@@ -207,6 +207,7 @@ fn info(signal: Option<Signal>) -> DeviceInfo {
         recalled: None,
         signal,
         key_readings: Vec::new(),
+        adapter_hint: None,
     }
 }
 

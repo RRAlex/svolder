@@ -34,6 +34,20 @@ refused while the link is down, as it always is. The other is a `reload` (or a S
 `remove`) that changes this device's entry: a corrected passphrase, another `profile`, new input
 labels, since the next attempt is the one that uses them.
 
+A hand edit of `adapter` in the config file reaches the running daemon with no reload and no
+restart. The daemon watches the file's directory with the kernel's inotify (nothing wakes until the
+kernel reports a finished write or a rename onto the file, so a quiet file costs nothing; a file
+that is only being created is not read until its writer closes it) and, a third of a second after an
+edit, reads the file and follows `adapter` as a reload does: it lets go of its links on the old
+adapter and connects every device again through the new one. A file that is empty, gone or
+unreadable moves nothing, and one that does not parse is said in a warning naming the file and the
+error. A `config.toml` that is a symlink (a stow package) is watched through the directory of what
+it points at, as it pointed when the daemon started. Only
+`adapter` is applied that way; the rest of a hand edit waits for a reload, and `config: … changed
+since the last reload` still says so. A daemon whose command line names the adapter (`--adapter`,
+`SVOLDER_ADAPTER`) ignores the file's, and one that cannot open the adapter named says so in its log
+and stays where it is.
+
 Everything else leaves the schedule alone: reads are answered from the last state the device
 confirmed; a `raw` is checked against the protected function ids first — that refusal stands whether
 the device is there or not — and then turned away for want of a link without ending the wait; and a
@@ -1029,6 +1043,18 @@ keeps a series for. While the device has not been seen it is `["signal"]` alone,
 joining once the daemon knows the profile; the key is absent only from a daemon too old to send it.
 `svolder devices --json` prints it while a daemon answers, and not from the configuration alone.
 
+A `devices` row also carries `"adapter_hint"` while the connects to that device keep failing on one
+adapter and another adapter hears it (three failed connects in a row that ran out their deadline,
+and one short scan of every adapter): `{"device","failing","own_heard","own_dbm","better",
+"better_dbm","take","failure","tries"}` names the adapter the connects fail on, whether it hears the
+device at all (`own_heard`) and how loudly (`own_dbm`, `null` when it heard it with no reading), the
+adapter that hears it, its address to put in `adapter` (`take`), the last failure's words and how
+many connects have failed. It goes when the device
+connects, when the daemon moves to another adapter or when a failure that is no adapter's trouble
+(a refused passphrase) ends the streak; the TUI draws it as the step on the Devices screen and
+`svolder status` prints it. A daemon that sends it lists `adapter_hint` among the `features` of
+its `version` answer; an older daemon sends no hint and a front end shows what it showed before.
+
 `host` (`{"cmd":"host"}`) answers what the daemon knows of the computer's music player and the route
 its sound takes to the default sink:
 `{"result":"host","available":true,"playing":{"title":…,"artist":…,"album":…,"player":…,"status":"playing","length_us":…,"progress":{"position_us":…,"rate_milli":1000,"read_at_ms":…},"cover":"<hash>"},"route":{"sink":{…},"player":{…},"player_match":"pid","others_mixing":0,"host_eq":true,"stages":{"eq":true,"crossfeed":false,"speakers":false}},"now_ms":…}`.
@@ -1236,7 +1262,7 @@ $ svolder daemon status
 svolderd.socket: installed, enabled, active
 svolderd.socket listens on /run/user/1000/svolder.sock
 svolderd.service: installed, enabled, active
-daemon: 0.39.10 on /run/user/1000/svolder.sock
+daemon: 0.39.11 on /run/user/1000/svolder.sock
 mqtt: connected to 192.168.1.10:1883 (read-only)
 mcp: listening on 127.0.0.1:8737 (token, read-only)
 mcp clients: 0 connections open; 2 clients in the past hour, 3 in the past day

@@ -174,6 +174,10 @@ impl App {
             KeyCode::BackTab => return self.cycle_pane(-1),
             _ => {}
         }
+        // The adapter step over the Devices list takes `Enter` and `Esc` while it is offered.
+        if let Some(intents) = self.adapter_step_key(code) {
+            return intents;
+        }
         // The computer side's stages take their keys before the global ones.
         if let Some(intents) = self.stage_key(code) {
             return intents;
@@ -198,6 +202,39 @@ impl App {
             // The wizard reads its own keys against the step it is on, and no app is ever
             // showing it while this loop is turning.
             Screen::Setup => Vec::new(),
+        }
+    }
+
+    /// The keys of the adapter step the Devices screen offers while a device keeps failing to
+    /// connect on one adapter and another hears it: `Enter` saves the other adapter (what the
+    /// Settings chooser's `Enter` does) and `Esc` keeps trying on this one, putting the step away
+    /// until the hint is gone and comes back. The step is drawn only while no device is open, and
+    /// both keys are its own only then (the cursor's row picks the hint when it carries one): with
+    /// a device open no frame is drawn, so `Enter` keeps the list's meaning (switch to the selected
+    /// row) and never writes an adapter unseen. `None` for every other key, and while no step is
+    /// offered.
+    fn adapter_step_key(&mut self, code: KeyCode) -> Option<Vec<Intent>> {
+        if self.screen != Screen::Devices {
+            return None;
+        }
+        let closed = self.session.holding.is_some();
+        match code {
+            KeyCode::Enter if closed => {
+                let hint = self
+                    .devices
+                    .selected_hint(self.selected())
+                    .or_else(|| self.devices.hint())?;
+                Some(vec![Intent::PickAdapter {
+                    address: hint.take.clone(),
+                    name: hint.better.clone(),
+                }])
+            }
+            KeyCode::Esc if closed => {
+                let hint = self.devices.hint()?;
+                self.devices.dismissed = Some(hint.device.clone());
+                Some(Vec::new())
+            }
+            _ => None,
         }
     }
 

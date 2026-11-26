@@ -11,6 +11,7 @@
 //! through [`WalkEffects`], which is the whole of what it can do to the machine. Nothing here
 //! prints, opens a radio or touches a file.
 //!
+//! - `adapters`: what every adapter heard ([`Listened`]), and which one hears a device best.
 //! - `prompt`: the [`Prompt`] a step is shown as, and the [`Step`]s of a guided run.
 //! - `effects`: what the walk asks of the machine ([`WalkEffects`]).
 //! - `error`: why an answer did not move the walk on ([`WalkError`]), and the [`Secret`] a
@@ -23,11 +24,13 @@ use serde::{Deserialize, Serialize};
 use svolder_ipc::{Connect, ConnectFailure, DeviceConfig, ScanEntry};
 use svolder_proto::UnitId;
 
+mod adapters;
 mod effects;
 mod error;
 mod prompt;
 mod wire;
 
+pub use adapters::{Listened, ListenedOn};
 pub use effects::{Heard, WalkEffects, WriteError};
 pub use error::{Secret, WalkError, connect_words};
 pub use prompt::{Prompt, Step, Takes};
@@ -36,6 +39,9 @@ pub use wire::{Phase, ROWS_MAX, RefusalKind, WalkRefusal, WalkState, Working};
 /// What a scan that heard nothing says.
 pub const NOTHING_HEARD: &str = "Nothing answered: power the device on and close the phone app, \
                                  which holds its only connection.";
+
+/// The title of the question of which adapter to add the device through.
+pub const ADAPTER_QUESTION: &str = "Which adapter";
 
 /// What a device whose product no profile covers says on its line, with what picking it leads
 /// to.
@@ -128,6 +134,10 @@ pub struct DeviceWalk<E: WalkEffects> {
     rows: Vec<Row>,
     /// What opening the radio for that scan had to say.
     notices: Vec<String>,
+    /// What every adapter heard in that scan, when the machine has several.
+    listened: Option<Listened>,
+    /// The adapter the walk switched to, once the question was answered that way.
+    switched: Option<String>,
     /// Whether a scan has run, so that hearing nothing is an answer rather than a start.
     scanned: bool,
     /// How many scans in a row have failed outright, which is what a walk stops after.
@@ -167,6 +177,8 @@ impl<E: WalkEffects> DeviceWalk<E> {
             linked,
             rows: Vec::new(),
             notices: Vec::new(),
+            listened: None,
+            switched: None,
             scanned: false,
             scan_failures: 0,
             picked: None,
@@ -214,6 +226,17 @@ impl<E: WalkEffects> DeviceWalk<E> {
             .map(|row| &row.entry)
     }
 
+    /// What every adapter heard in the last scan, when the machine has several and the effects
+    /// listened on all of them.
+    pub fn listened(&self) -> Option<&Listened> {
+        self.listened.as_ref()
+    }
+
+    /// The adapter the walk switched to, when the question it asks was answered that way.
+    pub fn switched(&self) -> Option<&str> {
+        self.switched.as_deref()
+    }
+
     /// Whether an effect that did not happen stopped the walk: a scan that could never run, or
     /// a file that cannot take the write. A stopped walk asks nothing more.
     pub fn stopped(&self) -> bool {
@@ -228,6 +251,7 @@ impl<E: WalkEffects> DeviceWalk<E> {
             Step::Pick => self.pick(),
             Step::Name => self.name_prompt(),
             Step::Passphrase => self.passphrase_prompt(),
+            Step::Adapter => self.adapter_prompt(),
             _ => self.scan_prompt(),
         }
     }
@@ -252,6 +276,7 @@ impl<E: WalkEffects> DeviceWalk<E> {
             Step::Linked => Err(out_of_range(choice)),
             Step::Pick if self.choosing_profile => self.chose_profile(choice),
             Step::Pick => self.chose_device(choice),
+            Step::Adapter => self.chose_adapter(choice).await,
             Step::Name => self.named(text).await,
             Step::Passphrase => self.coded(text).await,
             _ => self.searched(choice).await,
@@ -339,10 +364,18 @@ impl<E: WalkEffects> DeviceWalk<E> {
     /// One line per device heard: what it is, its unit id, how loud it was, and the profile
     /// its advertisement matches, with a configured unit's name when it is marked.
     fn pick(&self) -> Prompt {
+        let mut body = self.notices.clone();
+        if let Some(listened) = &self.listened {
+            body.push(format!(
+                "Heard on {} adapters; svolder uses {}.",
+                listened.adapters.len(),
+                listened.in_use
+            ));
+        }
         Prompt {
             step: Step::Pick,
             title: "Which device".into(),
-            body: self.notices.clone(),
+            body,
             choices: self.rows.iter().map(|row| self.row(row)).collect(),
             default: 0,
             takes: Takes::Choice,
@@ -353,10 +386,21 @@ impl<E: WalkEffects> DeviceWalk<E> {
     fn row(&self, row: &Row) -> String {
         let entry = &row.entry;
         let product = self.product(entry).unwrap_or("unknown");
-        let signal = entry
-            .rssi
-            .map(|rssi| format!("  {rssi} dBm"))
-            .unwrap_or_default();
+        let signal = match &self.listened {
+            Some(listened) => listened
+                .adapters
+                .iter()
+                .map(|adapter| match adapter.reading(&entry.unit) {
+                    Some(Some(rssi)) => format!("  {} {}", adapter.name, adapters::dbm(rssi)),
+                    Some(None) => format!("  {} heard", adapter.name),
+                    None => format!("  {} \u{2014}", adapter.name),
+                })
+                .collect::<String>(),
+            None => entry
+                .rssi
+                .map(|rssi| format!("  {rssi} dBm"))
+                .unwrap_or_default(),
+        };
         let profile = self
             .matched(entry)
             .map(|profile| profile.name.clone())
@@ -392,6 +436,86 @@ impl<E: WalkEffects> DeviceWalk<E> {
             default: 0,
             takes: Takes::Choice,
         }
+    }
+
+    /// What each adapter heard of the picked device, and the two ways to go on: adding it and
+    /// switching to the adapter that hears it best, or adding it and keeping the one in use.
+    fn adapter_prompt(&self) -> Prompt {
+        let (Some(listened), Some(better), Some(entry)) =
+            (&self.listened, self.adapter_question(), self.picked())
+        else {
+            return Prompt {
+                step: Step::Adapter,
+                title: ADAPTER_QUESTION.into(),
+                body: Vec::new(),
+                choices: vec!["Continue".into()],
+                default: 0,
+                takes: Takes::Choice,
+            };
+        };
+        let product = self.product(entry).unwrap_or("device").to_string();
+        let column = |text: &str| format!("{text:<11}");
+        let names: String = listened.adapters.iter().map(|a| column(&a.name)).collect();
+        let readings: String = listened
+            .adapters
+            .iter()
+            .map(|adapter| {
+                column(&match adapter.reading(&entry.unit) {
+                    Some(Some(rssi)) => adapters::dbm(rssi),
+                    Some(None) => "heard".to_string(),
+                    None => "\u{2014}".to_string(),
+                })
+            })
+            .collect();
+        Prompt {
+            step: Step::Adapter,
+            title: ADAPTER_QUESTION.into(),
+            body: vec![
+                format!("{:<14}{:<22}{}", "Device", "Unit id", names.trim_end()),
+                format!(
+                    "{:<14}{:<22}{}",
+                    product,
+                    adapters::short_unit(&entry.unit),
+                    readings.trim_end()
+                ),
+                format!(
+                    "{} hears the {product} best; svolder uses {}.",
+                    better.name, listened.in_use
+                ),
+            ],
+            choices: vec![
+                format!("Add it and switch to {}", better.name),
+                format!("Add it, keep {}", listened.in_use),
+            ],
+            default: 0,
+            takes: Takes::Choice,
+        }
+    }
+
+    /// Switch to the adapter that hears the device best, or keep the one in use (after an earlier
+    /// switch, the walk goes back to it), and go on to the device's name.
+    async fn chose_adapter(&mut self, choice: usize) -> Result<Walked, WalkError<E::Failure>> {
+        let (Some(listened), Some(better)) = (&self.listened, self.adapter_question()) else {
+            self.go(Step::Name);
+            return Ok(Walked::On);
+        };
+        let (target, back) = match choice {
+            0 => (Some(better.clone()), false),
+            1 => (
+                listened.used().cloned().filter(|_| self.switched.is_some()),
+                true,
+            ),
+            _ => return Err(out_of_range(choice)),
+        };
+        if let Some(adapter) = target {
+            self.effects
+                .switch_adapter(adapter.take(), &adapter.name)
+                .await
+                .map_err(WalkError::Effect)?;
+            self.switched = (!back).then_some(adapter.name);
+        }
+        self.go(Step::Name);
+        Ok(Walked::On)
     }
 
     /// What to call the device, with the name it advertises as the default.
@@ -455,7 +579,14 @@ impl<E: WalkEffects> DeviceWalk<E> {
         let taken = self.taken_units();
         let mut left_out = Vec::new();
         let mut rows = Vec::new();
-        for entry in heard.entries {
+        // A device only another adapter hears is offered as well: the question that follows the
+        // pick is the way to the adapter that hears it.
+        let mut entries = heard.entries;
+        if let Some(listened) = &heard.adapters {
+            let elsewhere = listened.rows_elsewhere(&entries, self.effects.registry());
+            entries.extend(elsewhere);
+        }
+        for entry in entries {
             let configured = configured_as(&taken, &entry.unit);
             match (configured, self.configured) {
                 // A unit that is configured is not offered again: a second block for it would
@@ -468,6 +599,7 @@ impl<E: WalkEffects> DeviceWalk<E> {
         }
         self.rows = rows;
         self.picked = None;
+        self.listened = heard.adapters;
         self.notices = heard.notices;
         if !left_out.is_empty() {
             self.notices.push(format!(
@@ -503,8 +635,24 @@ impl<E: WalkEffects> DeviceWalk<E> {
             self.choosing_profile = true;
             return Ok(Walked::On);
         }
-        self.go(Step::Name);
+        self.after_pick();
         Ok(Walked::On)
+    }
+
+    /// On from the device and its profile: to the question of which adapter when the adapter in
+    /// use is not the one that hears the device best, else to its name.
+    fn after_pick(&mut self) {
+        match self.adapter_question().is_some() {
+            true => self.go(Step::Adapter),
+            false => self.go(Step::Name),
+        }
+    }
+
+    /// The adapter that hears the picked device better than the adapter in use, when there is
+    /// one.
+    fn adapter_question(&self) -> Option<&ListenedOn> {
+        let unit = &self.picked()?.unit;
+        self.listened.as_ref()?.better_for(unit)
     }
 
     /// Read the device through the profile this choice names, or through none when the build
@@ -516,7 +664,7 @@ impl<E: WalkEffects> DeviceWalk<E> {
             self.profile = Some(name.clone());
         }
         self.choosing_profile = false;
-        self.go(Step::Name);
+        self.after_pick();
         Ok(Walked::On)
     }
 

@@ -186,6 +186,8 @@ fn view(area: Rect, app: &App) -> View {
     crate::tui::test_support::work::tick("help_view");
     let sections = sections(app);
     let lead = lead(app, &sections);
+    let described = description_width(&sections);
+    let sections = wrapped(sections, described);
     let entries = sections.iter().flatten();
     let label = entries.clone().map(Entry::label_width).max().unwrap_or(0);
     let column = entries.map(|entry| entry.width(label)).max().unwrap_or(0) + COLUMN_GAP;
@@ -297,7 +299,33 @@ fn pack(sections: &[Vec<Entry>], height: usize, lead: usize) -> Vec<Vec<Entry>> 
         }
         for entry in section {
             if columns.last().is_some_and(|column| column.len() >= height) {
-                columns.push(Vec::new());
+                // A line under a key goes where its key does: the key moves down with it, and a
+                // heading right above the key (and the blank before it) with them. A column the
+                // move would empty keeps its key and its lines, past the height, instead.
+                let mut carried = Vec::new();
+                if matches!(entry, Entry::Cont { .. })
+                    && let Some(full) = columns.last_mut()
+                {
+                    while let Some(last) = full.pop() {
+                        let key = matches!(last, Entry::Key { .. });
+                        carried.insert(0, last);
+                        if key {
+                            break;
+                        }
+                    }
+                    if matches!(full.last(), Some(Entry::Heading(_))) {
+                        carried.insert(0, full.pop().unwrap_or(Entry::Gap));
+                        if matches!(full.last(), Some(Entry::Gap)) {
+                            full.pop();
+                        }
+                    }
+                    if full.is_empty() {
+                        *full = std::mem::take(&mut carried);
+                    }
+                }
+                if !carried.is_empty() || !matches!(entry, Entry::Cont { .. }) {
+                    columns.push(carried);
+                }
             }
             if let Some(column) = columns.last_mut() {
                 column.push(entry.clone());
@@ -330,6 +358,19 @@ enum Entry {
         does: String,
         /// Why the key is not worth pressing now, for the keys that are conditional.
         reason: Option<&'static str>,
+        /// Whether the key is drawn in the faint grey: it has a reason, which may have been
+        /// wrapped onto the lines under it.
+        faint: bool,
+        /// Whether only the computer side takes the key (the table's `When::OnComputer`).
+        computer: bool,
+    },
+    /// A line under a key, in the column its description starts in: what the description
+    /// wrapped past the column's width, or what the key does on the computer side.
+    Cont {
+        /// The words of the line.
+        text: String,
+        /// Whether it is drawn in the faint grey.
+        faint: bool,
     },
     /// The gap between one screen's keys and the next screen's name.
     Gap,
@@ -341,7 +382,7 @@ impl Entry {
     fn label_width(&self) -> usize {
         match self {
             Entry::Key { label, .. } => widgets::text::cells(label),
-            Entry::Heading(_) | Entry::Gap => 0,
+            Entry::Heading(_) | Entry::Cont { .. } | Entry::Gap => 0,
         }
     }
 
@@ -357,6 +398,7 @@ impl Entry {
                         widgets::text::cells(why) + widgets::text::cells(REASON_GAP)
                     })
             }
+            Entry::Cont { text, .. } => label + LABEL_GAP + widgets::text::cells(text),
             Entry::Gap => 0,
         }
     }
@@ -374,10 +416,12 @@ impl Entry {
                 label: key_label,
                 does,
                 reason,
+                faint,
+                ..
             } => {
-                let (key, text) = match reason {
-                    None => (Role::KeyHint, Role::Text),
-                    Some(_) => (Role::Faint, Role::Faint),
+                let (key, text) = match faint {
+                    false => (Role::KeyHint, Role::Text),
+                    true => (Role::Faint, Role::Faint),
                 };
                 let mut spans = vec![
                     Span::styled(format!("{key_label:<label$}"), theme.style(key)),
@@ -392,6 +436,16 @@ impl Entry {
                 }
                 spans
             }
+            Entry::Cont { text, faint } => {
+                let role = match faint {
+                    true => Role::Faint,
+                    false => Role::Dim,
+                };
+                vec![
+                    Span::raw(" ".repeat(label + LABEL_GAP)),
+                    Span::styled(text.clone(), theme.style(role)),
+                ]
+            }
             Entry::Gap => Vec::new(),
         };
         spans.push(Span::raw(" ".repeat(pad)));
@@ -401,6 +455,22 @@ impl Entry {
 
 /// What separates a key's description from the reason it is not worth pressing.
 const REASON_GAP: &str = " · ";
+
+/// What ends the description of a key only the computer side takes.
+const COMPUTER_ONLY: &str = " · computer";
+
+/// What a line under a key says when the key means something else on the computer side.
+const COMPUTER_NOTE: &str = "computer: ";
+
+/// The keys the computer side gives another meaning, each as the key's label and the short
+/// phrase the dim line under the device's own row says. The key table lists the computer side's
+/// meaning as a second hint under the same label with `When::OnComputer`; that row is not listed
+/// on its own, the line under the key is where it is read.
+const COMPUTER_MEANS: [(&str, &str); 2] = [("f", "bypass"), ("Tab/\u{21e7}Tab", "next stage")];
+
+/// A description longer than this many cells is a sentence, not a shortcut's name: it does not
+/// set the width of a column of descriptions, and wraps under its own text in it.
+const LONG_DESCRIPTION: usize = 30;
 
 /// Every key the TUI reads, each named once, as the sections the overlay lays out: the keys
 /// more than one screen takes under [`EVERYWHERE`], Ctrl-C last among them, then a section per
@@ -426,6 +496,8 @@ fn sections(app: &App) -> Vec<Vec<Entry>> {
         label: CTRL_C.0,
         does: CTRL_C.1.to_string(),
         reason: None,
+        faint: false,
+        computer: false,
     });
     let mut sections = Vec::new();
     // Where the keys are on the computer side's tone screen comes first: the keys they have there.
@@ -436,6 +508,8 @@ fn sections(app: &App) -> Vec<Vec<Entry>> {
             label,
             does: does.to_string(),
             reason: None,
+            faint: false,
+            computer: false,
         }));
         sections.push(group);
     }
@@ -479,7 +553,113 @@ fn sections(app: &App) -> Vec<Vec<Entry>> {
             sections.push(own);
         }
     }
+    fold_computer_means(&mut sections, app);
     sections
+}
+
+/// Put the computer side's meaning of a key on a dim line under the key's own row, and leave the
+/// computer side's row out: one row per key. Where the device's own key is not listed (over the
+/// computer's side) the computer's row stays as it is.
+fn fold_computer_means(sections: &mut [Vec<Entry>], app: &App) {
+    if !app.computer_offered() {
+        return;
+    }
+    let is = |entry: &Entry, wanted: &str, computer: bool| matches!(entry, Entry::Key { label, computer: c, .. } if *label == wanted && *c == computer);
+    for (label, note) in COMPUTER_MEANS {
+        let Some((at, row)) = sections.iter().enumerate().find_map(|(at, section)| {
+            section
+                .iter()
+                .position(|entry| is(entry, label, false))
+                .map(|row| (at, row))
+        }) else {
+            continue;
+        };
+        sections[at].insert(
+            row + 1,
+            Entry::Cont {
+                text: format!("{COMPUTER_NOTE}{note}"),
+                faint: false,
+            },
+        );
+        for section in sections.iter_mut() {
+            section.retain(|entry| !is(entry, label, true));
+        }
+    }
+}
+
+/// How many cells wide the descriptions of a column are: the longest of the ordinary ones, a
+/// reason a key is dimmed for included.
+fn description_width(sections: &[Vec<Entry>]) -> usize {
+    sections
+        .iter()
+        .flatten()
+        .filter_map(|entry| match entry {
+            Entry::Key { does, reason, .. } => Some(
+                widgets::text::cells(does)
+                    + reason.map_or(0, |why| {
+                        widgets::text::cells(why) + widgets::text::cells(REASON_GAP)
+                    }),
+            ),
+            Entry::Cont { text, .. } => Some(widgets::text::cells(text)),
+            Entry::Heading(_) | Entry::Gap => None,
+        })
+        .filter(|width| *width <= LONG_DESCRIPTION)
+        .max()
+        .unwrap_or(0)
+}
+
+/// `sections` with every description wider than `width` cells wrapped: its first line stays on
+/// the key's row and the rest go on lines under it, in the column the description starts in.
+fn wrapped(sections: Vec<Vec<Entry>>, width: usize) -> Vec<Vec<Entry>> {
+    sections
+        .into_iter()
+        .map(|section| {
+            section
+                .into_iter()
+                .flat_map(|entry| match entry {
+                    Entry::Key {
+                        label,
+                        does,
+                        reason,
+                        faint,
+                        computer,
+                    } => {
+                        let full = match reason {
+                            Some(why) => format!("{does}{REASON_GAP}{why}"),
+                            None => does.clone(),
+                        };
+                        if widgets::text::cells(&full) <= width {
+                            return vec![Entry::Key {
+                                label,
+                                does,
+                                reason,
+                                faint,
+                                computer,
+                            }];
+                        }
+                        let mut lines = widgets::text::wrap(&full, width.max(1)).into_iter();
+                        let first = lines.next().unwrap_or_default();
+                        std::iter::once(Entry::Key {
+                            label,
+                            does: first,
+                            reason: None,
+                            faint,
+                            computer,
+                        })
+                        .chain(lines.map(|text| Entry::Cont { text, faint }))
+                        .collect()
+                    }
+                    Entry::Cont { text, faint } if widgets::text::cells(&text) > width => {
+                        widgets::text::wrap(&text, width.max(1))
+                            .into_iter()
+                            .map(|text| Entry::Cont { text, faint })
+                            .collect()
+                    }
+                    other => vec![other],
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// How many leading sections fill the first column alone: Everywhere and, when it is not the
@@ -516,6 +696,8 @@ fn gestures(app: &App) -> Vec<Entry> {
             label,
             does: does.to_string(),
             reason,
+            faint: reason.is_some(),
+            computer: false,
         })
         .collect()
 }
@@ -523,10 +705,19 @@ fn gestures(app: &App) -> Vec<Entry> {
 /// One key of the table as the overlay lists it, with the reason it is not worth pressing on
 /// `app` now where there is one.
 fn entry(hint: &KeyHint, app: &App) -> Entry {
+    // A key only the computer side takes says so in its description, not as a reason too.
+    let only_computer = hint.when == When::OnComputer;
+    let reason = reason(hint, app).filter(|_| !only_computer);
+    let mut does = does(hint, app);
+    if only_computer {
+        does.push_str(COMPUTER_ONLY);
+    }
     Entry::Key {
         label: hint.label_in(KeyContext::of(app)),
-        does: does(hint, app),
-        reason: reason(hint, app),
+        does,
+        reason,
+        faint: reason.is_some(),
+        computer: only_computer,
     }
 }
 
@@ -578,12 +769,12 @@ fn reason(hint: &KeyHint, app: &App) -> Option<&'static str> {
         When::HasToggle => "needs a toggle",
         When::CanIdentify => "this device offers no identify",
         When::HasComputer => "needs the computer's controls",
-        When::OnComputer => "on the computer side only",
+        When::OnComputer => "on the computer only",
         When::DacEq if app.profile.eq.is_none() => "needs an EQ",
         When::DacEq => "on the device's side only",
-        When::HasLoudness => "on the computer side, with loudness",
-        When::HasCrossfeed => "on the computer side, with crossfeed",
-        When::HasSpace => "on the computer side, with virtual speakers",
+        When::HasLoudness => "on the computer, with loudness",
+        When::HasCrossfeed => "on the computer, with crossfeed",
+        When::HasSpace => "on the computer, with virtual speakers",
         When::HasSetup if !app.host_shown() => "needs host",
         When::HasSetup => "needs a DAC",
         // The key is hidden, never dimmed, where scenes are not offered.

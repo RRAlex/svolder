@@ -111,6 +111,8 @@ fn answering_device(
             stale: false,
             next_attempt: None,
             passphrase_note: None,
+            adapter_hint: None,
+            hint_epoch: 0,
             refused: false,
             history: Arc::default(),
             ring: Arc::default(),
@@ -1717,6 +1719,206 @@ async fn the_version_answer_names_the_adapter_and_whether_it_is_pinned() {
         adapter_said(&pinned_daemon).await.1,
         "a pinned daemon says so"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A hand edit of `adapter` in the file reaches the running daemon with no reload and no
+/// restart: the watch sees the write and the daemon's links move to the adapter now named, and
+/// an edit of anything else moves nothing.
+#[tokio::test]
+async fn a_hand_edited_adapter_is_followed_without_a_reload() {
+    let dir = std::env::temp_dir().join(format!("svolderd-edited-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.toml");
+    let device = "[[device]]\nname = \"amp\"\nudid = \"0102030405060708\"\n";
+    std::fs::write(&path, format!("schema = 1\n{device}")).unwrap();
+    let daemon = following(&path);
+    daemon.reload_all().await.expect("the first reload");
+    let handle = Arc::clone(&daemon.devices()[0]);
+    for _ in 0..250 {
+        if handle.info.lock().unwrap().connected {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(handle.info.lock().unwrap().connected, "never connected");
+    let mut events = handle.events.subscribe();
+    let watching = tokio::spawn(crate::watch_adapter_edits(
+        path.clone(),
+        Arc::clone(&daemon),
+    ));
+    // Let the watch be placed before the file changes.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let wait = Duration::from_secs(5);
+
+    // An edit that leaves the adapter as it was touches no link.
+    std::fs::write(&path, format!("schema = 1\n# a comment\n{device}")).unwrap();
+    assert_eq!(
+        next_link(&mut events, Duration::from_millis(900)).await,
+        None,
+        "an edit that left the adapter alone touched a link"
+    );
+
+    std::fs::write(&path, format!("schema = 1\nadapter = \"hci1\"\n{device}")).unwrap();
+    assert_eq!(
+        next_link(&mut events, wait).await,
+        Some(false),
+        "the edit did not reach the daemon"
+    );
+    assert_eq!(
+        next_link(&mut events, wait).await,
+        Some(true),
+        "no reconnect"
+    );
+    watching.abort();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A watch over a config with one connected device: the daemon, the device's link events and the
+/// watching task, with the directory the file lives in.
+async fn watched_daemon(
+    name: &str,
+    adapter: &str,
+) -> (
+    PathBuf,
+    Arc<Daemon>,
+    tokio::sync::broadcast::Receiver<svolder_ipc::Event>,
+    tokio::task::JoinHandle<()>,
+) {
+    let dir = std::env::temp_dir().join(format!("svolderd-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.toml");
+    std::fs::write(&path, format!("schema = 1\n{adapter}{DEVICE_BLOCK}")).unwrap();
+    let daemon = following(&path);
+    daemon.reload_all().await.expect("the first reload");
+    let handle = Arc::clone(&daemon.devices()[0]);
+    for _ in 0..250 {
+        if handle.info.lock().unwrap().connected {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(handle.info.lock().unwrap().connected, "never connected");
+    let events = handle.events.subscribe();
+    let watching = tokio::spawn(crate::watch_adapter_edits(
+        path.clone(),
+        Arc::clone(&daemon),
+    ));
+    // Let the watch be placed before the file changes.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    (path, daemon, events, watching)
+}
+
+const DEVICE_BLOCK: &str = "[[device]]\nname = \"amp\"\nudid = \"0102030405060708\"\n";
+
+/// A writer that creates the file and writes it slowly, as some editors and tools do, leaves the
+/// daemon where it is until the file is closed with its content: the empty file a creation shows
+/// is no edit, so no defaults load and no link moves; the close then moves it.
+#[tokio::test]
+async fn a_slow_writer_that_creates_the_file_first_moves_nothing_until_it_closes() {
+    use std::io::Write;
+
+    let (path, _daemon, mut events, watching) =
+        watched_daemon("slow", "adapter = \"hci1\"\n").await;
+    let dir = path.parent().unwrap().to_path_buf();
+    let wait = Duration::from_secs(5);
+    // The file is replaced by a new one that is created, held open and empty past the settle.
+    std::fs::remove_file(&path).unwrap();
+    let mut file = std::fs::File::create(&path).unwrap();
+    assert_eq!(
+        next_link(&mut events, Duration::from_millis(900)).await,
+        None,
+        "the empty file a creation shows moved a link"
+    );
+    write!(file, "schema = 1\nadapter = \"hci2\"\n{DEVICE_BLOCK}").unwrap();
+    drop(file);
+    assert_eq!(next_link(&mut events, wait).await, Some(false), "no move");
+    assert_eq!(
+        next_link(&mut events, wait).await,
+        Some(true),
+        "no reconnect"
+    );
+    watching.abort();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An emptied file, a missing one and one that does not parse are never followed: no link moves,
+/// and the one that does not parse says so in a warning naming the file and the error.
+#[tokio::test]
+async fn an_empty_missing_or_unparsable_file_is_never_followed() {
+    crate::log::hold_lines();
+    let (path, _daemon, mut events, watching) =
+        watched_daemon("unread", "adapter = \"hci1\"\n").await;
+    let dir = path.parent().unwrap().to_path_buf();
+    std::fs::write(&path, "").unwrap();
+    assert_eq!(
+        next_link(&mut events, Duration::from_millis(900)).await,
+        None
+    );
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(
+        next_link(&mut events, Duration::from_millis(900)).await,
+        None
+    );
+    std::fs::write(&path, "adapter = [oops\n").unwrap();
+    assert_eq!(
+        next_link(&mut events, Duration::from_millis(900)).await,
+        None
+    );
+    let warned = crate::log::held_lines()
+        .into_iter()
+        .map(|(_, line)| line)
+        .find(|line| line.contains("adapter is left as it is"))
+        .expect("a warning for the unparsable file");
+    assert!(warned.contains(&path.display().to_string()), "{warned}");
+    watching.abort();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A config.toml that is a symlink (a stow package) is followed through the directory of the file
+/// it points at: the write goes to the target, and the link's own directory sees nothing.
+#[tokio::test]
+async fn an_edit_of_a_symlinked_config_is_followed() {
+    let dir = std::env::temp_dir().join(format!("svolderd-linked-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (target_dir, link_dir) = (dir.join("stow"), dir.join("config"));
+    std::fs::create_dir_all(&target_dir).unwrap();
+    std::fs::create_dir_all(&link_dir).unwrap();
+    let target = target_dir.join("svolder.toml");
+    std::fs::write(&target, format!("schema = 1\n{DEVICE_BLOCK}")).unwrap();
+    let path = link_dir.join("config.toml");
+    std::os::unix::fs::symlink(&target, &path).unwrap();
+    let daemon = following(&path);
+    daemon.reload_all().await.expect("the first reload");
+    let handle = Arc::clone(&daemon.devices()[0]);
+    for _ in 0..250 {
+        if handle.info.lock().unwrap().connected {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(handle.info.lock().unwrap().connected, "never connected");
+    let mut events = handle.events.subscribe();
+    let watching = tokio::spawn(crate::watch_adapter_edits(
+        path.clone(),
+        Arc::clone(&daemon),
+    ));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    std::fs::write(
+        &target,
+        format!("schema = 1\nadapter = \"hci1\"\n{DEVICE_BLOCK}"),
+    )
+    .unwrap();
+    let wait = Duration::from_secs(5);
+    assert_eq!(next_link(&mut events, wait).await, Some(false), "no move");
+    assert_eq!(
+        next_link(&mut events, wait).await,
+        Some(true),
+        "no reconnect"
+    );
+    watching.abort();
     let _ = std::fs::remove_dir_all(&dir);
 }
 

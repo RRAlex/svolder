@@ -210,7 +210,12 @@ async fn walk(
 ) -> Result<serde_json::Value, JobError> {
     let ctx = Arc::new(ctx);
     let board = Arc::new(Board::new(Arc::clone(&ctx)));
-    let effects = DaemonEffects::new(daemon, Arc::clone(&ctx), Arc::clone(&board));
+    let effects = DaemonEffects::new(
+        daemon,
+        Arc::clone(&ctx),
+        Arc::clone(&board),
+        origin == Origin::Socket,
+    );
     let mut walk = DeviceWalk::new(effects, Given::default(), Configured::Mark);
     let mut refusal: Option<WalkRefusal> = None;
     loop {
