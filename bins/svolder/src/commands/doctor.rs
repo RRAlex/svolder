@@ -706,16 +706,94 @@ async fn grade_row_for(g: &Globals<'_>, config: &Config, adapters: &[String]) ->
     if adapters.len() < 2 {
         return None;
     }
+    let hearings = crate::commands::adapters::survey(g, config, crate::commands::adapters::WINDOW)
+        .await
+        .unwrap_or_default();
     let mut grades = scanning::grade_adapters(g, &device.udid, adapters).await;
     // Best first, as the wizard's own adapter step offers them, so the two never read the same
     // grades in two orders. The sort is stable, so adapters that caught the device equally
     // often keep the order the host reports them in — which is the tie the row's fix breaks to.
     grades.sort_by_key(|grade| std::cmp::Reverse(grade.seen));
-    let configured = config
-        .adapter
+    // The adapter the session opens is the one named, in either way of naming one, else the
+    // first of them.
+    let in_use = match config.adapter.as_deref() {
+        Some(spec) => svolder_ble::adapters::resolve(spec, &present(&hearings)).ok(),
+        None => adapters.first().cloned(),
+    };
+    let configured = match (in_use.as_deref(), config.adapter.as_deref()) {
+        (Some(name), _) => Some(name),
+        (None, spec) => spec,
+    };
+    let mut row = grade_row(&grades, configured, &device.name);
+    // What doctor writes into `adapter` is the address: the number moves.
+    if let Some(fix) = row.fix.as_mut()
+        && let Some(name) = adapter_in(&fix.command).map(str::to_string)
+        && let Some(info) = hearings.iter().find(|h| h.adapter.name == name)
+        && !info.adapter.address.is_empty()
+    {
+        fix.command = format!("set adapter = {:?} in config.toml", info.adapter.address);
+    }
+    let better = in_use
         .as_deref()
-        .or_else(|| adapters.first().map(String::as_str));
-    Some(grade_row(&grades, configured, &device.name))
+        .and_then(|name| svolder_ble::adapters::better_than(name, &device.udid, &hearings));
+    Some(with_signal(row, better, in_use.as_deref(), &device.name))
+}
+
+/// The adapters of a survey.
+fn present(hearings: &[svolder_ble::adapters::Hearing]) -> Vec<svolder_ble::adapters::AdapterInfo> {
+    hearings.iter().map(|h| h.adapter.clone()).collect()
+}
+
+/// The grade row with what the signal says added. Doctor only reports on the adapter choice: the
+/// row never offers a change of `adapter` for a reading, and `--yes` never writes one for it.
+///
+/// Where the adapter in use does not hear the device at all and another adapter does, the row
+/// warns, naming that adapter, its address and its reading, and where to pick it. Where another
+/// adapter merely hears the device louder, one reading over a few seconds is no reason to say
+/// the choice is wrong (two dongles at -63 and -62 would flip run to run), so the row only
+/// mentions it and keeps its state.
+fn with_signal(
+    mut row: Outcome,
+    better: Option<svolder_ble::adapters::Better>,
+    in_use: Option<&str>,
+    device: &str,
+) -> Outcome {
+    let (Some(better), Some(in_use)) = (better, in_use) else {
+        return row;
+    };
+    let other = match better.rssi {
+        Some(rssi) => format!(
+            "{} ({}) hears it at {}",
+            better.name,
+            better.take,
+            svolder_ble::adapters::dbm(rssi)
+        ),
+        None => format!("{} ({}) hears it", better.name, better.take),
+    };
+    match better.own {
+        None => {
+            row.reason = format!(
+                "{}; {in_use} does not hear {device}; {other}: pick it in Settings, Bluetooth \
+                 adapter, or see `svolder adapters`",
+                row.reason
+            );
+            if row.state == State::Pass {
+                row.state = State::Warn;
+            }
+        }
+        Some(own) if better.is_louder() => {
+            let own = match own {
+                Some(rssi) => format!(" at {}", svolder_ble::adapters::dbm(rssi)),
+                None => String::new(),
+            };
+            row.reason = format!(
+                "{}; {in_use} hears {device}{own}; {other} (see `svolder adapters`)",
+                row.reason
+            );
+        }
+        Some(_) => {}
+    }
+    row
 }
 
 /// One device's row: whether a daemon holds it, and failing that whether the windows heard it

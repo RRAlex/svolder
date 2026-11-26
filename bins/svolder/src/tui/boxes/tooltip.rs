@@ -482,6 +482,7 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
         | Hit::SettingRow(_)
         | Hit::WebLink
         | Hit::McpToken
+        | Hit::AdapterRow(_)
         | Hit::SettingPrev
         | Hit::SettingNext
         | Hit::SettingCategory(_)

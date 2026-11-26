@@ -96,8 +96,9 @@ The tests that guard this, the ones that a leaked passphrase or unit id would br
 
 ## When a daemon holds the device
 
-One central holds a Forkbeard at a time, so a capture over the radio needs the daemon that holds
-it out of the way. `handover.rs` finds who that is without waking anything, and where systemd
+A capture over the radio needs the daemon that holds the device out of the way. Not every
+Forkbeard takes a second central at once (a Bifrost 3 does: one held by a daemon on one computer
+took a connection from another), so the capture does not count on it. `handover.rs` finds who that is without waking anything, and where systemd
 holds the socket with its service idle the doctor is told not to connect either:
 
 - when systemd's units own the socket and the socket unit or the service is running, the holder is

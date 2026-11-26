@@ -207,6 +207,11 @@ that branch rather than listed here.
   and a recalled band can be up to 12 dB above 0. The MCP server asks first (below). The save
   asks wherever it is offered (`bins/svolder/src/commands/device/device_presets.rs`,
   `bins/svolderd/src/mcp/tools.rs`).
+- [trade-off] **A switch of adapter can make the first connect on the new one slow.** The old link
+  is closed once the new adapter's work is done, not once the old link's own release has finished,
+  so when that release runs on in the background the first connect attempt on the new adapter can
+  fail while the old link is still coming down. It is retried and no write is lost
+  (`crates/svolder-ble/src/session.rs`).
 
 ### Daemon
 
@@ -628,6 +633,11 @@ that branch rather than listed here.
   Plays row of the Space panel is a TUI-side state; moving rows, `Tab` and `Enter` reset it, a view
   that arrives while the arrows are mid-highlight does not
   (`bins/svolder/src/tui/screens/tone/stages.rs`, `plays_row`).
+- [limit] **A panic inside a panic can leave the terminal raw.** A background task's panic does not
+  end the TUI, and a toast says it. If a destructor panics while that task unwinds, the process
+  aborts before it can restore the terminal, and Rust gives no stable way to detect that case:
+  the shell comes back with no echo and the alternate screen up, and typing `reset` and Enter
+  clears it (`bins/svolder/src/tui/terminal.rs`, `routing_hook`).
 - [limit] **A key pressed in the instant the terminal is resized can be lost.** The first key
   after the window is grown or shrunk, or after a run of Esc presses closes boxes, such as a `q` or
   Ctrl-C, can go unread until the next input (a second press reads both), and a frame at the old

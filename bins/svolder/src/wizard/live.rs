@@ -174,8 +174,17 @@ impl Files for LiveEffects {
         crate::commands::device::reload_daemon_quietly(&self.g.borrow(), &self.config).await;
     }
 
+    /// The adapter is written as its address, which stays with the dongle where the number the
+    /// kernel gave it moves; one BlueZ gave no address is written by name.
     fn write_adapter(&self, adapter: &str) -> Result<(), String> {
-        Config::set_adapter(&self.path, Some(adapter)).map_err(|e| e.to_string())
+        let written = self
+            .snapshot
+            .bluez()
+            .adapters
+            .into_iter()
+            .find(|a| a.name == adapter && !a.address.is_empty())
+            .map_or_else(|| adapter.to_string(), |a| a.address);
+        Config::set_adapter(&self.path, Some(&written)).map_err(|e| e.to_string())
     }
 
     /// Install the units and enable both of them, which is what `svolder daemon install` with

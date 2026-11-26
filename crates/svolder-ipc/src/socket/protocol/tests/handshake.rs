@@ -54,12 +54,14 @@ fn an_older_front_end_reads_the_new_version_and_error_answers() {
         features: FEATURES.iter().map(|f| (*f).to_string()).collect(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     })
     .unwrap();
     assert!(
         version.contains(
-            r#""features":["reasons","unknown_request_code","device_crud","server_switch","guest_switch","mqtt_set","walk","autoeq","host_cover","preset_write","speakers","scenes"]"#
+            r#""features":["reasons","unknown_request_code","device_crud","server_switch","guest_switch","mqtt_set","walk","autoeq","host_cover","preset_write","speakers","scenes","adapter_switch"]"#
         ),
         "{version}"
     );
@@ -175,7 +177,8 @@ fn the_daemon_lists_its_features_from_one_place() {
             FEATURE_HOST_COVER,
             FEATURE_PRESET_WRITE,
             FEATURE_SPEAKERS,
-            FEATURE_SCENES
+            FEATURE_SCENES,
+            FEATURE_ADAPTER_SWITCH
         ]
     );
     assert_eq!(FEATURE_REASONS, "reasons");
@@ -224,6 +227,8 @@ fn the_legacy_text_of_an_unknown_request_is_still_recognised() {
         features: vec![FEATURE_UNKNOWN_REQUEST_CODE.into()],
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     };
     assert!(!is_unknown_request(Some(&new), code, &message, "walk"));

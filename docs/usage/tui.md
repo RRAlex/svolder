@@ -26,7 +26,7 @@ Options:
       --no-color               Force monochrome rendering; also set by the `NO_COLOR` environment variable
       --demo                   Try the TUI against a fake device on a daemon of its own, in a private directory that is removed on exit; nothing of yours is read or written
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --host                   With --demo, leave the computer's audio on: the real default sink's volume and meters, the real media player and the computer EQ, on the fake device. A volume or player change stays after the demo; the computer EQ the demo applied is removed
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --web                    With --demo, serve the web UI on a port of its own on every interface, signed in by token; the TUI's Web box and standard error show the link
@@ -378,8 +378,9 @@ loudness strength, whichever row is focused. The Mode select's `‹ ›` arrows 
 whether or not the row is focused.
 
 On the computer's side, where the daemon (or the TUI itself) serves the computer's loudness, the
-pane keeps a Loudness row at the bottom, under the points table: `Loudness ‹ on › ████░░ 50 %`, with
-a dim line of what the stage plays at the volume it read under it
+pane keeps a Loudness row right under the points table, with one blank row between them where
+the pane has the room: `Loudness ‹ on › ████░░ 50 %`, with a dim line of what the stage plays at
+the volume it read under it
 (`at 35 %: bass +7.3 · mids −7.3 dB`; the stage's shelf gains, not the response at three
 frequencies), and a dim "the DAC's loudness is on too" when the device's own Loudness plays as well.
 Those dim lines never take a point's row: they show only when every point is already in view (or
@@ -388,7 +389,7 @@ the points table is folded, below) and the line fits.
 current volume; the tone screen (`e`) has the stage's own panel with its Reference row (see "The
 computer's stages" below). A daemon that does not offer loudness shows no row.
 
-Under it, where the daemon (or the TUI itself) serves the computer's crossfeed, the pane keeps the
+Under that, where the daemon (or the TUI itself) serves the computer's crossfeed, the pane keeps the
 **Crossfeed** row, `Crossfeed ‹ on ›`, and, while crossfeed plays, a Model row and a Preset row
 under it, indented two cells to show they belong to it: `  Model    ‹ Bauer ›` and
 `  Preset   ‹ Chu Moy ›`. `←→` or `␣` turn crossfeed on and
@@ -396,7 +397,8 @@ off on the first row, `←→` step the model or the preset round the ends on th
 (a model's first preset loads with it), and `Enter` or `X` open the tone screen with the Space
 panel on the row. On a short pane the Model and Preset rows go first, then rows of the points
 table, which scrolls to keep the focused point in sight. A daemon that does not offer crossfeed
-shows no row.
+shows no row. All of these follow the table from the top; the pane's spare rows fall at its bottom,
+not between the table and Loudness.
 
 The computer's own Preset line, under Mode, is indented the same two cells. While the computer EQ
 is **off** and the pane is too short for every point and every row under them, the points table
@@ -1935,7 +1937,7 @@ version, and three entries (four while the daemon keeps scenes, below):
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.39.9 │
+│                         v0.39.10 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -1955,7 +1957,7 @@ nothing in the menu there.
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.39.9 │
+│                         v0.39.10 │
 │                                  │
 │             Settings             │
 │             Scenes z             │
@@ -2079,8 +2081,8 @@ the daemon restarts, because those never stay on across a restart.
 behind it; `Esc` closes it onto the same screen. The box fills the body, from the row under the
 header down to the terminal's last row, no wider than the wide tier's body is and in the middle of
 it, and it opens on the category and row it was closed on (the first time, `Look`, row 0). Every row
-but the AutoEq refresh and the last category's is one key of the `[tui]` table (the refresh is
-`[autoeq] refresh_weeks`), in five categories named on the box's top border with superscript digits,
+but the AutoEq refresh, the Bluetooth adapter and the last category's is one key of the `[tui]`
+table (the refresh is `[autoeq] refresh_weeks`, the adapter the top-level `adapter`), in five categories named on the box's top border with superscript digits,
 the current one between `┤ ├`:
 
 - **Look**: the palette preset, an accent override for each device family (DAC, amp, preamp), the
@@ -2095,8 +2097,9 @@ the current one between `┤ ├`:
   monochrome), since nothing animates there.
 - **Behaviour**: mouse capture, whether a resting pointer shows a tooltip, whether `q` asks before
   it quits, the title meter, whether the intro plays on launch, which effect builds it and whether a
-  short sound plays with it, and how often the AutoEq index is fetched again
-  (`[autoeq] refresh_weeks`).
+  short sound plays with it, how often the AutoEq index is fetched again
+  (`[autoeq] refresh_weeks`), and the Bluetooth adapter svolder connects through (`adapter`; see
+  "Bluetooth adapter" below).
 - **Host audio**: whether the TUI reaches the host's own audio, its visualizer, the cover art and the VU reference.
 - **Connect** (the Connections category): the daemon's `[web]`, `[mcp]` and `[mqtt]` sections and
   what the daemon says of them, described under "Connect" below.
@@ -2169,7 +2172,7 @@ Keys, which the box takes whole, so a key it has no use for never reaches the sc
   its neighbour, wrapping round at the ends; the AutoEq refresh row steps `never`, `1 week`,
   `2 weeks` … `99 weeks` one at a time and stops at both ends instead of wrapping, and `␣`/`Enter`
   leave it alone
-- `␣`/`Enter` turn a switch row the other way
+- `␣`/`Enter` turn a switch row the other way, and on the Bluetooth adapter row open its list
 - `Tab`/`⇧Tab` move to the next or previous category, wrapping round and starting at its first row,
   and `1`–`5` jump to one
 - `M`, `E`, `H`, `R`, `F` and `V` turn their rows, and the box shows the change
@@ -2208,6 +2211,38 @@ s fails with `config io …: another svolder is writing this file`. A `config.to
 leaves it as it is. A write that fails is reported in a Failure toast with its reason
 (`settings not saved: …`), drawn over the box at full strength, and the change still applies for the
 rest of the session.
+
+#### Bluetooth adapter
+
+The last row of Behaviour reads the configured `adapter`: `first` when none is set, a name as it is,
+an address by its last three pairs. `Enter` (or a second click on the selected row, which has no
+arrows to click) opens a short list over the box; a short scan runs on every adapter at once while
+it says `listening on every adapter…`, then it shows one line per adapter:
+
+```
+ Bluetooth adapter
+ ▶ hci0  AA:BB:CC:DD:EE:01  UB500 (2357:0604)  BF3 −62 dBm  ✓ in use
+   hci2  AA:BB:CC:DD:EE:02  UB500 (2357:0604)  BF3 −74 dBm
+```
+
+each with its address, the USB product behind it, how loudly it hears each configured device (`—`
+for one it did not hear) and `✓ in use` on the one a session opens now. A device that is connected
+stops advertising and cannot be heard, so the adapter in use shows it as `BF3 connected, −62 dBm
+12 s ago`: the last strength known from before, and its age, where one is known. The cursor starts
+on the adapter in use. `↑↓` move, `Enter` saves the adapter under the cursor and closes the list,
+`Esc` closes it with no change; a click on a line selects it and a second click on the selected
+line saves it. A note under the table says when the configured address matches no adapter; the list is the same table `svolder adapters` prints.
+
+A pick is saved as the adapter's **address**, written to `config.toml` as `svolder add` writes a
+device (a running daemon is told to reload), and becomes the adapter svolder remembers for each
+configured device (also as the address, never the `hciN` number, which moves), so an adapter that
+connected one of them earlier does not outrank the pick. A direct session reconnects through the
+adapter at once. A daemon follows the change on its reload: it lets go of its links on the old
+adapter and connects every device again through the new one, with no restart, and the toast says
+`the daemon switched to it`; a daemon too old to do that says to run `svolder daemon restart`. When
+`--adapter` or `SVOLDER_ADAPTER` names an adapter, the toast says it still overrides the pick in
+this session. With the daemon reading another file than this session edits, the row is read-only
+here, as the Connect rows are.
 
 #### Connect
 

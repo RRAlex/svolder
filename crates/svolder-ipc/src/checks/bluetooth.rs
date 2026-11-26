@@ -204,18 +204,29 @@ pub(super) fn adapters(
         }
     };
     match wanted {
-        Some(name) => match bluez.adapters.iter().find(|a| a.name == name) {
+        // An adapter is named by its kernel name or by its address, in either case.
+        Some(name) => match bluez
+            .adapters
+            .iter()
+            .find(|a| a.name == name || a.address.eq_ignore_ascii_case(name))
+        {
             None => Outcome {
                 check: ADAPTERS,
                 state: State::Warn,
                 reason: format!(
-                    "the config names adapter {name:?}, which is not present ({present})"
+                    "the config names adapter {name:?}, which is not present ({})",
+                    bluez
+                        .adapters
+                        .iter()
+                        .map(|a| format!("{} {}", a.name, a.address))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ),
                 fix: Some(Fix {
                     command: format!(
                         "set adapter = {:?} in config.toml, or clear the key to use the first \
                          adapter",
-                        bluez.adapters[0].name
+                        bluez.adapters[0].address
                     ),
                     applies_itself: false,
                 }),
@@ -224,8 +235,8 @@ pub(super) fn adapters(
             Some(adapter) => pass(
                 ADAPTERS,
                 format!(
-                    "{name} is powered on ({}); present: {present}",
-                    adapter.address
+                    "{} is powered on ({}); present: {present}",
+                    adapter.name, adapter.address
                 ),
             ),
         },

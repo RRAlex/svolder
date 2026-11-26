@@ -75,7 +75,10 @@ fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
 /// [devices.0102030405060708]
 /// last_adapter = "hci1"
 /// last_profile = "gungnir2-v2"
+/// config_adapter = "AA:BB:CC:DD:EE:01"
 /// ```
+///
+/// `config_adapter` is the configuration's `adapter` at the time, absent when it named none.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceState {
     /// One entry per device, keyed by unit id.
@@ -98,6 +101,10 @@ struct Remembered {
     /// bands its tone control has without connecting to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_profile: Option<String>,
+    /// The configuration's `adapter` when the adapter was remembered: a config that names another
+    /// since has made a newer choice, and the memory is dropped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    config_adapter: Option<String>,
 }
 
 impl DeviceState {
@@ -126,23 +133,37 @@ impl DeviceState {
     /// corrected on the next connect, and a `None` clears a name left by an earlier run. The answer is what saves the steady state a write: the
     /// same adapter and profile again leave this state exactly as it was, and a caller that is
     /// only here to record a connect has nothing to put on disk.
-    pub fn remember(&mut self, udid: &str, adapter: &str, profile: Option<&str>) -> bool {
+    pub fn remember(
+        &mut self,
+        udid: &str,
+        adapter: &str,
+        profile: Option<&str>,
+        configured: Option<&str>,
+    ) -> bool {
         let entry = self.devices.entry(key(udid)).or_default();
         // An entry is the process's own the moment it is asked about, changed or not.
         self.touched.insert(key(udid));
         let same = entry.last_adapter.as_deref() == Some(adapter)
-            && entry.last_profile.as_deref() == profile;
+            && entry.last_profile.as_deref() == profile
+            && entry.config_adapter.as_deref() == configured;
         if same {
             return false;
         }
         entry.last_adapter = Some(adapter.to_string());
         entry.last_profile = profile.map(str::to_string);
+        entry.config_adapter = configured.map(str::to_string);
         true
     }
 
-    /// The adapter that last connected the device `udid` names.
-    pub fn last_adapter(&self, udid: &str) -> Option<String> {
-        self.devices.get(&key(udid))?.last_adapter.clone()
+    /// The adapter that last connected the device `udid` names, unless the configuration's
+    /// `adapter` is no longer what it was then: a memory older than the config's current choice
+    /// (the wizard, doctor's fix, a hand edit) must not outrank it. `configured` is the
+    /// configuration's `adapter` now.
+    pub fn last_adapter(&self, udid: &str, configured: Option<&str>) -> Option<String> {
+        let entry = self.devices.get(&key(udid))?;
+        (entry.config_adapter.as_deref() == configured)
+            .then(|| entry.last_adapter.clone())
+            .flatten()
     }
 
     /// The name of the profile the device `udid` names was last read through.
@@ -165,7 +186,7 @@ impl DeviceState {
     /// and is renamed over the target, so a reader sees either the file that was there or the
     /// whole of the new one: a file that is already there keeps the mode it had, and one that
     /// is not is created at mode 0600.
-    fn save_to(&self, base: &Path) -> Result<(), String> {
+    pub(crate) fn save_to(&self, base: &Path) -> Result<(), String> {
         let path = DeviceState::file_in(base);
         let parent = path.parent().ok_or("the state file has no directory")?;
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
@@ -286,7 +307,7 @@ mod tests {
                 std::thread::spawn(move || {
                     let mut st = DeviceState::load_from(&base);
                     loaded.wait();
-                    st.remember(unit, adapter, Some("gungnir2-v2"));
+                    st.remember(unit, adapter, Some("gungnir2-v2"), None);
                     st.save_to(&base).expect("the state file is written");
                 })
             })
@@ -302,16 +323,28 @@ mod tests {
     #[test]
     fn two_racing_saves_both_leave_their_entry() {
         let back = race(false);
-        assert_eq!(back.last_adapter("0102030405060708"), Some("hci1".into()));
-        assert_eq!(back.last_adapter("0807060504030201"), Some("hci2".into()));
+        assert_eq!(
+            back.last_adapter("0102030405060708", None),
+            Some("hci1".into())
+        );
+        assert_eq!(
+            back.last_adapter("0807060504030201", None),
+            Some("hci2".into())
+        );
     }
 
     /// Two saves that both reach the read-and-rename at once are let through one at a time.
     #[test]
     fn saves_that_overlap_are_let_through_one_at_a_time() {
         let back = race(true);
-        assert_eq!(back.last_adapter("0102030405060708"), Some("hci1".into()));
-        assert_eq!(back.last_adapter("0807060504030201"), Some("hci2".into()));
+        assert_eq!(
+            back.last_adapter("0102030405060708", None),
+            Some("hci1".into())
+        );
+        assert_eq!(
+            back.last_adapter("0807060504030201", None),
+            Some("hci2".into())
+        );
     }
 
     /// A state file a save creates is private to its user, as the configuration file is, and
@@ -322,13 +355,13 @@ mod tests {
         let dir = temp_state_dir("state");
         let path = DeviceState::file_in(&dir.0);
         let mut st = DeviceState::default();
-        st.remember("0102030405060708", "hci1", None);
+        st.remember("0102030405060708", "hci1", None, None);
         st.save_to(&dir.0).expect("the state file is written");
         let mode = |p: &Path| std::fs::metadata(p).expect("metadata").permissions().mode() & 0o777;
         assert_eq!(mode(&path), 0o600);
 
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).expect("chmod");
-        st.remember("0102030405060708", "hci2", None);
+        st.remember("0102030405060708", "hci2", None, None);
         st.save_to(&dir.0).expect("the state file is written");
         assert_eq!(mode(&path), 0o640);
     }
@@ -338,7 +371,7 @@ mod tests {
     fn the_lock_file_stays_after_a_save() {
         let dir = temp_state_dir("state");
         let mut st = DeviceState::default();
-        st.remember("0102030405060708", "hci1", None);
+        st.remember("0102030405060708", "hci1", None, None);
         st.save_to(&dir.0).expect("the state file is written");
         let lock = dir.0.join("svolder").join("state.toml.lock");
         assert_eq!(std::fs::metadata(&lock).expect("the lock file").len(), 0);
@@ -349,10 +382,10 @@ mod tests {
     fn the_last_adapter_that_connected_a_device_is_remembered() {
         let dir = temp_state_dir("state");
         let mut st = DeviceState::load_from(&dir.0);
-        st.remember("0102030405060708", "hci1", Some("gungnir2-v2"));
+        st.remember("0102030405060708", "hci1", Some("gungnir2-v2"), None);
         st.save_to(&dir.0).expect("the state file is written");
         assert_eq!(
-            DeviceState::load_from(&dir.0).last_adapter("0102030405060708"),
+            DeviceState::load_from(&dir.0).last_adapter("0102030405060708", None),
             Some("hci1".into())
         );
     }
@@ -362,7 +395,7 @@ mod tests {
     fn the_state_file_names_the_device_it_is_about() {
         let dir = temp_state_dir("state");
         let mut st = DeviceState::default();
-        st.remember("0102030405060708", "hci1", Some("gungnir2-v2"));
+        st.remember("0102030405060708", "hci1", Some("gungnir2-v2"), None);
         st.save_to(&dir.0).expect("the state file is written");
         let path = DeviceState::file_in(&dir.0);
         assert_eq!(path, dir.0.join("svolder").join("state.toml"));
@@ -403,7 +436,7 @@ mod tests {
         )
         .expect("the state file is written");
         assert_eq!(
-            DeviceState::load_from(&dir.0).last_adapter("0102030405060708"),
+            DeviceState::load_from(&dir.0).last_adapter("0102030405060708", None),
             Some("hci1".into())
         );
     }
@@ -419,6 +452,37 @@ mod tests {
         assert_eq!(DeviceState::load_from(&dir.0), DeviceState::default());
     }
 
+    /// The newest choice wins whichever way round it comes: an adapter the config gains after one
+    /// was remembered outranks that memory, and one remembered under the config's own value is
+    /// kept until the config names another.
+    #[test]
+    fn a_remembered_adapter_does_not_outrank_a_newer_configured_one() {
+        let unit = "0102030405060708";
+        // Remembered with no adapter configured, then the config gains one (the wizard, doctor's
+        // fix, a hand edit): the config's is the newer choice.
+        let mut st = DeviceState::default();
+        st.remember(unit, "hci0", None, None);
+        assert_eq!(st.last_adapter(unit, None), Some("hci0".into()));
+        assert_eq!(st.last_adapter(unit, Some("AA:BB:CC:DD:EE:02")), None);
+        // The config names one, a session connects through it and remembers it under that value:
+        // the memory stands while the config does, and goes when the config moves on or is
+        // cleared.
+        st.remember(unit, "AA:BB:CC:DD:EE:02", None, Some("AA:BB:CC:DD:EE:02"));
+        assert_eq!(
+            st.last_adapter(unit, Some("AA:BB:CC:DD:EE:02")),
+            Some("AA:BB:CC:DD:EE:02".into())
+        );
+        assert_eq!(st.last_adapter(unit, Some("AA:BB:CC:DD:EE:03")), None);
+        assert_eq!(st.last_adapter(unit, None), None);
+        // A one-off `--adapter` run remembers its own adapter under the config's value, and that
+        // is the newer choice until the config changes.
+        st.remember(unit, "hci1", None, Some("AA:BB:CC:DD:EE:02"));
+        assert_eq!(
+            st.last_adapter(unit, Some("AA:BB:CC:DD:EE:02")),
+            Some("hci1".into())
+        );
+    }
+
     /// The same adapter connecting the same device again changes nothing, so there is nothing
     /// to write; a different adapter is worth the write.
     #[test]
@@ -426,18 +490,18 @@ mod tests {
         let dir = temp_state_dir("state");
         let mut st = DeviceState::load_from(&dir.0);
         assert!(
-            st.remember("0102030405060708", "hci1", Some("gungnir2-v2")),
+            st.remember("0102030405060708", "hci1", Some("gungnir2-v2"), None),
             "the first adapter is news"
         );
         st.save_to(&dir.0).expect("the state file is written");
 
         let mut again = DeviceState::load_from(&dir.0);
         assert!(
-            !again.remember("0102030405060708", "hci1", Some("gungnir2-v2")),
+            !again.remember("0102030405060708", "hci1", Some("gungnir2-v2"), None),
             "the same adapter again is not"
         );
         assert!(
-            again.remember("0102030405060708", "hci2", Some("gungnir2-v2")),
+            again.remember("0102030405060708", "hci2", Some("gungnir2-v2"), None),
             "a different adapter is"
         );
         // Only the first save ran, so the file still says what it said.
@@ -454,7 +518,7 @@ mod tests {
         let dir = temp_state_dir("state");
         let st = DeviceState::load_from(&dir.0);
         assert_eq!(st, DeviceState::default());
-        assert_eq!(st.last_adapter("0102030405060708"), None);
+        assert_eq!(st.last_adapter("0102030405060708", None), None);
     }
 
     /// A daemon this process starts logs beside the state file, in the same directory.
@@ -476,14 +540,20 @@ mod tests {
     fn the_state_keeps_every_device_and_the_latest_adapter_of_each() {
         let dir = temp_state_dir("state");
         let mut st = DeviceState::load_from(&dir.0);
-        st.remember("0102030405060708", "hci0", Some("gungnir2-v2"));
-        st.remember("0807060504030201", "hci2", Some("gungnir2-v2"));
-        st.remember("0102030405060708", "hci1", Some("gungnir2-v2"));
+        st.remember("0102030405060708", "hci0", Some("gungnir2-v2"), None);
+        st.remember("0807060504030201", "hci2", Some("gungnir2-v2"), None);
+        st.remember("0102030405060708", "hci1", Some("gungnir2-v2"), None);
         st.save_to(&dir.0).expect("the state file is written");
 
         let back = DeviceState::load_from(&dir.0);
-        assert_eq!(back.last_adapter("0102030405060708"), Some("hci1".into()));
-        assert_eq!(back.last_adapter("0807060504030201"), Some("hci2".into()));
+        assert_eq!(
+            back.last_adapter("0102030405060708", None),
+            Some("hci1".into())
+        );
+        assert_eq!(
+            back.last_adapter("0807060504030201", None),
+            Some("hci2".into())
+        );
     }
 
     /// A file written before profiles were remembered still loads, with no profile to give.
@@ -498,7 +568,10 @@ mod tests {
         )
         .expect("the old file");
         let st = DeviceState::load_from(&dir.0);
-        assert_eq!(st.last_adapter("0102030405060708"), Some("hci1".into()));
+        assert_eq!(
+            st.last_adapter("0102030405060708", None),
+            Some("hci1".into())
+        );
         assert_eq!(st.last_profile("0102030405060708"), None);
     }
 
@@ -506,9 +579,9 @@ mod tests {
     #[test]
     fn the_last_profile_is_refreshed_when_it_changes() {
         let mut st = DeviceState::default();
-        assert!(st.remember("0102030405060708", "hci1", Some("gungnir2-v1")));
-        assert!(!st.remember("0102030405060708", "hci1", Some("gungnir2-v1")));
-        assert!(st.remember("0102030405060708", "hci1", Some("gungnir2-v2")));
+        assert!(st.remember("0102030405060708", "hci1", Some("gungnir2-v1"), None));
+        assert!(!st.remember("0102030405060708", "hci1", Some("gungnir2-v1"), None));
+        assert!(st.remember("0102030405060708", "hci1", Some("gungnir2-v2"), None));
         assert_eq!(
             st.last_profile("0102030405060708"),
             Some("gungnir2-v2".into())
@@ -519,9 +592,9 @@ mod tests {
     #[test]
     fn no_profile_after_a_profile_clears_it() {
         let mut st = DeviceState::default();
-        assert!(st.remember("0102030405060708", "hci1", Some("gungnir2-v2")));
-        assert!(st.remember("0102030405060708", "hci1", None));
+        assert!(st.remember("0102030405060708", "hci1", Some("gungnir2-v2"), None));
+        assert!(st.remember("0102030405060708", "hci1", None, None));
         assert_eq!(st.last_profile("0102030405060708"), None);
-        assert!(!st.remember("0102030405060708", "hci1", None));
+        assert!(!st.remember("0102030405060708", "hci1", None, None));
     }
 }

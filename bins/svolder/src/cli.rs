@@ -22,6 +22,8 @@ mod about {
     pub(super) const SETUP: &str = "The guided first run, safe to run again";
     pub(super) const DOCTOR: &str = "Check the host and each configured device, and offer fixes";
     pub(super) const SCAN: &str = "List every device in range with its ready-to-run `add` line";
+    pub(super) const ADAPTERS: &str =
+        "List the Bluetooth adapters and how loudly each hears what you configured";
     pub(super) const TUI: &str = "Open the interactive terminal UI";
     pub(super) const STATUS: &str = "Connect to a device and print every control's current value";
     pub(super) const GET: &str = "Read one control's current value";
@@ -68,6 +70,7 @@ const GROUPS: &[(&str, &[(&str, &str)])] = &[
             ("setup", about::SETUP),
             ("doctor", about::DOCTOR),
             ("scan", about::SCAN),
+            ("adapters", about::ADAPTERS),
         ],
     ),
     (
@@ -173,8 +176,8 @@ pub(crate) struct Cli {
     /// BlueZ), or `fake` (in-process).
     #[arg(long, global = true, env = "SVOLDER_TRANSPORT", default_value = "auto")]
     pub(crate) transport: String,
-    /// Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured
-    /// `adapter`, else the first one.
+    /// Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to
+    /// the configured `adapter`, else the first one.
     #[arg(long, global = true, env = "SVOLDER_ADAPTER")]
     pub(crate) adapter: Option<String>,
     /// Daemon socket to use. Defaults to the runtime directory's `svolder.sock`.
@@ -220,6 +223,15 @@ pub(crate) enum Command {
         #[arg(long, value_parser = parse_duration, default_value = "5s")]
         timeout: Duration,
         /// Print one JSON object per device instead of text
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = about::ADAPTERS)]
+    Adapters {
+        /// How long every adapter listens
+        #[arg(long, value_parser = parse_duration, default_value = "4s")]
+        timeout: Duration,
+        /// Print one JSON object per adapter instead of text
         #[arg(long)]
         json: bool,
     },

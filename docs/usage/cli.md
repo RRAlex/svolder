@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 # Device verbs
 
 The device verbs: `doctor`, `setup`, `devices`, `add`, `remove`, `hops`, `passphrase`, `scan`,
-`inspect`, `status`, `get`, `set`, `preset`, `scene`, `watch`, `panel`, `host`, `raw`, `decode` and
+`adapters`, `inspect`, `status`, `get`, `set`, `preset`, `scene`, `watch`, `panel`, `host`, `raw`, `decode` and
 `profiles`. Back to the [usage index](README.md).
 
 ## doctor
@@ -29,7 +29,7 @@ Options:
       --json                   Print one JSON object per check instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
       --yes                    Apply the fixes this verb can apply itself without asking
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --dev                    Also check what a second adapter and a patched bluetoothd give
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
@@ -43,8 +43,8 @@ in this order — `✓` pass, `!` warn, `✗` fail, `·` a fact worth recording 
 | check | says |
 |---|---|
 | Bluetooth service | whether `org.bluez` answers on the system D-Bus |
-| Adapters | which adapters BlueZ reports, and whether the configured `adapter` is missing or unpowered |
-| Adapter grade | (a device configured, and more than one adapter present) each adapter's catch rate against the first configured device, best first as the setup wizard lists them, with adapters that tied left in the order the host reports them; warns when the configured `adapter` is not the best of them |
+| Adapters | which adapters BlueZ reports, and whether the configured `adapter` (a name or an address) is missing or unpowered |
+| Adapter grade | (a device configured, and more than one adapter present) each adapter's catch rate against the first configured device, best first as the setup wizard lists them, with adapters that tied left in the order the host reports them; warns when the configured `adapter` is not the best of them; where the adapter in use does not hear the device and another adapter does, it also warns, naming that adapter, its address and its reading and pointing at Settings, Bluetooth adapter and `svolder adapters`; another adapter that merely hears it louder is a line of information, never a warning. Doctor only reports on the adapter choice: it never writes `adapter` for a reading |
 | Runtime | `$XDG_RUNTIME_DIR`, and whether the socket's own directory can be written to |
 | Daemon | whether the systemd units are installed, enabled, and pointed at the resolved socket; a note, not a failure, where there is no systemd at all — autospawn or a direct session serve instead. A daemon answering on the socket with a version other than this svolder's grades `!` (`daemon vX.Y.Z is older than this svolder vA.B.C`, or `newer than` when the daemon is the later build, compared in semver order) and, for an older daemon, gives the fix `svolder daemon restart`, which doctor prints and never runs; a newer daemon has no fix to print, since restarting it changes nothing; a daemon that says its `config.toml` changed since its last reload (a hand edit it has not taken) grades `!` with its words (`config: PATH changed since the last reload: svolder daemon reload (or SIGHUP)`) and, where the check has no fix of its own, the fix `svolder daemon reload`, printed and never run, since a reload changes the devices; a daemon whose `config.toml` is gone grades `!` with `config: PATH is missing: the daemon keeps its running configuration; restore the file, then svolder daemon reload` and no fix, since a reload of a missing file is refused |
 | Other daemons | one row per other svolderd of this user's listening on a socket this session does not reach — neither the one it resolves nor the one the systemd unit listens on — whoever started it and whatever network namespace it runs in: its pid, where it listens (the listening socket it holds, or its `--socket`/`SVOLDER_SOCKET` when its descriptors or its namespace's socket table cannot be read; for a daemon in another mount namespace, such as a container, that path reached through `/proc/<pid>/root`), and the command that stops that one, which doctor prints and never runs |
@@ -105,7 +105,7 @@ Usage: svolder setup [OPTIONS]
 Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -215,7 +215,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print one JSON object per device instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -268,7 +268,7 @@ Options:
       --name <NAME>              The name to select this device by
       --profile <PROFILE>        The profile to use for this device, when it differs from the detected one
       --transport <TRANSPORT>    Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>        Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>        Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --passphrase <PASSPHRASE>  `auto`, `none`, or four digits [default: auto]
       --socket <SOCKET>          Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start                 Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
@@ -304,7 +304,7 @@ Arguments:
 Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -351,7 +351,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print one JSON object per hop instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -416,7 +416,7 @@ Usage: svolder identify [OPTIONS]
 Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -455,7 +455,7 @@ Commands:
 Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -478,7 +478,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --yes                    Skip the confirmation prompt
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -506,7 +506,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --yes                    Skip the confirmation prompt
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -590,7 +590,7 @@ Options:
       --timeout <TIMEOUT>      How long to listen for advertisements [default: 5s]
       --json                   Print one JSON object per device instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -617,6 +617,56 @@ and nothing else. A daemon listens for at most 30 seconds on a `scan` request: o
 longer `--timeout` is cut to 30 seconds before it is asked for, and
 `svolder: the daemon scans for at most 30 s` is printed to stderr once.
 
+## adapters
+
+List the Bluetooth adapters this machine has, which one svolder uses, and how loudly each hears the
+configured devices.
+
+```
+List the Bluetooth adapters and how loudly each hears what you configured
+
+Usage: svolder adapters [OPTIONS]
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --timeout <TIMEOUT>      How long every adapter listens [default: 4s]
+      --json                   Print one JSON object per adapter instead of text
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+      --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
+```
+
+Example:
+
+```
+$ svolder adapters
+hci0  AA:BB:CC:DD:EE:01  UB500 (2357:0604)  BF3 −62 dBm  ✓ in use
+hci2  AA:BB:CC:DD:EE:02  UB500 (2357:0604)  BF3 −74 dBm
+```
+
+One line per adapter: its kernel name, its Bluetooth address, the USB product behind it (the
+product string the device gives, with the vendor and product ids; nothing for an adapter that is
+not a USB device), how loudly it hears each configured device (`—` for a device it did not hear)
+and `✓ in use` on the adapter a session opens now: `--adapter`, else the adapter the state file
+remembers for the device (a direct session opens that one), else the configured `adapter`, else the
+first one; a named adapter that matches none is said on stderr, with the adapters there are. A
+device a running daemon holds a link to stops advertising and cannot be heard, so the adapter in
+use shows it as `BF3 connected, −62 dBm 12 s ago` (the last strength known from before the
+connect, and its age, where known; plain `connected` otherwise). Every adapter listens for
+`--timeout` at the same time. The verb only listens:
+it connects to nothing and writes nothing. `--json` prints one object per adapter: `name`,
+`address`, `usb`, `in_use`, `listened` and `heard`, a list of `{device, rssi}` for the devices it
+heard, with `connected: true` and `age_s` for one it holds. An adapter that could not listen has
+`listened: false` and the reason in `error`, which is not the same as one that heard nothing
+(`listened: true`, `heard: []`); the text line says `cannot listen: …`. Under `--transport fake` the
+adapters are the ones `SVOLDER_FAKE_ADAPTERS` describes.
+
+Put the address of the adapter to use in `adapter` (see [the `adapter` key](config.md#the-adapter-key));
+the Settings box of the TUI does that for you.
+
 ## inspect
 
 Connect to a device, refresh its state by asking for every reading, and print every function the
@@ -632,7 +682,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print one JSON object per reading instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -687,7 +737,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print one JSON object per control instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -756,7 +806,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print one JSON object instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -802,7 +852,7 @@ Options:
       --step <STEP>            Raw-value step for `up`/`down` [default: 1]
       --no-wait                Send without waiting for the device to confirm
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --yes                    Answer yes to the question a save asks
       --json                   Print one JSON object instead of text
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
@@ -889,7 +939,7 @@ Commands:
 Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -915,7 +965,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print one JSON object per preset instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -963,7 +1013,7 @@ Arguments:
 Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1008,7 +1058,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print the answer as one JSON object instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1035,7 +1085,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print the answer as one JSON object instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1079,7 +1129,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print the answer as one JSON object instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1118,7 +1168,7 @@ Options:
       --force                  Save over a scene of that name
       --json                   Print the answer as one JSON object instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1163,7 +1213,7 @@ Options:
       --json                   Print the answer as one JSON object instead of text
       --yes                    Answer yes to the question asked when the scene plays a preset on a device and on the computer at once
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1200,7 +1250,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print the answer as one JSON object instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1233,7 +1283,7 @@ Options:
       --json                   Print the answer as one JSON object instead of text
       --yes                    Skip the confirmation prompt
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1268,7 +1318,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print one JSON object per reading instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1371,7 +1421,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print one JSON object per line (the only form: the verb is for programs)
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1460,7 +1510,7 @@ Commands:
 Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1490,7 +1540,7 @@ Commands:
 Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1543,7 +1593,7 @@ Options:
       --sink <NODE>            The sink to put it in front of, by node name or wpctl id; the default output when left out
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
       --yes                    Answer yes to the question asked when the preset is on the DAC
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1630,7 +1680,7 @@ Usage: svolder host eq remove [OPTIONS]
 Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1650,7 +1700,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print one JSON object instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1701,7 +1751,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print the computer EQ's state as one JSON object
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1734,7 +1784,7 @@ Options:
       --yes                    Answer yes to the question asked when a device plays the preset too
       --json                   Print the computer EQ's state as one JSON object
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1851,7 +1901,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print the crossfeed as the daemon sends it, as one JSON object
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -1925,7 +1975,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print the loudness as the daemon sends it, as one JSON object
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -2003,7 +2053,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print the bypass and the levels as one JSON object
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -2060,7 +2110,7 @@ Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --json                   Print the state, the list or the saved set as the daemon sends it, as JSON
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
@@ -2129,7 +2179,7 @@ Options:
       --seconds <SECONDS>      How long to record every frame while you press the device's buttons, in seconds [default: 60]
       --keep-ids               Keep unit ids, passphrase bytes, the home directory and Bluetooth addresses in the file
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --yes                    Stop the daemon that holds the device, and start it again after, without asking
   -o, --out <FILE>             Write the file here instead of a name made from the product and the time
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
@@ -2194,7 +2244,7 @@ svolder: recording every frame for 2 s; press the device's buttons now (Ctrl-C e
 capture.txt
 $ head -4 capture.txt
 svolder capture
-svolder 0.39.9
+svolder 0.39.10
 taken 2026-10-23 07:33:02 UTC, frame window 2 s
 unit ids, passphrase bytes, the home directory and Bluetooth addresses are scrubbed (--keep-ids keeps them)
 $ grep -A5 '== adverts' capture.txt
@@ -2233,7 +2283,7 @@ Options:
       --no-wait                Send without waiting for the device to confirm
       --json                   Print one JSON object instead of text
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
       --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr

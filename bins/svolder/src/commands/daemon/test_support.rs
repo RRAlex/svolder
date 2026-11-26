@@ -114,6 +114,8 @@ impl Handler for StoppingDaemon {
                 features: Vec::new(),
                 config_changed: false,
                 config_missing: false,
+                adapter: None,
+                adapter_pinned: false,
                 activity: None,
             },
             _ => Response::Ack,
@@ -220,6 +222,8 @@ impl Handler for FakeDaemon {
                 features: Vec::new(),
                 config_changed: false,
                 config_missing: false,
+                adapter: None,
+                adapter_pinned: false,
                 activity: None,
             },
             Request::Devices => Response::Devices {

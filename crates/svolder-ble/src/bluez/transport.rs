@@ -29,6 +29,7 @@ use super::{
     RX_UUID, TX_UUID, advertisement_from_manufacturer_data, forkbeard_advertisement,
     map_btleplug_error,
 };
+use crate::adapters::{AdapterInfo, resolve};
 use crate::advert::Advertisement;
 use crate::error::BleError;
 use crate::transport::{Advertisements, Link, Listening, Notifications, Transport};
@@ -135,7 +136,8 @@ impl<P> Sightings<P> {
 }
 
 impl BluezTransport {
-    /// Open the named adapter (e.g. "hci1"), or the first adapter when `None`.
+    /// Open the adapter `adapter` names, by kernel name ("hci1") or by address, or the first adapter
+    /// when `None`.
     pub async fn new(adapter: Option<&str>) -> Result<Self, BleError> {
         let manager = Manager::new().await.map_err(|e| map_btleplug_error(&e))?;
         let adapters = manager
@@ -147,24 +149,39 @@ impl BluezTransport {
                 .into_iter()
                 .next()
                 .ok_or_else(|| BleError::Adapter("no Bluetooth adapter found".into()))?,
-            Some(name) => {
+            Some(spec) => {
+                // Every adapter's name and address is read first, so a spec that is an address
+                // finds the adapter wearing it, and one that matches none says which there are.
+                let mut present = Vec::new();
+                for a in &adapters {
+                    let Ok(info) = a.adapter_info().await else {
+                        continue;
+                    };
+                    let Some(name) = adapter_name(&info) else {
+                        continue;
+                    };
+                    let address = match a.adapter_address().await {
+                        Ok(Some(address)) => address.to_string().to_ascii_uppercase(),
+                        _ => String::new(),
+                    };
+                    present.push(AdapterInfo {
+                        name: name.to_string(),
+                        address,
+                        usb: None,
+                    });
+                }
+                let wanted = resolve(spec, &present).map_err(BleError::Adapter)?;
                 let mut found = None;
-                // The names are kept as they go by, so a name that matches none of them can
-                // say which ones there were.
-                let mut present: Vec<String> = Vec::new();
                 for a in adapters {
                     let Ok(info) = a.adapter_info().await else {
                         continue;
                     };
-                    if let Some(seen) = adapter_name(&info) {
-                        present.push(seen.to_string());
-                    }
-                    if adapter_info_matches(&info, name) {
+                    if adapter_info_matches(&info, &wanted) {
                         found = Some(a);
                         break;
                     }
                 }
-                found.ok_or_else(|| BleError::Adapter(no_adapter_named(name, &present)))?
+                found.ok_or_else(|| BleError::Adapter(format!("no adapter named {wanted}")))?
             }
         };
         let name = chosen
@@ -982,17 +999,8 @@ fn adapter_info_matches(info: &str, name: &str) -> bool {
 }
 
 /// The adapter's name, as the first word of what BlueZ says about it.
-fn adapter_name(info: &str) -> Option<&str> {
+pub(crate) fn adapter_name(info: &str) -> Option<&str> {
     info.split_whitespace().next()
-}
-
-/// What a named adapter no controller answers to earns: the name that was asked for, then the
-/// adapters there are to ask for instead.
-fn no_adapter_named(name: &str, present: &[String]) -> String {
-    if present.is_empty() {
-        return format!("no adapter named {name}; no adapters present");
-    }
-    format!("no adapter named {name}; adapters: {}", present.join(", "))
 }
 
 /// True when `SVOLDER_BLE_TRACE`'s value asks for the step trace: set to anything other

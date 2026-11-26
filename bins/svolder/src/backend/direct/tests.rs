@@ -1272,3 +1272,177 @@ async fn a_raw_write_on_a_bands_short_id_replaces_the_step_sent_to_the_band() {
         "the step sent before it no longer stands"
     );
 }
+
+/// What a connect that ran out its deadline says, as the session words it.
+fn deadline_failure() -> Failure {
+    Failure::from_ble(&BleError::Connection(
+        "no connection within 20s: le-connection-abort-by-local".into(),
+    ))
+}
+
+fn hearing_at(name: &str, address: &str, rssi: Option<i16>) -> svolder_ble::adapters::Hearing {
+    svolder_ble::adapters::Hearing {
+        adapter: svolder_ble::adapters::AdapterInfo {
+            name: name.into(),
+            address: address.into(),
+            usb: None,
+        },
+        heard: Ok(rssi
+            .map(|rssi| svolder_ble::adapters::Heard {
+                unit: "0A1B2C3D4E5F6071".into(),
+                rssi: Some(rssi),
+            })
+            .into_iter()
+            .collect()),
+    }
+}
+
+/// A connect that never came up on hci2, with hci0 hearing the device louder: the failure's
+/// words end by naming hci0 and the address to put in the config.
+#[test]
+fn a_failed_connect_names_the_adapter_that_hears_the_device_louder() {
+    let hearings = [
+        hearing_at("hci0", "AA:BB:CC:DD:EE:01", Some(-62)),
+        hearing_at("hci2", "AA:BB:CC:DD:EE:02", Some(-74)),
+    ];
+    let pointer = svolder_ble::adapters::pointer("hci2", "BF3", "0A1B2C3D4E5F6071", &hearings);
+    let failure = pointed(deadline_failure(), pointer);
+    assert!(connect_never_came_up(&failure));
+    assert!(
+        failure.what.ends_with(
+            "hci2 hears BF3 at −74 dBm and cannot hold a link; hci0 hears it at −62 dBm: try adapter = \"AA:BB:CC:DD:EE:01\""
+        ),
+        "{}",
+        failure.what
+    );
+}
+
+/// With no other adapter hearing the device the failure is the one it was.
+#[test]
+fn a_failed_connect_is_unchanged_when_no_other_adapter_hears_the_device() {
+    let hearings = [
+        hearing_at("hci0", "AA:BB:CC:DD:EE:01", None),
+        hearing_at("hci2", "AA:BB:CC:DD:EE:02", Some(-74)),
+    ];
+    let pointer = svolder_ble::adapters::pointer("hci2", "BF3", "0A1B2C3D4E5F6071", &hearings);
+    assert_eq!(pointer, None);
+    let before = deadline_failure();
+    let after = pointed(deadline_failure(), pointer);
+    assert_eq!(after.what, before.what);
+    assert_eq!(after.code, before.code);
+}
+
+/// Only a connect that ran out its deadline is pointed elsewhere: a refused passphrase or a
+/// missing device is not an adapter's trouble.
+#[test]
+fn only_a_connect_deadline_is_pointed_elsewhere() {
+    assert!(!connect_never_came_up(&Failure::from_ble(
+        &BleError::NotFound
+    )));
+    assert!(!connect_never_came_up(&Failure::from_ble(
+        &BleError::PassphraseRejected
+    )));
+}
+
+thread_local! {
+    /// What the next [`point_elsewhere`] is told by a scan that no test has a radio for.
+    pub(super) static TOLD: std::cell::RefCell<Option<Option<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// A transport that names an adapter and nothing else.
+struct OnAdapter;
+
+#[async_trait::async_trait]
+impl Transport for OnAdapter {
+    async fn scan(&self, _: Duration) -> Result<svolder_ble::Advertisements, BleError> {
+        Err(BleError::NotFound)
+    }
+    async fn connect(&self, _: UnitId) -> Result<Box<dyn svolder_ble::Link>, BleError> {
+        Err(BleError::NotFound)
+    }
+    fn adapter(&self) -> Option<&str> {
+        Some("hci2")
+    }
+}
+
+fn bf3() -> DeviceConfig {
+    DeviceConfig {
+        name: "BF3".into(),
+        udid: "0A1B2C3D4E5F6071".into(),
+        profile: None,
+        passphrase: "auto".into(),
+        inputs: Default::default(),
+    }
+}
+
+/// The step `open_over` takes after a failed `reach`: a connect deadline on a real adapter is
+/// pointed at the adapter the scan names, a refusal is not, and a fake wire never is.
+#[tokio::test]
+async fn point_elsewhere_adds_the_pointer_to_a_connect_deadline_only() {
+    let transport: Arc<dyn Transport> = Arc::new(OnAdapter);
+    let device = bf3();
+    TOLD.with(|told| *told.borrow_mut() = Some(Some("hci0 hears it louder".into())));
+    let said = point_elsewhere(deadline_failure(), Wire::Ble, &transport, Some(&device)).await;
+    assert!(
+        said.what.ends_with("; hci0 hears it louder"),
+        "{}",
+        said.what
+    );
+
+    TOLD.with(|told| *told.borrow_mut() = Some(Some("never".into())));
+    let refused = Failure::from_ble(&BleError::PassphraseRejected);
+    let before = refused.what.clone();
+    let after = point_elsewhere(refused, Wire::Ble, &transport, Some(&device)).await;
+    assert_eq!(after.what, before);
+    let fake = point_elsewhere(deadline_failure(), Wire::Fake, &transport, Some(&device)).await;
+    assert!(!fake.what.contains("never"), "{}", fake.what);
+    TOLD.with(|told| told.take());
+}
+
+/// A transport on hci2 whose every attempt at the device ends the way a dongle that hears it and
+/// cannot hold a link does, at once rather than after twenty seconds.
+struct NeverUp;
+
+#[async_trait::async_trait]
+impl Transport for NeverUp {
+    async fn scan(&self, _: Duration) -> Result<svolder_ble::Advertisements, BleError> {
+        Err(BleError::Connection(
+            "no connection within 20s: le-connection-abort-by-local".into(),
+        ))
+    }
+    async fn connect(&self, _: UnitId) -> Result<Box<dyn svolder_ble::Link>, BleError> {
+        Err(BleError::Connection(
+            "no connection within 20s: le-connection-abort-by-local".into(),
+        ))
+    }
+    fn adapter(&self) -> Option<&str> {
+        Some("hci2")
+    }
+}
+
+/// `open_over` itself adds the pointer to the failure of a connect that never came up: the step
+/// is what a direct session's user reads, so a build that drops the call fails here.
+#[tokio::test]
+async fn open_over_points_a_connect_deadline_at_the_adapter_that_hears_the_device() {
+    let g = Globals {
+        transport: "ble",
+        adapter: None,
+        socket: None,
+        device: Some("BF3"),
+        verbose: false,
+    };
+    let mut config = Config::default();
+    config.devices.push(bf3());
+    let transport: Arc<dyn Transport> = Arc::new(NeverUp);
+    TOLD.with(|told| *told.borrow_mut() = Some(Some("hci0 hears it louder".into())));
+    let failure = open_over(&g, &config, transport, true, Wire::Ble, Some("hci2"))
+        .await
+        .err()
+        .expect("the connect never comes up");
+    TOLD.with(|told| told.take());
+    assert!(
+        failure.what.ends_with("; hci0 hears it louder"),
+        "{}",
+        failure.what
+    );
+}

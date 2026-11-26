@@ -43,6 +43,18 @@ use svolder_ipc::{
     CODE_LINK, CODE_NOT_FOUND, CODE_TIMEOUT, CODE_USAGE, JOB_STOP_BOUND, Reason, WRITE_SETTLE_BOUND,
 };
 
+/// What a reload needs to move the daemon to another adapter.
+struct AdapterSwitch {
+    /// What the actors and the scanner hold, pointed at the adapter in use.
+    switch: Arc<svolder_ble::SwitchableTransport>,
+    /// The transport name a new one is built with.
+    wire: String,
+    /// Whether the command line named the adapter, which the file then cannot change.
+    pinned: bool,
+    /// The adapter as it was last asked for: `None` for the first one.
+    current: tokio::sync::Mutex<Option<String>>,
+}
+
 /// What a reload that meets the daemon's stop says.
 const STOPPING: &str = "the daemon is stopping";
 
@@ -71,6 +83,8 @@ pub struct Daemon {
     scanner: Arc<Scanner>,
     /// The registry an actor is started with, replaced by every reload.
     registry: RwLock<Arc<Registry>>,
+    /// How a reload moves the daemon to another adapter, set once at start.
+    adapter_switch: std::sync::OnceLock<AdapterSwitch>,
     /// The configuration file a reload re-reads.
     config_path: PathBuf,
     /// The configuration as of the last reload, which every request reads.
@@ -210,7 +224,77 @@ impl Daemon {
             me: std::sync::OnceLock::new(),
             scenes: crate::scenes::Scenes::new(),
             socket,
+            adapter_switch: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Let a reload move the daemon to another adapter: `switch` is what every actor and the
+    /// scanner hold, `wire` the transport name to build the next one with, `pinned` whether the
+    /// command line named the adapter (so the file's `adapter` is not the daemon's to follow),
+    /// and `adapter` the one it runs on now.
+    pub fn with_adapter_switch(
+        self,
+        switch: Arc<svolder_ble::SwitchableTransport>,
+        wire: String,
+        pinned: bool,
+        adapter: Option<String>,
+    ) -> Self {
+        let _ = self.adapter_switch.set(AdapterSwitch {
+            switch,
+            wire,
+            pinned,
+            current: tokio::sync::Mutex::new(adapter),
+        });
+        self
+    }
+
+    /// Follow a changed `adapter` of the configuration: build the transport it names, point
+    /// everything at it, and have every device connect again through it. Nothing happens when
+    /// the adapter did not change, when the command line pins it, or when the one named cannot be
+    /// opened (said in the log; the daemon stays on the adapter it has and tries again at the
+    /// next reload).
+    pub(crate) async fn adapter_to(&self, wanted: Option<&str>, registry: &Registry) {
+        let Some(switch) = self.adapter_switch.get() else {
+            return;
+        };
+        if switch.pinned {
+            return;
+        }
+        let mut current = switch.current.lock().await;
+        if current.as_deref() == wanted {
+            return;
+        }
+        let next = match crate::transport::make(&switch.wire, wanted, registry).await {
+            Ok(next) => next,
+            Err(why) => {
+                log::warn(&format!(
+                    "adapter {}: {why}; staying on the one in use",
+                    wanted.unwrap_or("(the first)")
+                ));
+                return;
+            }
+        };
+        *current = wanted.map(str::to_string);
+        // The same adapter under another spelling (its name, then its address) moves nothing.
+        let same = matches!(
+            (self.transport.adapter(), next.adapter()),
+            (Some(had), Some(now)) if had == now
+        );
+        if same {
+            return;
+        }
+        log::info(&format!(
+            "adapter changed to {}: every device connects again through it",
+            next.adapter().or(wanted).unwrap_or("(the first)")
+        ));
+        switch.switch.swap(next);
+        let devices = self.devices();
+        futures::future::join_all(
+            devices
+                .iter()
+                .map(|device| self.ask(device, Command::Reconnect)),
+        )
+        .await;
     }
 
     /// The daemon with its host's sources taken from `mode` from the next
@@ -289,6 +373,8 @@ impl Daemon {
         for warning in config.warnings() {
             log::warn(&warning);
         }
+        // The adapter first, so a device the reload starts opens on the one it names.
+        self.adapter_to(config.adapter.as_deref(), &registry).await;
         let devices = self.reconcile(&config).await;
         // The scenes' view follows the config and the device set the reload settled.
         self.scenes.poke();
@@ -1039,6 +1125,8 @@ impl Daemon {
                 Response::Version {
                     config_changed,
                     config_missing,
+                    adapter: self.transport.adapter().map(str::to_string),
+                    adapter_pinned: self.adapter_switch.get().is_some_and(|s| s.pinned),
                     version: env!("CARGO_PKG_VERSION").to_string(),
                     mqtt: Some(self.mqtt_status()),
                     mcp: Some(self.mcp.status()),

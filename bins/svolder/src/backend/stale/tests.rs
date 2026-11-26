@@ -232,6 +232,8 @@ impl svolder_ipc::Handler for Stalls {
                 features: Vec::new(),
                 config_changed: false,
                 config_missing: false,
+                adapter: None,
+                adapter_pinned: false,
                 activity: None,
             },
             Request::Devices if self.devices_answered => Response::Devices {
@@ -314,6 +316,8 @@ impl svolder_ipc::Handler for Slow {
                 features: Vec::new(),
                 config_changed: false,
                 config_missing: false,
+                adapter: None,
+                adapter_pinned: false,
                 activity: None,
             },
             Request::Devices => Response::Devices {

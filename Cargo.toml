@@ -6,7 +6,7 @@ resolver = "3"
 members = ["crates/*", "bins/*"]
 
 [workspace.package]
-version = "0.39.9"
+version = "0.39.10"
 edition = "2024"
 rust-version = "1.93"
 license = "GPL-3.0-or-later"
@@ -134,3 +134,12 @@ opt-level = 1
 inherits = "release"
 incremental = true
 codegen-units = 256
+
+# bluez-async 0.9.0 panics when an event stream is dropped (bluez-rs/bluez-async issue #419): its
+# `MessageStream::drop` spawns `remove_match(..).await.unwrap()`, which fails with "No match with
+# that id found" when a D-Bus signal arrives first, and the panic tore the TUI down after a scan.
+# This is upstream's fix, not yet released. Drop this patch for the first bluez-async release
+# after 0.9.0. Upstream's bluez-async has a path dependency on bluez-generated, so that package
+# comes from the same git rev too (its source is identical to crates.io 0.4.0).
+[patch.crates-io]
+bluez-async = { git = "https://github.com/bluez-rs/bluez-async", rev = "b9d409fcbc3a40cfacf22e59b85a7486063855be" }

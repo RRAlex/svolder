@@ -303,6 +303,7 @@ pub(super) fn watching(backend: Backend, app: App, device: Option<&str>) -> Watc
         view_off: false,
         web_code: None,
         web_check: None,
+        adapters_scan: None,
         web_copy: None,
         web_copy_next: None,
         setup: Box::default(),

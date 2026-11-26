@@ -441,6 +441,25 @@ fn an_absent_or_unusable_adapter_warns_and_no_adapter_at_all_fails() {
     assert_eq!(exit_code(&run(&p, sock(), false)), 2);
 }
 
+/// A config that names its adapter by address (in either case) finds it among the adapters the
+/// way a name does, and the check names it by the kernel name BlueZ gives it.
+#[test]
+fn a_config_naming_the_adapter_by_address_finds_it() {
+    let mut p = healthy();
+    p.config = Some(Ok(
+        CONFIG_TEXT.replace("schema = 1", "schema = 1\nadapter = \"ca:b1:e5:0f:da:c5\"")
+    ));
+    let found = named(run(&p, sock(), false), ADAPTERS);
+    assert!(matches!(found.state, State::Pass), "{found:?}");
+    assert!(found.reason.starts_with("hci1 is powered on"), "{found:?}");
+
+    p.config = Some(Ok(
+        CONFIG_TEXT.replace("schema = 1", "schema = 1\nadapter = \"AA:BB:CC:DD:EE:FF\"")
+    ));
+    let missing = named(run(&p, sock(), false), ADAPTERS);
+    assert!(matches!(missing.state, State::Warn), "{missing:?}");
+}
+
 #[test]
 fn the_runtime_check_warns_only_when_the_socket_is_the_tmp_fallback() {
     let mut p = healthy();

@@ -8,6 +8,25 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.39.10
+
+- **Pick the Bluetooth adapter, and name it by its address.** `adapter` in the config (and
+  `--adapter`, `SVOLDER_ADAPTER`) now takes the adapter's address as well as its `hciN` name, so a
+  reboot that renumbers the adapters no longer moves svolder to the wrong one. The TUI's Settings
+  has a **Bluetooth adapter** row that lists every adapter with its USB product and how loud it
+  hears each of your devices (`connected` for the one holding the link); `Enter` picks one, saved
+  by address, and a running daemon switches to it without a restart. `svolder adapters` prints the
+  same list (`--json` too). When connecting keeps failing on one adapter while another hears the
+  device, the error and `svolder doctor` say which one to try.
+- **Adding a device no longer crashes the TUI.** A Bluetooth library svolder uses could panic when
+  a scan ended while a device was busy advertising (the TUI went back to the shell); svolder now
+  uses that library's fix, and a background task that fails no longer takes the TUI's screen down
+  with it: it shows as a message instead.
+- **The computer's Tone pane stacks from the top.** Loudness and Space follow the points table
+  with one blank row where there is room, and the rows left over fall at the bottom, where
+  Ratatoskr can show up again.
+- **Hati: its inputs read Balanced and Single-Ended**, as Schiit's app names them.
+
 ## 0.39.9
 
 - **The computer's Tone pane reads in stages, and folds what is off.** In the TUI's Tone control pane

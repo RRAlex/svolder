@@ -349,7 +349,7 @@ Skoll (15), Stjarna (13), Hati (27).
 
 | IDs | Type | Meaning |
 |-----|------|---------|
-| `2` | UInt8 | Input 1-2: Skoll Balanced, Single-Ended; Stjarna and Hati RCA 1, RCA 2 |
+| `2` | UInt8 | Input 1-2: Skoll and Hati Balanced, Single-Ended; Stjarna RCA 1, RCA 2 |
 | `3` | UInt8 | Gain 1-4 (Skoll and Hati 40/50/60/70 dB; Stjarna 40/47/55/60 dB) |
 | `4` | Boolean | Mute |
 | `5` | Boolean | Headphone (Skoll) |

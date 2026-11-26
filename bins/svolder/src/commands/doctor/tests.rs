@@ -842,6 +842,8 @@ async fn the_daemon_answer_is_the_version_mcp_and_web_of_a_version_reply_and_not
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         },
     }));
@@ -1049,6 +1051,8 @@ async fn the_daemon_answer_carries_the_changed_config_words() {
             features: Vec::new(),
             config_changed: true,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         },
     }));
@@ -1242,4 +1246,109 @@ async fn the_route_is_asked_of_the_daemon_the_doctor_found() {
         crate::commands::host_check::route_on(&daemon.socket).await,
         Some(route)
     );
+}
+
+/// The grades of two adapters that caught the device in every window: the catch rate has nothing
+/// to tell them apart by.
+fn caught_everywhere() -> Vec<Grade> {
+    ["hci0", "hci2"]
+        .iter()
+        .map(|name| Grade {
+            adapter: (*name).into(),
+            seen: 5,
+            of: 5,
+            note: None,
+        })
+        .collect()
+}
+
+fn better(own: Option<Option<i16>>, rssi: i16) -> svolder_ble::adapters::Better {
+    svolder_ble::adapters::Better {
+        take: "AA:BB:CC:DD:EE:01".into(),
+        name: "hci0".into(),
+        rssi: Some(rssi),
+        own,
+    }
+}
+
+/// Where the adapter in use does not hear the device at all and another one does, the row warns,
+/// naming that adapter, its address and its reading and where to pick it, and offers no change of
+/// `adapter`: doctor only reports on the choice.
+#[test]
+fn an_adapter_in_use_that_does_not_hear_the_device_is_warned_about_with_no_fix() {
+    let pass = grade_row(&caught_everywhere(), Some("hci2"), "BF3");
+    assert_eq!(pass.state, State::Pass);
+
+    let row = with_signal(pass, Some(better(None, -62)), Some("hci2"), "BF3");
+    assert_eq!(row.state, State::Warn);
+    assert!(
+        row.reason
+            .contains("hci2 does not hear BF3; hci0 (AA:BB:CC:DD:EE:01) hears it at −62 dBm"),
+        "{row:?}"
+    );
+    assert!(
+        row.reason.contains("Settings, Bluetooth adapter"),
+        "{row:?}"
+    );
+    assert!(
+        row.fix.is_none(),
+        "doctor offered to write `adapter`: {row:?}"
+    );
+}
+
+/// A louder reading on another adapter alone is a line of information: the state and the fix are
+/// what they were, however large the margin, so the row never flips on a one-reading difference
+/// and `--yes` never writes the config for it.
+#[test]
+fn a_louder_reading_alone_is_information_never_a_warning() {
+    let pass = grade_row(&caught_everywhere(), Some("hci2"), "BF3");
+    for louder in [-73, -62, -40] {
+        let row = with_signal(
+            pass.clone(),
+            Some(better(Some(Some(-74)), louder)),
+            Some("hci2"),
+            "BF3",
+        );
+        assert_eq!(row.state, State::Pass, "{row:?}");
+        assert!(row.fix.is_none(), "{row:?}");
+        assert!(row.reason.contains("hears it at"), "{row:?}");
+    }
+    let same = with_signal(
+        pass.clone(),
+        Some(better(Some(Some(-62)), -74)),
+        Some("hci2"),
+        "BF3",
+    );
+    assert_eq!(same.state, State::Pass);
+    assert_eq!(with_signal(pass.clone(), None, Some("hci2"), "BF3"), pass);
+}
+
+/// A row that already warns by catch rate keeps its own fix when the signal is added.
+#[test]
+fn the_signal_leaves_a_warning_rows_own_fix_alone() {
+    let warns = grade_row(
+        &[
+            Grade {
+                adapter: "hci0".into(),
+                seen: 2,
+                of: 5,
+                note: None,
+            },
+            Grade {
+                adapter: "hci1".into(),
+                seen: 5,
+                of: 5,
+                note: None,
+            },
+        ],
+        Some("hci0"),
+        "BF3",
+    );
+    let both = with_signal(
+        warns.clone(),
+        Some(better(Some(Some(-80)), -60)),
+        Some("hci0"),
+        "BF3",
+    );
+    assert_eq!(both.fix, warns.fix);
 }

@@ -357,12 +357,12 @@ fn config_lines_write_the_table_key_and_value() {
     );
 }
 
-/// The categories group the 35 `[tui]` rows, the AutoEq refresh and the 13 Connect rows, each
-/// once, and every row has an explanation that with its config line fits the box at 80×24.
+/// The categories group the 35 `[tui]` rows, the AutoEq refresh, the Bluetooth adapter and the 13
+/// Connect rows, each once, and every row has an explanation that with its config line fits the box at 80×24.
 #[test]
 fn every_setting_is_in_one_category_and_its_explanation_fits_the_box() {
     let all = every_setting();
-    assert_eq!(all.len(), 49);
+    assert_eq!(all.len(), 50);
     for (at, setting) in all.iter().enumerate() {
         assert!(
             !all[at + 1..].contains(setting),
@@ -1402,7 +1402,7 @@ fn the_graph_rows_turn_and_step() {
 }
 
 /// The three graph rows sit side by side in Look, after the visual rows, and close the
-/// category; the AutoEq refresh closes Behaviour.
+/// category; the AutoEq refresh and the Bluetooth adapter close Behaviour.
 #[test]
 fn the_graph_rows_close_the_look_category() {
     let look = rows(0);
@@ -1411,7 +1411,11 @@ fn the_graph_rows_close_the_look_category() {
         &[key("graphs"), key("graph_span"), key("link_span")]
     );
     assert!(!look.contains(&Setting::AutoEqRefresh));
-    assert_eq!(rows(2).last(), Some(&Setting::AutoEqRefresh));
+    let behaviour = rows(2);
+    assert_eq!(
+        &behaviour[behaviour.len() - 2..],
+        &[Setting::AutoEqRefresh, Setting::Adapter]
+    );
 }
 
 /// The VU reference row steps by one dB on `←` and `→`, either arrow the one way it points, stops

@@ -14,7 +14,7 @@ key = "input"
 label = "Input"
 kind = "select"
 key_reading = true
-values = { 1 = "RCA 1", 2 = "RCA 2" }
+values = { 1 = "Balanced", 2 = "Single-Ended" }
 
 [[control]]
 id = [3]

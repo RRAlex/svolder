@@ -40,6 +40,26 @@ pub(super) fn refresh_word(weeks: RefreshWeeks) -> String {
     }
 }
 
+/// What the Bluetooth adapter row says of the configured `adapter`: `first` for none, a name as
+/// it is, and an address by its last three pairs, which is what tells two dongles apart.
+pub(super) fn adapter_word(adapter: Option<&str>) -> String {
+    match adapter {
+        None => "first".to_string(),
+        Some(spec) if svolder_ble::adapters::is_address(spec) => {
+            format!("…{}", &spec[spec.len() - 8..])
+        }
+        Some(name) => name.to_string(),
+    }
+}
+
+/// Where the adapter lives in the configuration file, with what it holds now.
+pub(super) fn adapter_line(adapter: Option<&str>) -> String {
+    match adapter {
+        Some(adapter) => format!("adapter = \"{adapter}\""),
+        None => "adapter  (not set)".to_string(),
+    }
+}
+
 /// What the token row says while the token is on show in its box.
 const REVEALED: &str = "(revealed)";
 /// What a row says of a value the file leaves out.
@@ -197,6 +217,11 @@ pub fn explain(setting: Setting) -> Cow<'static, str> {
         }
         Setting::Mouse => return (MOUSE.help)(),
         Setting::HostAudio => return (HOST_AUDIO.help)(),
+        Setting::Adapter => {
+            "The Bluetooth adapter svolder connects through, by its address, so it stays the same \
+             dongle when the hciN numbers move. Enter lists the adapters with how loudly each \
+             hears your devices; Enter on one saves it. The daemon reads it when it starts."
+        }
         Setting::WebUi => {
             "The web UI serves this screen's controls to a browser on this computer or your \
              network. Enter opens its box: on and off, how far it reaches, a link or a pairing \
@@ -286,6 +311,7 @@ pub fn config_line(setting: Setting, tui: &TuiConfig) -> String {
         Setting::Mouse => key_line(&MOUSE, tui),
         Setting::HostAudio => key_line(&HOST_AUDIO, tui),
         Setting::AutoEqRefresh => "[autoeq] refresh_weeks".to_string(),
+        Setting::Adapter => "adapter".to_string(),
         Setting::WebUi => "[web] enabled, listen".to_string(),
         Setting::McpEnabled => "[mcp] enabled".to_string(),
         Setting::McpListen => "[mcp] listen".to_string(),

@@ -179,7 +179,7 @@ fn hati_lists_its_controls() {
     let (code, out, err) = svolder_env(&["status"], &[("SVOLDER_FAKE_PROFILE", "hati")]);
     assert_eq!(code, 0, "{err}");
     for line in [
-        "Status 2 u8 1   Input = 1 (RCA 1)",
+        "Status 2 u8 1   Input = 1 (Balanced)",
         "Status 10 bool false   Power = off",
         "Status 11.1 u8 1   Load capacitance = 1 (50 pF)",
         "Status 201 bool false   Remote lock = false",
@@ -1052,4 +1052,70 @@ fn profiles_show_lokimax_lists_its_actions_reads_and_settings() {
         out.contains("band1, band2, band3, band4, band5, band6"),
         "{out}"
     );
+}
+
+/// The two adapters the fake `adapters` verb is shown: one hears the device louder.
+const TWO_ADAPTERS: &str = "hci0=AA:BB:CC:DD:EE:01@-62,hci2=AA:BB:CC:DD:EE:02@-74";
+const BF3: &str = "schema = 1\nadapter = \"AA:BB:CC:DD:EE:02\"\n[[device]]\nname = \"BF3\"\nudid = \"0A1B2C3D4E5F6071\"\n";
+
+/// `adapters` lists every adapter with its address and what each hears of the configured
+/// devices, and marks the one the config names by its address, whatever its kernel number.
+#[test]
+fn adapters_lists_each_adapter_and_marks_the_one_in_use() {
+    let (code, out, err) = svolder_configured(
+        BF3,
+        &["adapters"],
+        &[
+            ("SVOLDER_TRANSPORT", "fake"),
+            ("SVOLDER_FAKE_ADAPTERS", TWO_ADAPTERS),
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.len(), 2, "{out}");
+    assert!(lines[0].starts_with("hci0  AA:BB:CC:DD:EE:01"), "{out}");
+    assert!(lines[0].contains("BF3 −62 dBm"), "{out}");
+    assert!(!lines[0].contains("in use"), "{out}");
+    assert!(lines[1].contains("BF3 −74 dBm"), "{out}");
+    assert!(lines[1].ends_with("✓ in use"), "{out}");
+}
+
+#[test]
+fn adapters_json_is_one_object_per_adapter() {
+    let (code, out, err) = svolder_configured(
+        BF3,
+        &["adapters", "--json"],
+        &[
+            ("SVOLDER_TRANSPORT", "fake"),
+            ("SVOLDER_FAKE_ADAPTERS", TWO_ADAPTERS),
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let rows: Vec<serde_json::Value> = out
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a JSON object"))
+        .collect();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["name"], "hci0");
+    assert_eq!(rows[0]["in_use"], false);
+    assert_eq!(rows[1]["address"], "AA:BB:CC:DD:EE:02");
+    assert_eq!(rows[1]["in_use"], true);
+    assert_eq!(rows[1]["heard"][0]["device"], "BF3");
+    assert_eq!(rows[1]["heard"][0]["rssi"], -74);
+}
+
+/// `--adapter` names the adapter in use by its address too.
+#[test]
+fn adapters_marks_the_adapter_the_flag_names_by_address() {
+    let (code, out, err) = svolder_configured(
+        BF3,
+        &["--adapter", "aa:bb:cc:dd:ee:01", "adapters", "--json"],
+        &[
+            ("SVOLDER_TRANSPORT", "fake"),
+            ("SVOLDER_FAKE_ADAPTERS", TWO_ADAPTERS),
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let first: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    assert_eq!(first["in_use"], true);
 }

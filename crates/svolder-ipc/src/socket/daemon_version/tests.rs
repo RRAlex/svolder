@@ -126,6 +126,8 @@ async fn a_version_reply_is_a_daemon_info_and_another_reply_is_nothing() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         },
     }));
@@ -142,6 +144,8 @@ async fn a_version_reply_is_a_daemon_info_and_another_reply_is_nothing() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         })
     );
@@ -183,6 +187,8 @@ async fn version_on_carries_the_log_with_the_info() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         },
     }));
@@ -202,6 +208,8 @@ async fn version_on_carries_the_log_with_the_info() {
                 features: Vec::new(),
                 config_changed: false,
                 config_missing: false,
+                adapter: None,
+                adapter_pinned: false,
                 activity: None,
             },
             log: Some("journal".into()),
@@ -256,6 +264,8 @@ fn a_daemon_supports_what_it_lists() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     };
     assert!(!info.supports("reasons"));

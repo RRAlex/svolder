@@ -38,6 +38,8 @@ fn a_version_reply_without_activity_decodes_to_none_and_one_with_it_round_trips(
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: Some(sent),
     })
     .unwrap();
@@ -58,6 +60,8 @@ fn a_version_reply_without_activity_decodes_to_none_and_one_with_it_round_trips(
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     })
     .unwrap();

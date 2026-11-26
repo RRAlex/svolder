@@ -148,6 +148,11 @@ pub struct DaemonInfo {
     /// Whether its configuration file is gone (`config_changed` is then true too); false for a
     /// daemon too old to say.
     pub config_missing: bool,
+    /// The kernel name of the adapter it holds its devices through, when it says.
+    pub adapter: Option<String>,
+    /// Whether its command line (`--adapter` or `SVOLDER_ADAPTER`) names the adapter, so the
+    /// file's `adapter` does not move it; false for a daemon too old to say.
+    pub adapter_pinned: bool,
     /// How many clients its MCP server and web UI have had, when it says.
     pub activity: Option<Activity>,
 }
@@ -258,6 +263,8 @@ pub async fn version_on(client: &mut Client) -> Result<VersionReply, Unanswered>
             features,
             config_changed,
             config_missing,
+            adapter,
+            adapter_pinned,
             activity,
         }) => Ok(VersionReply {
             info: DaemonInfo {
@@ -271,6 +278,8 @@ pub async fn version_on(client: &mut Client) -> Result<VersionReply, Unanswered>
                 features,
                 config_changed,
                 config_missing,
+                adapter,
+                adapter_pinned,
                 activity,
             },
             log,

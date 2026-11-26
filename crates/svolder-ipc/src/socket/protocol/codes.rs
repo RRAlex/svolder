@@ -99,6 +99,11 @@ pub const FEATURE_PRESET_WRITE: &str = "preset_write";
 /// end offers scenes only while it lists this.
 pub const FEATURE_SCENES: &str = "scenes";
 
+/// The feature a daemon lists when a reload that changes `adapter` moves it to the new adapter at
+/// once: it closes its links on the old one and connects every device again through the new, with
+/// no restart. A daemon without it reads `adapter` only when it starts.
+pub const FEATURE_ADAPTER_SWITCH: &str = "adapter_switch";
+
 /// Everything this build's daemon supports, as its `version` answer lists it: the one place the
 /// list is kept. A front end asks through `DaemonInfo::supports`.
 pub const FEATURES: &[&str] = &[
@@ -114,6 +119,7 @@ pub const FEATURES: &[&str] = &[
     FEATURE_PRESET_WRITE,
     FEATURE_SPEAKERS,
     FEATURE_SCENES,
+    FEATURE_ADAPTER_SWITCH,
 ];
 
 /// The message of the code-3 [`Response::Error`] a daemon answers a command with while it holds no

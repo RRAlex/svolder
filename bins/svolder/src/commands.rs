@@ -6,6 +6,7 @@
 //! `main` parses the command line (see [`crate::cli`]) and hands each verb to the module that
 //! carries it out. The modules:
 //!
+//! - [`adapters`]: `adapters`, the Bluetooth adapters, which is in use and what each hears.
 //! - [`capture`]: `capture`, one text file of what svolder learns about a device, scrubbed of ids.
 //! - [`config`]: `config path|show|template`, the configuration's location and contents.
 //! - [`daemon`]: `daemon status|logs|restart|stop|install|uninstall`, the background service.
@@ -34,6 +35,7 @@
 //! - [`token`]: `mcp token` and `web token`, the bearer tokens of the daemon's servers.
 //! - [`web`]: `web` and `web pair`, the web UI's link, code and pairing.
 
+pub(crate) mod adapters;
 pub(crate) mod capture;
 pub(crate) mod config;
 pub(crate) mod daemon;

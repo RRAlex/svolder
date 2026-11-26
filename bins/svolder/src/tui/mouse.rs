@@ -17,6 +17,7 @@ use ratatui::layout::{Position, Rect};
 use super::app::curve_drag::{self, Gesture};
 use super::app::glide::Bar;
 use super::app::{App, Intent, Ld, Pane, Screen, SettingsBox, Side, Stage, ToneRow, Xf};
+use super::boxes::connections::Modal;
 use super::boxes::device_presets;
 
 /// The longest two left presses on the same cell can be apart and still make a double-click:
@@ -114,6 +115,8 @@ pub enum Hit {
     Transport(usize),
     /// Select this row of the Settings box's category.
     SettingRow(usize),
+    /// Pick this adapter of the Bluetooth adapter list, an index into its rows.
+    AdapterRow(usize),
     /// The link the Web UI box shows, on every line it wraps to, which a click copies and opens.
     WebLink,
     /// The token the MCP token box shows, on every line it wraps to, which a click copies.
@@ -306,6 +309,8 @@ impl HitMap {
 pub enum MouseAction {
     /// Make the squirrel hop.
     Mascot,
+    /// Put the Bluetooth adapter list's cursor on this adapter: a first click only selects.
+    AdapterAt(usize),
     /// Focus row `1` of pane `0`, the way `Tab` then the arrow keys would.
     Focus(Pane, usize),
     /// Carry out this intent, the way a key that asks for it would.
@@ -704,12 +709,27 @@ pub fn resolve(hits: &HitMap, event: MouseEvent, app: &App) -> Option<MouseActio
 fn resolve_box_click(hits: &HitMap, event: MouseEvent, app: &App) -> Option<MouseAction> {
     let at = app.overlays.settings?;
     match *hits.hit_at(event.column, event.row)? {
+        // The adapter row has no arrows to click, so a second click on it opens its list.
+        Hit::SettingRow(row)
+            if row == at.row
+                && super::screens::settings::current(at)
+                    == super::screens::settings::Setting::Adapter =>
+        {
+            Some(MouseAction::Key(KeyCode::Enter))
+        }
         Hit::SettingRow(row) => Some(MouseAction::Setting(SettingsBox { row, ..at })),
         Hit::SettingPrev => Some(MouseAction::Key(KeyCode::Left)),
         Hit::SettingNext => Some(MouseAction::Key(KeyCode::Right)),
         Hit::EscMark => Some(MouseAction::Key(KeyCode::Esc)),
         Hit::WebLink => Some(MouseAction::Intent(Intent::OpenWebLink)),
         Hit::McpToken => Some(MouseAction::Intent(Intent::CopyToken)),
+        Hit::AdapterRow(at) => match app.overlays.conn.modal.as_ref()? {
+            Modal::Adapters(list) if list.at == at => list
+                .pick_at(at)
+                .map(|(address, name)| MouseAction::Intent(Intent::PickAdapter { address, name })),
+            Modal::Adapters(_) => Some(MouseAction::AdapterAt(at)),
+            _ => None,
+        },
         Hit::SettingCategory(category) => {
             Some(MouseAction::Setting(SettingsBox { category, row: 0 }))
         }
@@ -797,6 +817,7 @@ fn resolve_click(hits: &HitMap, x: u16, y: u16, app: &App) -> Option<MouseAction
         | Hit::SettingNext
         | Hit::SettingCategory(_)
         | Hit::WebLink
+        | Hit::AdapterRow(_)
         | Hit::McpToken => None,
     }
 }

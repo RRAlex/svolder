@@ -486,3 +486,17 @@ async fn the_owed_reload_never_holds_the_loop_and_a_direct_session_asks_nothing(
     );
     end.watching.close().await;
 }
+
+/// A tick tells the panics of tasks the run survived: the loop's own tick is what reaches the
+/// process's router.
+#[tokio::test]
+async fn a_tick_tells_a_background_task_panic() {
+    let (backend, _gate, app) = fake(SHORT_DEADLINE).await;
+    let mut watching = watching(backend, app, None);
+    crate::tui::terminal::note_background_panic(
+        "a background task panicked (svolder-tokio): the tick test",
+    );
+    on_tick(&mut watching).await;
+    let toast = watching.app.toast().expect("the panic is told");
+    assert!(toast.text.contains("the tick test"), "{}", toast.text);
+}

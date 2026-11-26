@@ -366,6 +366,8 @@ impl Handler for LogDaemon {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         }
     }
@@ -524,6 +526,8 @@ async fn status_prints_no_mismatch_for_a_daemon_of_its_own_version() {
                     features: Vec::new(),
                     config_changed: false,
                     config_missing: false,
+                    adapter: None,
+                    adapter_pinned: false,
                     activity: None,
                 },
                 _ => Response::Ack,
@@ -664,6 +668,8 @@ async fn status_gives_up_on_a_daemon_that_never_lists_its_devices() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         }),
     );
@@ -726,6 +732,8 @@ impl Handler for Says {
                 features: Vec::new(),
                 config_changed: self.config_changed,
                 config_missing: self.config_missing,
+                adapter: None,
+                adapter_pinned: false,
                 activity: None,
             },
             _ => Response::Ack,
@@ -851,6 +859,8 @@ impl Handler for ClientsDaemon {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: self.0,
         }
     }

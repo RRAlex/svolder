@@ -177,6 +177,8 @@ fn daemon_with_config(config: Option<&str>) -> DaemonInfo {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     }
 }
@@ -223,6 +225,7 @@ fn find_at(app: &App, width: u16, height: u16, needle: &str) -> (u16, u16) {
     panic!("{needle:?} is not drawn");
 }
 
+mod adapters;
 mod connect;
 mod look;
 mod mqtt;

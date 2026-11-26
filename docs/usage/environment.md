@@ -20,7 +20,7 @@ fails naming that target when the two have drifted.
 |----------|---------|---------------|
 | `SVOLDER_TRANSPORT` | svolder, svolderd | Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon`, `ble`, or `fake`. Default `auto` for `svolder`, `ble` for `svolderd`. |
 | `SVOLDER_NO_START` | svolder | `1` or `true` is `--no-start` (`0` or `false` is not): use only a daemon that already answers on the socket, and start no socket unit, no daemon and no direct BlueZ session; exit 3 when none answers. Overrides `--transport`. The GNOME indicator's clicks run with it. Unset by default. |
-| `SVOLDER_ADAPTER` | svolder, svolderd | Bluetooth adapter for a direct BlueZ session, e.g. `hci0`. Defaults to the configured `adapter`, else the first adapter BlueZ reports. |
+| `SVOLDER_ADAPTER` | svolder, svolderd | Bluetooth adapter for a direct BlueZ session, by name (`hci0`) or by address. Defaults to the configured `adapter`, else the first adapter BlueZ reports. |
 | `SVOLDER_SOCKET` | svolder, svolderd | Unix socket path to serve or connect to. Defaults to `$XDG_RUNTIME_DIR/svolder.sock`, then `/run/user/<uid>/svolder.sock`, then `/tmp/svolder-<uid>/svolder.sock`. |
 | `SVOLDER_FAKE_PROFILE` | svolder, svolderd | Profile the in-process fake device (`--transport fake`) uses. Default `gungnir2-v2`. |
 | `SVOLDER_FAKE_UNIT` | svolder, svolderd | Unit id (8 bytes, hex) the fake device reports. Default `0102030405060708`. |
@@ -52,6 +52,7 @@ fails naming that target when the two have drifted.
 | Variable | Read by | What it does |
 |----------|---------|---------------|
 | `SVOLDER_FAKE_MORE` | svolderd | More live fake devices beside the first, for `svolderd --transport fake`: `<profile>@<UNIT>`, comma-separated, each answering its own unit id (16 hex digits) with the code `1234` and firmware `3`. The other `SVOLDER_FAKE_*` knobs describe the first device alone, except `SVOLDER_FAKE_SIGNAL`, which plays on every device. The daemon lists a device only when a `[[device]]` block names its unit. Unset by default. |
+| `SVOLDER_FAKE_ADAPTERS` | svolder | The adapters `svolder adapters --transport fake` and the TUI's adapter list show: `<name>=<ADDRESS>@<dBm>`, comma-separated (`none` for an adapter that hears nothing), each hearing every configured device at its signal. Unset: one adapter, `hci0`, hearing everything at -60 dBm. |
 | `SVOLDER_FAKE_SEVER_AFTER_MS` | svolder, svolderd | Cuts the in-process fake device's first link this many milliseconds after it comes up, the way a device dropping the connection would, so a test can watch a reconnect. Unset by default. |
 | `SVOLDER_FAKE_GONE_AFTER_MS` | svolder, svolderd | Takes the in-process fake device off the air this many milliseconds after it starts: its link is cut and it is neither heard nor reached again, so a test can watch a device out of reach. Unset by default. |
 | `SVOLDER_FAKE_GONE_FILE` | svolder, svolderd | A path: the in-process fake device goes off the air, as with `SVOLDER_FAKE_GONE_AFTER_MS`, the moment a file appears there, so a test drops it on its own cue. Unset by default. |

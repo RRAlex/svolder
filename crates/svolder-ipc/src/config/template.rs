@@ -42,7 +42,7 @@ impl Config {
         );
         commented(
             &mut out,
-            "The Bluetooth adapter to talk through, named the way BlueZ names it.",
+            "The Bluetooth adapter to talk through: a name like hci0 or the adapter's address (the address stays with the dongle when the hciN numbers move).",
             "adapter",
             UNSET,
         );

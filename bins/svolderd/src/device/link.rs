@@ -18,6 +18,17 @@ use super::{Actor, Command, Commands, FirstAttempt};
 use crate::locks::locked;
 use crate::log;
 
+/// How many attempts in a row fail before the actor looks for an adapter that hears the device
+/// better: the one scan a streak earns.
+const POINTER_STREAK: u32 = 3;
+
+/// Whether the failure that just ended `failures` attempts in a row is the one that earns the
+/// pointer: the streak is long enough, and the failure is a connect that never came up. A refused
+/// passphrase or a device that is not there says nothing about the adapter.
+fn pointer_due(failures: u32, message: &str) -> bool {
+    failures == POINTER_STREAK && svolder_ble::adapters::is_connect_deadline(message)
+}
+
 /// How long the actor waits between failed discover-and-connect attempts, one step per
 /// consecutive failure: 2, 5, 15 and then 30 seconds, the last step repeating as long as the
 /// device stays away.
@@ -96,6 +107,10 @@ impl Actor {
             }
             match self.attempt(rx).await {
                 AttemptEnd::Stop => return false,
+                AttemptEnd::Connected if std::mem::take(&mut self.drop_due) => {
+                    self.release_for_adapter().await;
+                    self.failures = 0;
+                }
                 AttemptEnd::Connected => {
                     let refused = locked(&self.info).refused;
                     self.report_first(FirstAttempt::Connected { refused });
@@ -121,6 +136,9 @@ impl Actor {
                         RETRY_SCHEDULE[(self.failures as usize).min(RETRY_SCHEDULE.len() - 1)];
                     self.log_failure(&message, wait);
                     self.failures = self.failures.saturating_add(1);
+                    if pointer_due(self.failures, &message) {
+                        self.point_elsewhere();
+                    }
                     self.set_next_attempt(Some(tokio::time::Instant::now() + wait));
                     match self.idle(rx, wait).await {
                         Idled::Stop => return false,
@@ -133,6 +151,36 @@ impl Actor {
                 }
             }
         }
+    }
+
+    /// Let go of the link because the daemon moved to another adapter, saying so once.
+    async fn release_for_adapter(&mut self) {
+        log::info(&format!(
+            "{}: the adapter changed; connecting again through it",
+            self.name
+        ));
+        self.close().await;
+        let device = self.name.clone();
+        self.publish(Event::Connection {
+            device,
+            connected: false,
+        });
+    }
+
+    /// Where connects keep failing on an adapter and another one hears the device, say so in
+    /// the log, once per streak: the scan runs on a task of its own, so the actor's own
+    /// attempts and commands are not held for it. A transport with no adapter of its own (the
+    /// fake) has nothing to point away from.
+    fn point_elsewhere(&self) {
+        let Some(failing) = self.transport.adapter().map(str::to_string) else {
+            return;
+        };
+        let (name, unit) = (self.name.clone(), self.config.udid.clone());
+        tokio::spawn(async move {
+            if let Some(words) = svolder_ble::adapters::pointer_for(&failing, &name, &unit).await {
+                log::warn(&format!("{name}: {words}"));
+            }
+        });
     }
 
     /// Say how the first attempt ended, to a probe's caller, once.
@@ -188,6 +236,10 @@ impl Actor {
                 Woke::Command(Some((command, reply))) => {
                     let response = self.run_command(command).await;
                     let _ = reply.send(response);
+                    if std::mem::take(&mut self.drop_due) {
+                        self.release_for_adapter().await;
+                        return true;
+                    }
                     if self.release_after_refusal().await {
                         return true;
                     }
@@ -260,5 +312,23 @@ impl Actor {
         }
         self.set_connected(false);
         self.set_next_attempt(None);
+    }
+}
+
+#[cfg(test)]
+mod pointer_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_connect_deadline_at_the_streak_earns_the_pointer() {
+        let deadline = "connection failed: no connection within 20s: le-connection-abort-by-local";
+        assert!(pointer_due(POINTER_STREAK, deadline));
+        assert!(!pointer_due(POINTER_STREAK - 1, deadline));
+        assert!(!pointer_due(POINTER_STREAK + 1, deadline));
+        assert!(!pointer_due(
+            POINTER_STREAK,
+            "device passphrase was rejected"
+        ));
+        assert!(!pointer_due(POINTER_STREAK, "no matching device found"));
     }
 }

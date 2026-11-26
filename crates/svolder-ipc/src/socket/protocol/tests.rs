@@ -131,6 +131,8 @@ fn the_mqtt_status_round_trips_through_a_version_reply() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         };
         let back: Response = serde_json::from_str(&serde_json::to_string(&reply).unwrap())
@@ -161,6 +163,8 @@ fn the_mqtt_field_is_one_an_older_client_ignores_and_an_older_daemon_leaves_out(
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     })
     .unwrap();
@@ -186,6 +190,8 @@ fn the_mqtt_field_is_one_an_older_client_ignores_and_an_older_daemon_leaves_out(
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         }
     );
@@ -205,6 +211,8 @@ fn the_mqtt_field_is_one_an_older_client_ignores_and_an_older_daemon_leaves_out(
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         }
     );
@@ -226,6 +234,8 @@ fn the_config_path_is_additive() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     };
     let line = serde_json::to_string(&reply).unwrap();
@@ -249,6 +259,8 @@ fn the_config_path_is_additive() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         }
     );
@@ -290,6 +302,8 @@ fn the_mcp_field_is_additive() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         };
         let back: Response = serde_json::from_str(&serde_json::to_string(&reply).unwrap())
@@ -308,6 +322,8 @@ fn the_mcp_field_is_additive() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     })
     .unwrap();
@@ -327,6 +343,8 @@ fn the_mcp_field_is_additive() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         }
     );
@@ -369,6 +387,8 @@ fn the_web_field_is_additive() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         };
         let back: Response = serde_json::from_str(&serde_json::to_string(&reply).unwrap())
@@ -388,6 +408,8 @@ fn the_web_field_is_additive() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     };
     let line = serde_json::to_string(&silent).unwrap();
@@ -407,6 +429,8 @@ fn the_web_field_is_additive() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         }
     );
@@ -680,6 +704,8 @@ fn sample_response_replies() -> Vec<(&'static str, Reply)> {
                     features: Vec::new(),
                     config_changed: false,
                     config_missing: false,
+                    adapter: None,
+                    adapter_pinned: false,
                     activity: None,
                 },
             },
@@ -816,6 +842,8 @@ fn the_token_description_is_additive_and_carries_no_token() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     };
     let line = serde_json::to_string(&reply).unwrap();
@@ -852,6 +880,8 @@ fn the_token_description_is_additive_and_carries_no_token() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     })
     .unwrap();
@@ -873,6 +903,8 @@ fn version_reply_carries_the_log_and_decodes_without_it() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     };
     let line = serde_json::to_string(&reply).unwrap();
@@ -894,6 +926,8 @@ fn version_reply_carries_the_log_and_decodes_without_it() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     })
     .unwrap();
@@ -1112,6 +1146,8 @@ fn the_oldest_shapes_still_decode() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         }
     );
@@ -1230,6 +1266,8 @@ fn a_version_reply_carries_the_web_fields_and_decodes_without_them() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     };
     let line = serde_json::to_string(&new).unwrap();
@@ -1838,6 +1876,8 @@ fn config_changed_is_sent_only_when_true_and_an_older_reply_reads_unchanged() {
         features: Vec::new(),
         config_changed,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     };
     let quiet = serde_json::to_string(&reply(false)).unwrap();
@@ -1877,6 +1917,8 @@ fn config_missing_is_sent_only_when_true_and_an_older_reply_reads_there() {
         features: Vec::new(),
         config_changed: config_missing,
         config_missing,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     };
     let quiet = serde_json::to_string(&reply(false)).unwrap();
@@ -2035,4 +2077,26 @@ fn a_preset_write_request_round_trips() {
         serde_json::to_string(&written).unwrap(),
         r#"{"result":"preset_written","name":"Mine"}"#
     );
+}
+
+/// The adapter a daemon holds and whether its command line pins it are on the wire only when they
+/// say something, and a reply without them (an older daemon) reads as none and not pinned.
+#[test]
+fn the_daemons_adapter_is_sent_only_when_known_and_an_older_reply_reads_none() {
+    let older = r#"{"result":"version","version":"0.39.9"}"#;
+    match serde_json::from_str::<Response>(older).unwrap() {
+        Response::Version {
+            adapter,
+            adapter_pinned,
+            ..
+        } => assert_eq!((adapter, adapter_pinned), (None, false)),
+        other => panic!("{other:?}"),
+    }
+    let said = r#"{"result":"version","version":"0.39.10","adapter":"hci2","adapter_pinned":true}"#;
+    let reply = serde_json::from_str::<Response>(said).unwrap();
+    assert!(
+        matches!(&reply, Response::Version { adapter: Some(a), adapter_pinned: true, .. } if a == "hci2"),
+        "{reply:?}"
+    );
+    assert_eq!(serde_json::to_string(&reply).unwrap(), said);
 }

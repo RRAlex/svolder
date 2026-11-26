@@ -109,10 +109,12 @@ reaches the host's through the bind-mounted system bus.
 BlueZ adapter, bypassing any running daemon. `--adapter hciN` (or `SVOLDER_ADAPTER`) picks which
 controller to use; without it, a configured `adapter` (see
 ["Daemon and config"](daemon.md#daemon-and-config)) or the first adapter BlueZ reports is used.
+Wherever an adapter is named — `--adapter`, `SVOLDER_ADAPTER`, the `adapter` key, for the daemon too —
+it is named by kernel name (`hci0`) or by Bluetooth address (`AA:BB:CC:DD:EE:01`).
 
 ```
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
-      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session, by name (hci0) or by address. Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
 ```
 
 Using `--transport ble` requires the invoking user to be in the `bluetooth` group and the chosen
@@ -360,6 +362,37 @@ config or the command line named. `svolder doctor` grades every adapter present 
 configured device and warns when the configured `adapter` grades worse than another one on the host;
 the setup wizard's Adapter step does the same grading for a device it is adding and writes the best
 one into `adapter`.
+
+### Choosing an adapter
+
+With more than one adapter, which one is used matters more than it seems: two identical dongles can
+hear the same device at very different strengths, and a dongle that hears a device is not always
+one that can hold a link to it. `svolder adapters` lists every adapter with its address, its USB
+product and how loudly it hears each configured device; the TUI's Settings (Behaviour, Bluetooth
+adapter) shows the same list and `Enter` on a line saves that adapter.
+
+Name the adapter by its **address** in `adapter`. The `hciN` numbers are the kernel's and move when
+dongles are plugged in a different order or the machine restarts, so a config that names `hci2`
+may mean another dongle after a reboot, silently; the address stays with the hardware, and svolder
+looks up the `hciN` that has it every time a session starts. An address no adapter has is an error
+that lists the adapters there are; it is never a quiet fall back to another one. What svolder
+remembers for a device (the state file) is the address too. The daemon follows a changed `adapter`
+when it reloads (a Settings pick, `svolder daemon reload`, a hangup): it lets go of its links and
+its scans on the old adapter and connects every device again through the new one, with no restart,
+unless its own command line names the adapter.
+
+When connecting keeps failing on the adapter in use and another adapter hears the device, the
+failure says so, once per streak of failures (one short scan of every adapter, not one per attempt;
+the daemon writes it to its log):
+
+```
+hci2 hears BF3 at −74 dBm and cannot hold a link; hci0 hears it at −62 dBm: try adapter = "AA:BB:CC:DD:EE:01"
+```
+
+`svolder doctor` says the same in its Adapter grade row where the adapter in use does not hear the
+device and another one does; another adapter that only hears it louder is a line of information
+there. Doctor only reports: it never writes `adapter` for a reading. Nothing switches adapters on
+its own.
 
 When you read BlueZ state by hand on a host with several adapters, remember that `bluetoothctl`
 answers for its default controller only: run `bluetoothctl list`, then `select <adapter address>`,

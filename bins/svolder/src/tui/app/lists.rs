@@ -177,6 +177,9 @@ impl App {
     /// Turn the selected setting the other way, or ask for nothing on a row that steps through
     /// choices rather than turning.
     fn toggle_setting(&mut self) -> Vec<Intent> {
+        if self.selected_setting() == Some(Setting::Adapter) {
+            return self.open_adapters();
+        }
         if let Some(setting) = self.selected_setting().filter(|s| s.is_connection()) {
             return self.connection_step(setting);
         }
@@ -213,6 +216,9 @@ impl App {
         };
         if setting.is_connection() {
             return self.connection_step(setting);
+        }
+        if setting == Setting::Adapter {
+            return self.open_adapters();
         }
         let change = match setting {
             Setting::Key(key) => {

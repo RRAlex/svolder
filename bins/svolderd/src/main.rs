@@ -84,7 +84,7 @@ struct Args {
     /// Transport backend: `ble` (a real BlueZ adapter) or `fake` (in-process).
     #[arg(long, env = "SVOLDER_TRANSPORT", default_value = "ble")]
     transport: String,
-    /// Bluetooth adapter to use with --transport ble (e.g. hci0). Defaults to the first.
+    /// Bluetooth adapter to use with --transport ble, by name (hci0) or by address. Defaults to the first.
     #[arg(long, env = "SVOLDER_ADAPTER")]
     adapter: Option<String>,
     /// Log every command and status (the same as RUST_LOG=debug)
@@ -172,6 +172,10 @@ struct Claimed {
     /// releases the lock.
     lock: Option<std::fs::File>,
     transport: Arc<dyn Transport>,
+    /// What `transport` wraps, which a reload that changes `adapter` points elsewhere.
+    switch: Arc<svolder_ble::SwitchableTransport>,
+    /// The adapter the transport was opened on, as the command line or the file named it.
+    adapter: Option<String>,
     listener: Listener,
     /// The path a handed-over listener is bound to, when it has one.
     adopted_at: Option<PathBuf>,
@@ -245,7 +249,7 @@ async fn claim_socket(
 
     let adapter = args.adapter.clone().or_else(|| config.adapter.clone());
     let transport = match transport::make(&args.transport, adapter.as_deref(), registry).await {
-        Ok(transport) => transport,
+        Ok(transport) => Arc::new(svolder_ble::SwitchableTransport::new(transport)),
         Err(message) => {
             log::error(&message);
             return Err(ExitCode::from(3));
@@ -279,7 +283,9 @@ async fn claim_socket(
     Ok(Claimed {
         path,
         lock,
-        transport,
+        transport: Arc::clone(&transport) as Arc<dyn Transport>,
+        switch: transport,
+        adapter,
         listener,
         adopted_at,
     })
@@ -344,6 +350,12 @@ async fn start(
         config.clone(),
     )
     .with_config_stamp(stamp)
+    .with_adapter_switch(
+        Arc::clone(&claimed.switch),
+        args.transport.clone(),
+        args.adapter.is_some(),
+        claimed.adapter.clone(),
+    )
     .with_host_mode(host::HostMode::from_env())
     // The scene last recalled is kept in the state home, so it ranks first after a restart.
     .with_scenes_file(scenes::Scenes::state_path())

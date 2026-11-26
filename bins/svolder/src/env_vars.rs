@@ -47,8 +47,8 @@ const ENV_VARS: &[EnvVar] = &[
         name: "SVOLDER_ADAPTER",
         read_by: "svolder, svolderd",
         dev_only: false,
-        what: "Bluetooth adapter for a direct BlueZ session, e.g. `hci0`. Defaults to the \
-               configured `adapter`, else the first adapter BlueZ reports.",
+        what: "Bluetooth adapter for a direct BlueZ session, by name (`hci0`) or by address. \
+               Defaults to the configured `adapter`, else the first adapter BlueZ reports.",
     },
     EnvVar {
         name: "SVOLDER_SOCKET",
@@ -81,6 +81,15 @@ const ENV_VARS: &[EnvVar] = &[
                knobs describe the first device alone, except `SVOLDER_FAKE_SIGNAL`, which \
                plays on every device. The daemon lists a device only when a `[[device]]` \
                block names its unit. Unset by default.",
+    },
+    EnvVar {
+        name: "SVOLDER_FAKE_ADAPTERS",
+        read_by: "svolder",
+        dev_only: true,
+        what: "The adapters `svolder adapters --transport fake` and the TUI's adapter list show: \
+               `<name>=<ADDRESS>@<dBm>`, comma-separated (`none` for an adapter that hears \
+               nothing), each hearing every configured device at its signal. Unset: one \
+               adapter, `hci0`, hearing everything at -60 dBm.",
     },
     EnvVar {
         name: "SVOLDER_FAKE_FIRMWARE",

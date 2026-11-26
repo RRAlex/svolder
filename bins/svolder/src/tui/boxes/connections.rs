@@ -167,6 +167,40 @@ pub enum Modal {
     Web(WebBox),
     /// The MCP token box.
     Token,
+    /// The Bluetooth adapter list.
+    Adapters(AdapterList),
+}
+
+/// The Bluetooth adapter list: what every adapter hears, once a short scan has run, and which
+/// row the cursor is on.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AdapterList {
+    /// One row per adapter; `None` while the scan runs.
+    pub rows: Option<Vec<crate::commands::adapters::Row>>,
+    /// Why the adapters could not be listed.
+    pub failed: Option<String>,
+    /// What is wrong with the adapter that was named, said under the table.
+    pub note: Option<String>,
+    /// The row the cursor is on.
+    pub at: usize,
+}
+
+impl AdapterList {
+    /// What picking the row at `at` saves: the adapter's address, or its name where BlueZ gave
+    /// none, and its name.
+    pub fn pick_at(&self, at: usize) -> Option<(String, String)> {
+        let row = self.rows.as_ref()?.get(at)?;
+        let saved = match row.adapter.address.is_empty() {
+            true => row.adapter.name.clone(),
+            false => row.adapter.address.clone(),
+        };
+        Some((saved, row.adapter.name.clone()))
+    }
+
+    /// What picking the row under the cursor saves.
+    pub fn pick(&self) -> Option<(String, String)> {
+        self.pick_at(self.at)
+    }
 }
 
 /// A line being typed into: its text and where the cursor sits, in characters.
@@ -229,6 +263,8 @@ pub struct Connections {
     /// The daemon's line saying its configuration file changed since its last reload, while it
     /// says so.
     pub config_changed: Option<String>,
+    /// The `adapter` key as the file holds it.
+    pub adapter: Option<String>,
     /// What is open over the rows.
     pub modal: Option<Modal>,
     /// Whether the password line shows what is typed in it (Tab) rather than a bullet each.
@@ -252,6 +288,7 @@ impl Connections {
     pub fn load_with(&mut self, config: &Config, password_in_env: bool) {
         self.mcp = config.mcp.clone();
         self.web = config.web.clone();
+        self.adapter = config.adapter.clone();
         self.mqtt = MqttView {
             enabled: config.mqtt.enabled,
             host: config.mqtt.host.clone(),
@@ -311,6 +348,26 @@ impl Connections {
     pub fn expire(&mut self, now: Instant) {
         if self.revealed.as_ref().is_some_and(|r| now >= r.until) {
             self.hide_token();
+        }
+    }
+
+    /// Take what a survey of the adapters came to into the list that waits for it: the cursor
+    /// starts on the adapter in use. A list that was closed meanwhile takes nothing.
+    pub fn adapters_found(&mut self, found: Result<crate::commands::adapters::Survey, String>) {
+        let Some(Modal::Adapters(list)) = self.modal.as_mut() else {
+            return;
+        };
+        match found {
+            Ok(survey) => {
+                list.at = survey.rows.iter().position(|row| row.in_use).unwrap_or(0);
+                list.rows = Some(survey.rows);
+                list.note = survey.note;
+                list.failed = None;
+            }
+            Err(why) => {
+                list.rows = None;
+                list.failed = Some(why);
+            }
         }
     }
 

@@ -213,9 +213,9 @@ fn a_device_with_no_tone_control_has_a_blank_preset_line() {
     assert_eq!(line.spans.iter().map(Span::width).sum::<usize>(), 0);
 }
 
-/// The computer side's Crossfeed row sits at the bottom of the pane whatever its height: the
-/// Model and Preset rows under it go first when the pane is short, then the table's rows, scrolled
-/// to keep the focused point in view; the row itself always stays.
+/// The computer side's Crossfeed row follows the table, after a blank row where the pane has one
+/// to spare: the Model and Preset rows under it go first when the pane is short, then the table's
+/// rows, scrolled to keep the focused point in view; the row itself always stays.
 #[test]
 fn a_short_tone_pane_gives_up_the_model_and_preset_rows_first_and_the_row_stays() {
     use crate::tui::app::Screen;
@@ -231,15 +231,15 @@ fn a_short_tone_pane_gives_up_the_model_and_preset_rows_first_and_the_row_stays(
         let plain: Vec<String> = pane.lines.iter().map(|l| l.to_string()).collect();
         (pane.lines.len(), plain, pane.crossfeed.map(|row| row.line))
     };
-    // tall: blank, row, Model, Preset at the very bottom
+    // tall: blank, row, Model, Preset follow the two points; the spare rows fall below
     let (len, plain, row) = kinds(14);
-    assert_eq!(len, 14, "{plain:#?}");
-    assert_eq!(row, Some(11));
+    assert_eq!(len, 10, "{plain:#?}");
+    assert_eq!(row, Some(7));
     assert!(
-        plain[12].contains("Model") && plain[12].contains("Bauer"),
+        plain[8].contains("Model") && plain[8].contains("Bauer"),
         "{plain:#?}"
     );
-    assert!(plain[13].contains("Preset"), "{plain:#?}");
+    assert!(plain[9].contains("Preset"), "{plain:#?}");
     // 9 rows is the least that keeps them: 4 of head, a point, a blank, row, Model, Preset
     let (len, plain, _) = kinds(9);
     assert_eq!((len, plain[7].contains("Model")), (9, true), "{plain:#?}");
@@ -797,4 +797,145 @@ fn a_folded_preset_line_counts_points_and_names_custom() {
     assert!(preset_line(8, None).ends_with("custom \u{b7} 8 points"));
     assert_eq!(preset_line(0, None).trim_start(), "Preset  custom");
     assert!(preset_line(0, Some("Bass")).ends_with("Preset  Bass"));
+}
+
+/// The rows under the computer's table follow it, one blank row between, and the pane's spare
+/// rows fall at its bottom: a short table leaves no empty rows before Loudness.
+#[test]
+fn the_rows_under_the_table_follow_it_and_the_spare_rows_fall_at_the_bottom() {
+    let size = (80, 24);
+    let app = fold_app(true, 3, size);
+    let rows = pane_rows(&app, size);
+    let last_point = rows
+        .iter()
+        .rposition(|row| row.contains(" Hz") && row.contains(" dB"))
+        .expect("a point");
+    let loudness = rows
+        .iter()
+        .position(|row| row.contains("Loudness"))
+        .expect("the Loudness row");
+    assert_eq!(loudness, last_point + 2, "one blank row only: {rows:#?}");
+    assert!(rows[last_point + 1].trim().is_empty(), "{rows:#?}");
+    // the Space row and its sub-rows follow the readout with no gap, then the pane's spare rows
+    let preset = rows
+        .iter()
+        .rposition(|row| row.contains("Preset"))
+        .expect("the crossfeed Preset row");
+    assert!(
+        rows[preset + 1..preset + 3]
+            .iter()
+            .all(|row| row.trim().is_empty()),
+        "the pane's last rows are blank: {rows:#?}"
+    );
+    // the lines themselves stop at the last row they hold
+    let lines = lines_at(&app, (38, 18));
+    assert!(lines.len() < 18, "{lines:#?}");
+    assert!(lines[lines.len() - 1].contains("Preset"), "{lines:#?}");
+}
+
+/// In a tall pane with the EQ on and the Space off, the bottom-right corner of the Tone pane is
+/// free for the squirrel's home.
+#[test]
+fn a_tall_pane_with_the_eq_on_leaves_the_squirrel_its_corner() {
+    for size in [(80, 40), (120, 50)] {
+        let mut app = mockup_app();
+        let mut eq = crate::tui::test_support::computer_eq_stages(crate::tui::app::Space::Off);
+        eq.on = true;
+        eq.points.truncate(3);
+        app.host.computer.eq = Some(eq);
+        app.flip_side();
+        drop(frame(&app, size.0, size.1));
+        assert!(
+            crate::tui::decoration::mascot::draw::home_has_room(
+                Rect::new(0, 0, size.0, size.1),
+                &app,
+                &truecolour_theme(),
+            ),
+            "{size:?}: {:#?}",
+            pane_rows(&app, size)
+        );
+    }
+}
+
+/// With more points than fit, the table scrolls and every row under it is drawn, down to the
+/// pane's last row, as before.
+#[test]
+fn a_table_longer_than_the_pane_still_fills_it_with_the_rows_under_it() {
+    let app = fold_app(true, 8, (80, 24));
+    let lines = lines_at(&app, (38, 16));
+    assert_eq!(lines.len(), 16, "{lines:#?}");
+    let tail: Vec<&String> = lines[lines.len() - 5..].iter().collect();
+    assert!(tail[0].trim().is_empty(), "{lines:#?}");
+    assert!(tail[1].contains("Loudness"), "{lines:#?}");
+    assert!(tail[2].contains("Space"), "{lines:#?}");
+    assert!(tail[3].contains("Model"), "{lines:#?}");
+    assert!(tail[4].contains("Preset"), "{lines:#?}");
+}
+
+/// A click on the Loudness row and on the Space row, where the rows now sit, reaches them.
+#[test]
+fn a_click_on_the_loudness_and_space_rows_at_their_new_lines_acts_on_them() {
+    use crate::tui::mouse::MouseAction;
+    let size = (80, 24);
+    let app = fold_app(true, 3, size);
+    let (buffer, hits) = crate::tui::test_support::drawn(&app, size.0, size.1);
+    let rows = text(&buffer);
+    let at = |word: &str| {
+        u16::try_from(
+            rows.iter()
+                .position(|row| row.contains(word))
+                .unwrap_or_else(|| panic!("a {word} row: {rows:#?}")),
+        )
+        .expect("row")
+    };
+    let x = CONTROLS_WIDTH + 4;
+    let loudness = at("Loudness");
+    // right under the table: the last point's row, a blank row, then Loudness
+    let last_point = rows[..usize::from(loudness)]
+        .iter()
+        .rposition(|row| row.contains(" Hz "))
+        .expect("a point row above Loudness");
+    assert_eq!(usize::from(loudness), last_point + 2, "{rows:#?}");
+    assert!(matches!(hits.hit_at(x, loudness), Some(Hit::Ld(_))));
+    let space = rows
+        .iter()
+        .position(|row| row.contains("Crossfeed") && row.contains('\u{2039}'))
+        .map(|y| u16::try_from(y).expect("row"))
+        .expect("the Space row");
+    assert!(matches!(hits.hit_at(x, space), Some(Hit::Crossfeed(_))));
+    for y in [loudness, space] {
+        let action = crate::tui::mouse::resolve(&hits, crate::tui::test_support::click(x, y), &app);
+        assert!(
+            matches!(
+                action,
+                Some(MouseAction::Ld { .. } | MouseAction::Crossfeed { .. })
+            ),
+            "row {y}: {action:?}"
+        );
+    }
+}
+
+/// With loudness and no crossfeed, the Loudness row follows the table after one blank row where
+/// the pane has a row to spare, and the leftover rows fall at the bottom.
+#[test]
+fn a_loudness_only_pane_keeps_its_blank_row_under_the_table() {
+    let mut app = fold_app(true, 3, (80, 24));
+    let mut eq = app.host.computer.eq.as_deref().cloned().expect("eq");
+    eq.crossfeed = None;
+    app.host.computer.eq = Some(Box::new(eq));
+    let shown = lines_at(&app, (38, 16));
+    let loudness = shown
+        .iter()
+        .position(|row| row.contains("Loudness"))
+        .expect("a Loudness row");
+    let last_point = shown[..loudness]
+        .iter()
+        .rposition(|row| row.contains(" Hz "))
+        .expect("a point row");
+    assert_eq!(loudness, last_point + 2, "{shown:#?}");
+    assert!(shown[last_point + 1].trim().is_empty(), "{shown:#?}");
+    assert!(
+        shown.len() < 16,
+        "the leftover rows are not drawn as padding: {shown:#?}"
+    );
 }

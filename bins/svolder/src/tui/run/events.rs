@@ -315,6 +315,8 @@ pub(super) async fn execute(
         | Intent::Tui(_)
         | Intent::AutoEqRefresh(_)
         | Intent::Connection(_)
+        | Intent::ListAdapters
+        | Intent::PickAdapter { .. }
         | Intent::RevealToken
         | Intent::CopyToken
         | Intent::RotateToken

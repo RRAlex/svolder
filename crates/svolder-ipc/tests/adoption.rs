@@ -47,6 +47,8 @@ impl Handler for Answering {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            adapter: None,
+            adapter_pinned: false,
             activity: None,
         }
     }

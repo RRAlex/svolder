@@ -47,10 +47,10 @@ pub use autoeq::{
 pub(crate) use codes::FEATURE_REASONS;
 pub use codes::{
     CODE_COMPUTER_UNAVAILABLE, CODE_LINK, CODE_NOT_FOUND, CODE_TIMEOUT, CODE_UNKNOWN_REQUEST,
-    CODE_USAGE, FEATURE_AUTOEQ, FEATURE_DEVICE_CRUD, FEATURE_GUEST_SWITCH, FEATURE_HOST_COVER,
-    FEATURE_MQTT_SET, FEATURE_PRESET_WRITE, FEATURE_SCENES, FEATURE_SERVER_SWITCH,
-    FEATURE_SPEAKERS, FEATURE_UNKNOWN_REQUEST_CODE, FEATURE_WALK, FEATURES, NO_DEVICES_CONFIGURED,
-    NOT_CONNECTED, NOT_FOUND_YET, WEB_OFF, not_found_yet,
+    CODE_USAGE, FEATURE_ADAPTER_SWITCH, FEATURE_AUTOEQ, FEATURE_DEVICE_CRUD, FEATURE_GUEST_SWITCH,
+    FEATURE_HOST_COVER, FEATURE_MQTT_SET, FEATURE_PRESET_WRITE, FEATURE_SCENES,
+    FEATURE_SERVER_SWITCH, FEATURE_SPEAKERS, FEATURE_UNKNOWN_REQUEST_CODE, FEATURE_WALK, FEATURES,
+    NO_DEVICES_CONFIGURED, NOT_CONNECTED, NOT_FOUND_YET, WEB_OFF, not_found_yet,
 };
 pub use device_config::{ConfiguredDevice, DeviceConfigOp, PassphraseKind, ProfileChoice};
 pub use host_cover::{COVER_CHUNK_BYTES, CoverReader, cover_chunk};
@@ -449,6 +449,14 @@ pub enum Response {
         /// absent while it is there, and from a daemon too old to say
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         config_missing: bool,
+        /// the kernel name of the Bluetooth adapter the daemon holds its devices through (`hci0`);
+        /// absent from a daemon that does not say, and when it has no adapter name to give
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        adapter: Option<String>,
+        /// whether the daemon's command line (`--adapter` or `SVOLDER_ADAPTER`) names the adapter,
+        /// so the file's `adapter` does not move it; absent while it does not
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        adapter_pinned: bool,
         /// how many clients the MCP server and the web UI have had, as counts; absent from a
         /// daemon too old to count
         #[serde(default, skip_serializing_if = "Option::is_none")]

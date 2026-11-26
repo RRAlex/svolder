@@ -50,8 +50,8 @@ use clap::Parser;
 use backend::Globals;
 use cli::{Cli, Command};
 use commands::{
-    capture, config, daemon, decode, demo, device, doctor, hops, host_eq, identify, mqtt, profiles,
-    scene, token, web,
+    adapters, capture, config, daemon, decode, demo, device, doctor, hops, host_eq, identify, mqtt,
+    profiles, scene, token, web,
 };
 use recovery::Failure;
 
@@ -177,6 +177,7 @@ async fn run(cli: Cli, demo_socket: Option<PathBuf>) -> Result<ExitCode, String>
             Ok(doctor::run(&g, doctor::DoctorOpts { json, yes, dev }).await)
         }
         Command::Scan { timeout, json } => device::scan(&g, timeout, json).await,
+        Command::Adapters { timeout, json } => adapters::run(&g, timeout, json).await,
         Command::Tui {
             no_color,
             demo: true,

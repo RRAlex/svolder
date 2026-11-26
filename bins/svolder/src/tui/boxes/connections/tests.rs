@@ -108,6 +108,8 @@ fn the_daemon_says_where_it_reads_and_the_rows_follow() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     };
     let mut conn = Connections::default();
@@ -163,6 +165,8 @@ fn described(kind: TokenKind, path: Option<&str>, tail: &str) -> DaemonInfo {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     }
 }
@@ -271,6 +275,8 @@ fn no_daemon_or_an_older_reply_leaves_the_sessions_own_reading() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        adapter: None,
+        adapter_pinned: false,
         activity: None,
     };
     conn.daemon_said(&older, Path::new(OWN_CONFIG));

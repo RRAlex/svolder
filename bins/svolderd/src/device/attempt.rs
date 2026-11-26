@@ -64,7 +64,10 @@ impl Actor {
     /// its task keeps running when the arm is dropped, so no connect is ever orphaned; the
     /// readings the attempt took away are still answered from `last_state`.
     pub(super) async fn attempt(&mut self, rx: &mut Commands) -> AttemptEnd {
-        // There is nothing to wait for while the attempt this starts is running.
+        // There is nothing to wait for while the attempt this starts is running. A reconnect
+        // asked for before it started is answered by it, since it goes through the transport as
+        // it stands now; one that arrives while it runs may be for a link it opened on the old.
+        self.drop_due = false;
         self.set_next_attempt(None);
         if let Some(session) = self.session.as_ref() {
             self.last_state = session.state().clone();

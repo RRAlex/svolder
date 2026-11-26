@@ -238,20 +238,28 @@ impl Guard {
     /// The terminal's own title goes onto its title stack on the way in and comes back off it
     /// on the way out, so a tab the meters renamed reads as it did before svolder ran.
     ///
-    /// Installs a panic hook ahead of every other one so a panic mid-draw still restores the
-    /// terminal before the default hook prints its message. It turns mouse capture off first,
-    /// drains and discards input and puts the title back, as [`Guard::drop`] does, so the shell
-    /// the panic drops back into isn't left swallowing clicks; a terminal that rejects one of
-    /// those sequences is no reason not to restore the rest, so its answer is dropped.
+    /// Installs a panic hook ahead of every other one so a panic that ends the run, one on this
+    /// thread, still restores the terminal before the default hook prints its message. It turns
+    /// mouse capture off first, drains and discards input and puts the title back, as
+    /// [`Guard::drop`] does, so the shell the panic drops back into isn't left swallowing clicks;
+    /// a terminal that rejects one of those sequences is no reason not to restore the rest, so
+    /// its answer is dropped. A panic on any other thread (a task the runtime catches, the run
+    /// goes on) restores nothing and prints nothing: the loop says it in a toast
+    /// ([`say_background_panics`]). Where every panic aborts (`panic = "abort"`) none is survived,
+    /// so every one restores the terminal first, whatever thread it is on.
     pub fn enter(mouse: bool) -> std::io::Result<Guard> {
-        let hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            mouse_off_then_flush(&mut Mouse { on: true }, &mut StdinFlush);
-            restore_title();
-            let _ = ratatui::try_restore();
-            hook(info);
-        }));
-        let terminal = ManuallyDrop::new(open_terminal()?);
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(routing_hook(
+            &ROUTER,
+            || {
+                mouse_off_then_flush(&mut Mouse { on: true }, &mut StdinFlush);
+                restore_title();
+                let _ = ratatui::try_restore();
+            },
+            previous,
+            |left| print_left(&left, &mut std::io::stderr()),
+        ));
+        let terminal = ManuallyDrop::new(ROUTER.hold(open_terminal)?);
         let mut guard = Guard {
             terminal,
             mouse: Mouse::default(),
@@ -260,6 +268,178 @@ impl Guard {
         guard.mouse.set_mouse(mouse)?;
         title::emit(&title::push_title());
         Ok(guard)
+    }
+}
+
+/// How many background panics wait to be told at most; a loop of them says the first few.
+const BACKGROUND_PANICS_KEPT: usize = 8;
+
+/// Where a panic goes while the TUI holds the terminal: the thread that holds it, and what the
+/// panics of every other thread said.
+///
+/// A panic hook runs on the panicking thread, before the unwind, whatever catches it later. The
+/// run is drawn and read on the thread that entered the terminal (`main` runs the runtime's
+/// `block_on` there; the runtime's workers and blocking threads are others), so a panic on that
+/// thread ends the run and the terminal comes back first, while one on any other thread is a
+/// task the runtime catches: the run goes on, so the screen is left alone and the words wait
+/// for the loop to say them.
+pub(super) struct PanicRouter {
+    /// The thread that holds the terminal, from [`Guard::enter`] to [`Guard::drop`].
+    draw: std::sync::Mutex<Option<std::thread::ThreadId>>,
+    /// What other threads' panics said, oldest first.
+    background: std::sync::Mutex<Vec<String>>,
+}
+
+/// The process's own router, the one [`Guard::enter`]'s hook reports to.
+static ROUTER: PanicRouter = PanicRouter::new();
+
+impl PanicRouter {
+    pub(super) const fn new() -> PanicRouter {
+        PanicRouter {
+            draw: std::sync::Mutex::new(None),
+            background: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The calling thread holds the terminal from now on.
+    fn claim(&self) {
+        *self.draw.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::thread::current().id());
+    }
+
+    /// The calling thread holds what `open` opens: claimed before it runs, so a panic while it
+    /// runs restores, and let go again when it fails, so the plain prompts a caller falls back to
+    /// do not swallow later panics of other threads with no loop to tell them.
+    fn hold<T>(&self, open: impl FnOnce() -> std::io::Result<T>) -> std::io::Result<T> {
+        self.claim();
+        open().inspect_err(|_| self.release())
+    }
+
+    /// The terminal is given back: every panic goes the way it went before.
+    fn release(&self) {
+        *self.draw.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// What panics on other threads said since the last call.
+    pub(super) fn take(&self) -> Vec<String> {
+        std::mem::take(&mut *self.background.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    /// Send one panic, on thread `here`, its way: with no terminal held, to `previous` alone;
+    /// on the thread that holds it, or when `fatal` (no panic is survived, so any thread's ends
+    /// the run), `restore` and then `previous`; on any other, to the list `take` reads, and
+    /// nowhere else. Answers whether the panic ended the run, so what is left in the list
+    /// should be said now.
+    pub(super) fn route(
+        &self,
+        here: std::thread::ThreadId,
+        fatal: bool,
+        said: impl FnOnce() -> String,
+        restore: impl FnOnce(),
+        previous: impl FnOnce(),
+    ) -> bool {
+        let draw = *self.draw.lock().unwrap_or_else(|e| e.into_inner());
+        match draw {
+            None => {
+                previous();
+                false
+            }
+            Some(draw) if fatal || draw == here => {
+                restore();
+                previous();
+                true
+            }
+            Some(_) => {
+                let mut kept = self.background.lock().unwrap_or_else(|e| e.into_inner());
+                if kept.len() < BACKGROUND_PANICS_KEPT {
+                    kept.push(said());
+                }
+                false
+            }
+        }
+    }
+}
+
+type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync + 'static>;
+
+/// The hook that sends each panic through `router`, `restore` and `previous` being what
+/// [`PanicRouter::route`] calls.
+pub(super) fn routing_hook(
+    router: &'static PanicRouter,
+    restore: impl Fn() + Send + Sync + 'static,
+    previous: PanicHook,
+    left: impl Fn(Vec<String>) + Send + Sync + 'static,
+) -> PanicHook {
+    Box::new(move |info| {
+        let ended = router.route(
+            std::thread::current().id(),
+            cfg!(panic = "abort"),
+            || {
+                let thread = std::thread::current();
+                format!(
+                    "a background task panicked ({}): {}",
+                    thread.name().unwrap_or("unnamed"),
+                    info.to_string().replace('\n', " ")
+                )
+            },
+            &restore,
+            || previous(info),
+        );
+        if ended {
+            // Background panics nobody got to say: a later panic or a poisoned lock would
+            // otherwise lose its cause.
+            left(router.take());
+        }
+    })
+}
+
+impl PanicRouter {
+    /// Put what other threads' panics said since the last call in a toast on `app`.
+    pub(super) fn say_to(&self, app: &mut super::app::App) {
+        let panics = self.take();
+        if !panics.is_empty() {
+            app.warn(panics.join(" | "));
+        }
+    }
+}
+
+// Tests tick in parallel: each test thread reads a list of its own, so one test's tick cannot
+// take the panic another test noted. The run reads the process's list.
+#[cfg(test)]
+thread_local! {
+    static TICKED: &'static PanicRouter = Box::leak(Box::new(PanicRouter::new()));
+}
+
+/// The list a tick reads the panics of other threads from.
+fn ticked() -> &'static PanicRouter {
+    #[cfg(test)]
+    {
+        TICKED.with(|router| *router)
+    }
+    #[cfg(not(test))]
+    {
+        &ROUTER
+    }
+}
+
+/// Put a panic of another thread on the list a tick reads, as the hook would.
+#[cfg(test)]
+pub(super) fn note_background_panic(said: &str) {
+    ticked()
+        .background
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(said.to_string());
+}
+
+/// Say the panics of tasks the run survived, once each, in a toast on `app`.
+pub(super) fn say_background_panics(app: &mut super::app::App) {
+    ticked().say_to(app);
+}
+
+/// Print the panics of other threads the run ended without saying, after the terminal is back.
+pub(super) fn print_left(lines: &[String], err: &mut impl std::io::Write) {
+    for line in lines {
+        let _ = writeln!(err, "{line}");
     }
 }
 
@@ -278,11 +458,13 @@ impl Drop for Guard {
     ///
     /// Nothing here prints or panics on a terminal that has hung up: every answer is dropped.
     fn drop(&mut self) {
+        ROUTER.release();
         mouse_off_then_flush(&mut self.mouse, &mut StdinFlush);
         restore_title();
         leave_screen(&mut self.terminal, || {
             let _ = ratatui::try_restore();
         });
+        print_left(&ROUTER.take(), &mut std::io::stderr());
     }
 }
 

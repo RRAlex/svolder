@@ -18,6 +18,7 @@ fn writes_from_a_list(intent: &Intent) -> bool {
         Intent::Tui(_)
             | Intent::AutoEqRefresh(_)
             | Intent::Connection(_)
+            | Intent::PickAdapter { .. }
             | Intent::DefaultDevice(_)
             | Intent::UpdateDevice(..)
             | Intent::SavePreset(_)
@@ -77,6 +78,8 @@ impl App {
             | Intent::Tui(_)
             | Intent::AutoEqRefresh(_)
             | Intent::Connection(_)
+            | Intent::ListAdapters
+            | Intent::PickAdapter { .. }
             | Intent::RevealToken
             | Intent::CopyToken
             | Intent::RotateToken

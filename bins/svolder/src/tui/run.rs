@@ -26,6 +26,7 @@
 //! - [`open`]: what opens a device for the TUI.
 //! - [`reopen`]: the open and reopen a start or a switch goes through, and where none lands.
 //! - [`watching`]: what the loop is watching.
+//! - [`adapters`]: what the loop does for the Bluetooth adapter list.
 //! - [`web_box`]: what the loop does for the Web UI box.
 
 use std::future::Future;
@@ -63,6 +64,7 @@ use super::render::FrameAreas;
 use super::terminal::{MouseCapture, SyncEdge};
 use super::widgets::hyperlink;
 
+mod adapters;
 mod computer;
 mod connect;
 mod devices;
@@ -766,6 +768,13 @@ where
         {
             web_check_back(&mut watching, checked);
         }
+        // The adapter list's scan came back.
+        found = adapters::recv(&mut watching.adapters_scan), if watching.adapters_scan.is_some() => {
+            watching.adapters_scan = None;
+            if let Some(found) = found {
+                watching.app.overlays.conn.adapters_found(found);
+            }
+        }
         // The config box asks for its first read as it opens, then again on its own clock.
         _ = std::future::ready(()), if setup::first_due(&watching) => {
             setup::read(&mut watching);
@@ -1034,6 +1043,8 @@ where
 /// A tick ages what is on screen, and sends what the keys held back.
 async fn on_tick(watching: &mut Watching) {
     watching.app.tick(Instant::now());
+    // A task the runtime caught the panic of is not the run's end: the toast says it.
+    super::terminal::say_background_panics(&mut watching.app);
     super::start::say_daemon_gone(
         &mut watching.app,
         crate::commands::demo::daemon_gone(),

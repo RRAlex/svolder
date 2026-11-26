@@ -1619,3 +1619,170 @@ async fn a_devices_row_lists_the_key_readings_signal_first() {
     daemon.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A daemon over the fake device that follows `adapter` through reloads, reading `config`.
+fn following(config: &std::path::Path) -> Arc<Daemon> {
+    let base = daemon();
+    let switch = Arc::new(svolder_ble::SwitchableTransport::new(Arc::clone(
+        &base.transport,
+    )));
+    let held = Config::load_from(config).unwrap_or_default();
+    Daemon::new(
+        Arc::clone(&switch) as Arc<dyn svolder_ble::Transport>,
+        read(&base.registry).clone(),
+        config.to_path_buf(),
+        config.with_file_name("profiles"),
+        PathBuf::from("/nonexistent/svolder.sock"),
+        held,
+    )
+    .with_adapter_switch(switch, "fake".to_string(), false, None)
+    .shared()
+}
+
+/// What a daemon's `version` answer says of its adapter.
+async fn adapter_said(daemon: &Daemon) -> (Option<String>, bool) {
+    match daemon.handle(Request::Version).await {
+        Response::Version {
+            adapter,
+            adapter_pinned,
+            ..
+        } => (adapter, adapter_pinned),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The `version` answer names the adapter the daemon holds, and says whether the command line
+/// pins it, which is what a front end needs to tell a pick that took from one that did not.
+#[tokio::test]
+async fn the_version_answer_names_the_adapter_and_whether_it_is_pinned() {
+    let dir = std::env::temp_dir().join(format!("svolderd-said-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.toml");
+    std::fs::write(&path, "schema = 1\n").unwrap();
+    // a transport that names its adapter, as BlueZ's does: the answer carries that name
+    struct Named;
+    #[async_trait::async_trait]
+    impl svolder_ble::Transport for Named {
+        async fn scan(
+            &self,
+            _: Duration,
+        ) -> Result<svolder_ble::Advertisements, svolder_ble::BleError> {
+            Err(svolder_ble::BleError::NotFound)
+        }
+        async fn connect(
+            &self,
+            _: svolder_proto::UnitId,
+        ) -> Result<Box<dyn svolder_ble::Link>, svolder_ble::BleError> {
+            Err(svolder_ble::BleError::NotFound)
+        }
+        fn adapter(&self) -> Option<&str> {
+            Some("hci7")
+        }
+    }
+    let base = daemon();
+    let named = Arc::new(svolder_ble::SwitchableTransport::new(Arc::new(Named)));
+    let named_daemon = Daemon::new(
+        Arc::clone(&named) as Arc<dyn svolder_ble::Transport>,
+        read(&base.registry).clone(),
+        path.clone(),
+        path.with_file_name("profiles"),
+        PathBuf::from("/nonexistent/svolder.sock"),
+        Config::load_from(&path).unwrap_or_default(),
+    )
+    .with_adapter_switch(named, "hci7".to_string(), false, None)
+    .shared();
+    assert_eq!(
+        adapter_said(&named_daemon).await,
+        (Some("hci7".to_string()), false),
+        "the adapter it holds, unpinned"
+    );
+
+    let base = daemon();
+    let switch = Arc::new(svolder_ble::SwitchableTransport::new(Arc::clone(
+        &base.transport,
+    )));
+    let held = Config::load_from(&path).unwrap_or_default();
+    let pinned_daemon = Daemon::new(
+        Arc::clone(&switch) as Arc<dyn svolder_ble::Transport>,
+        read(&base.registry).clone(),
+        path.clone(),
+        path.with_file_name("profiles"),
+        PathBuf::from("/nonexistent/svolder.sock"),
+        held,
+    )
+    .with_adapter_switch(switch, "fake".to_string(), true, None)
+    .shared();
+    assert!(
+        adapter_said(&pinned_daemon).await.1,
+        "a pinned daemon says so"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The next link change the device publishes within `within`, `None` when there is none.
+async fn next_link(
+    events: &mut tokio::sync::broadcast::Receiver<svolder_ipc::Event>,
+    within: Duration,
+) -> Option<bool> {
+    tokio::time::timeout(within, async {
+        loop {
+            if let Ok(svolder_ipc::Event::Connection { connected, .. }) = events.recv().await {
+                return connected;
+            }
+        }
+    })
+    .await
+    .ok()
+}
+
+/// A reload that changes `adapter` has every device let its link go and connect again through
+/// the adapter now named; a reload that leaves `adapter` as it was touches no link.
+#[tokio::test]
+async fn a_reload_with_a_new_adapter_connects_every_device_again() {
+    let dir = std::env::temp_dir().join(format!("svolderd-adapter-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.toml");
+    let device = "[[device]]\nname = \"amp\"\nudid = \"0102030405060708\"\n";
+    std::fs::write(&path, format!("schema = 1\n{device}")).unwrap();
+    let daemon = following(&path);
+    daemon.reload_all().await.expect("the first reload");
+    let handle = Arc::clone(&daemon.devices()[0]);
+    for _ in 0..250 {
+        if handle.info.lock().unwrap().connected {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(handle.info.lock().unwrap().connected, "never connected");
+    let mut events = handle.events.subscribe();
+    let wait = Duration::from_secs(5);
+
+    std::fs::write(&path, format!("schema = 1\nadapter = \"hci1\"\n{device}")).unwrap();
+    daemon
+        .reload_all()
+        .await
+        .expect("the reload that names an adapter");
+    assert_eq!(
+        next_link(&mut events, wait).await,
+        Some(false),
+        "the link was not let go"
+    );
+    assert_eq!(
+        next_link(&mut events, wait).await,
+        Some(true),
+        "no reconnect"
+    );
+
+    daemon
+        .reload_all()
+        .await
+        .expect("a reload that changes nothing");
+    assert_eq!(
+        next_link(&mut events, Duration::from_millis(600)).await,
+        None,
+        "a reload with the same adapter touched a link"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

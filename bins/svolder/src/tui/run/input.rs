@@ -112,6 +112,22 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
             ))
             .await;
         }
+        Intent::ListAdapters => adapters::list(opener, &mut watching),
+        Intent::PickAdapter { address, name } => {
+            if Box::pin(adapters::pick(
+                opener,
+                &mut watching,
+                address,
+                name,
+                look,
+                screen,
+            ))
+            .await
+                == Switched::GaveUp
+            {
+                return gave_up(watching);
+            }
+        }
         Intent::RevealToken => connect::reveal(&mut watching, &look.token_site),
         Intent::CopyToken => {
             connect::copy(&mut watching, look);
@@ -429,6 +445,14 @@ pub(super) async fn apply_action<O: Open, M: MouseCapture>(
         }
         MouseAction::Setting(at) => {
             watching.app.overlays.settings = Some(at);
+            Flow::Continue(watching)
+        }
+        MouseAction::AdapterAt(at) => {
+            if let Some(crate::tui::boxes::connections::Modal::Adapters(list)) =
+                watching.app.overlays.conn.modal.as_mut()
+            {
+                list.at = at;
+            }
             Flow::Continue(watching)
         }
         MouseAction::DismissToast => {

@@ -15,7 +15,7 @@ use crossterm::event::KeyCode;
 use svolder_ipc::token::TokenSource;
 
 use super::{App, ConnChange, Intent, SettingsBox};
-use crate::tui::boxes::connections::{Field, Line, Modal, TokenView};
+use crate::tui::boxes::connections::{AdapterList, Field, Line, Modal, TokenView};
 use crate::tui::boxes::web_box::{self, WebBox, WebRow};
 use crate::tui::screens::settings::{self, Setting};
 
@@ -87,6 +87,42 @@ impl App {
             _ => return Vec::new(),
         };
         vec![Intent::Connection(change)]
+    }
+
+    /// Open the Bluetooth adapter list and ask for the scan that fills it.
+    pub(super) fn open_adapters(&mut self) -> Vec<Intent> {
+        if let Some(words) = self.overlays.conn.read_only() {
+            self.warn(words);
+            return Vec::new();
+        }
+        self.overlays.conn.modal = Some(Modal::Adapters(AdapterList::default()));
+        vec![Intent::ListAdapters]
+    }
+
+    /// A key in the adapter list: ↑↓ move, Enter saves the adapter under the cursor, Esc or `q`
+    /// closes the list. Every other key is swallowed. Enter while the scan still runs, or after
+    /// it failed, does nothing.
+    fn adapters_key(&mut self, code: KeyCode) -> Vec<Intent> {
+        let Some(Modal::Adapters(list)) = self.overlays.conn.modal.as_mut() else {
+            return Vec::new();
+        };
+        let last = list
+            .rows
+            .as_ref()
+            .map_or(0, |rows| rows.len().saturating_sub(1));
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => self.overlays.conn.modal = None,
+            KeyCode::Up => list.at = list.at.saturating_sub(1),
+            KeyCode::Down => list.at = (list.at + 1).min(last),
+            KeyCode::Enter => {
+                if let Some((address, name)) = list.pick() {
+                    self.overlays.conn.modal = None;
+                    return vec![Intent::PickAdapter { address, name }];
+                }
+            }
+            _ => {}
+        }
+        Vec::new()
     }
 
     /// Put the Settings cursor on `setting`, in whichever category lists it.
@@ -176,6 +212,7 @@ impl App {
                 Vec::new()
             }
             Some(Modal::Web(_)) => self.web_box_key(code),
+            Some(Modal::Adapters(_)) => self.adapters_key(code),
             Some(Modal::Token) => match code {
                 KeyCode::Char('c') => vec![Intent::CopyToken],
                 KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q' | 'v') => {

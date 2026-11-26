@@ -694,7 +694,7 @@ pub(crate) async fn transport_for(
     wire: Wire,
 ) -> Result<(Arc<dyn Transport>, Option<String>), Failure> {
     let chosen = choose_configured(config, g.device);
-    let remembered = last_adapter(wire, chosen).await;
+    let remembered = last_adapter(wire, chosen, config.adapter.as_deref()).await;
     let adapter = preferred_adapter(g.adapter, config.adapter.as_deref(), remembered);
     let transport = open_transport(wire, adapter.as_deref()).await?;
     Ok((transport, adapter))
@@ -738,17 +738,37 @@ pub(crate) async fn open_over(
         Some(device) => Some(device.udid.as_str()),
         None => g.device,
     };
-    let (session, profile, episode, heard) = reach(&transport, &registry, chosen, selector).await?;
+    let (session, profile, episode, heard) =
+        match reach(&transport, &registry, chosen, selector).await {
+            Ok(reached) => reached,
+            Err(failure) => return Err(point_elsewhere(failure, wire, &transport, chosen).await),
+        };
     let unit = session.advertisement().unit_id();
     // The adapter that connected is the one that was named, and where none was, the one
     // the transport took for itself: without that second answer the state file could only
     // ever differ from the config on a run that typed `--adapter`, which is the one run
     // that needs it least.
     let took = adapter_taken(adapter, transport.adapter());
+    // What is remembered is the adapter's address, which stays with the dongle, not the number the
+    // kernel gave it this time.
+    let took = match (wire, took) {
+        (Wire::Ble, Some(spec)) => Some(match svolder_ble::adapters::present().await {
+            Ok(present) => svolder_ble::adapters::stable_name(&spec, &present),
+            Err(_) => spec,
+        }),
+        (_, took) => took,
+    };
     // Only a profile the registry can find again is worth remembering: a generic one is
     // named for its product id and would be an unknown name on the next read.
     let known = registry.get(&profile.name).map(|_| profile.name.as_str());
-    remember_adapter(wire, took.as_deref(), &unit.to_string(), known).await;
+    remember_adapter(
+        wire,
+        took.as_deref(),
+        &unit.to_string(),
+        known,
+        config.adapter.as_deref(),
+    )
+    .await;
     let mut backend = DirectBackend {
         transport,
         registry,
@@ -767,6 +787,46 @@ pub(crate) async fn open_over(
     };
     backend.judge_passphrase();
     Ok(backend)
+}
+
+/// A failed connect, where another adapter hears the device, with the way out added to its words.
+///
+/// The connect's own deadline is the streak: it tried for twenty seconds, so one short scan of
+/// every adapter is all this costs, and only when the failure is that the connect never came
+/// up. A machine with one adapter, and one where no other adapter hears the device, keeps the
+/// failure as it was.
+async fn point_elsewhere(
+    failure: Failure,
+    wire: Wire,
+    transport: &Arc<dyn Transport>,
+    chosen: Option<&DeviceConfig>,
+) -> Failure {
+    let (Wire::Ble, Some(device), Some(failing)) = (wire, chosen, transport.adapter()) else {
+        return failure;
+    };
+    if !connect_never_came_up(&failure) {
+        return failure;
+    }
+    #[cfg(test)]
+    if let Some(told) = tests::TOLD.with(|told| told.take()) {
+        return pointed(failure, told);
+    }
+    let pointer = svolder_ble::adapters::pointer_for(failing, &device.name, &device.udid).await;
+    pointed(failure, pointer)
+}
+
+/// Whether `failure` is a connect that ran out its deadline, which is what a dongle that hears
+/// the device and cannot hold a link ends in.
+fn connect_never_came_up(failure: &Failure) -> bool {
+    svolder_ble::adapters::is_connect_deadline(&failure.what)
+}
+
+/// `failure` with `pointer` after its words, or as it was when there is none.
+fn pointed(mut failure: Failure, pointer: Option<String>) -> Failure {
+    if let Some(words) = pointer {
+        failure.what = format!("{}; {words}", failure.what);
+    }
+    failure
 }
 
 /// Build the transport a direct backend talks through, on the controller `adapter` names for
@@ -807,15 +867,20 @@ fn adapter_failure(err: &BleError, adapter: Option<&str>) -> Failure {
 /// look up — and only for a real radio, since the fake transport has no adapters to choose
 /// between. Reading it is a file read, so it happens on a blocking thread rather than on the
 /// one a front end draws with.
-async fn last_adapter(wire: Wire, chosen: Option<&DeviceConfig>) -> Option<String> {
+async fn last_adapter(
+    wire: Wire,
+    chosen: Option<&DeviceConfig>,
+    configured: Option<&str>,
+) -> Option<String> {
     let (Wire::Ble, Some(device)) = (wire, chosen) else {
         return None;
     };
     let udid = device.udid.clone();
+    let configured = configured.map(str::to_string);
     let state = tokio::task::spawn_blocking(crate::state::DeviceState::load)
         .await
         .ok()?;
-    state.last_adapter(&udid)
+    state.last_adapter(&udid, configured.as_deref())
 }
 
 /// Which adapter a direct session opens on: `--adapter`, else the one that last connected this
@@ -851,7 +916,13 @@ fn adapter_taken(named: Option<&str>, transport: Option<&str>) -> Option<String>
 /// steady state, writes nothing. The rest happens on a blocking thread, and a failed write is
 /// dropped: what this file holds is worth a faster connect and nothing more, and a session that
 /// is up is no place to report a read-only state directory.
-async fn remember_adapter(wire: Wire, adapter: Option<&str>, unit: &str, profile: Option<&str>) {
+async fn remember_adapter(
+    wire: Wire,
+    adapter: Option<&str>,
+    unit: &str,
+    profile: Option<&str>,
+    configured: Option<&str>,
+) {
     if wire != Wire::Ble {
         return;
     }
@@ -860,9 +931,10 @@ async fn remember_adapter(wire: Wire, adapter: Option<&str>, unit: &str, profile
     };
     let (adapter, unit) = (adapter.to_string(), unit.to_string());
     let profile = profile.map(str::to_string);
+    let configured = configured.map(str::to_string);
     let _ = tokio::task::spawn_blocking(move || {
         let mut state = crate::state::DeviceState::load();
-        if state.remember(&unit, &adapter, profile.as_deref()) {
+        if state.remember(&unit, &adapter, profile.as_deref(), configured.as_deref()) {
             let _ = state.save();
         }
     })

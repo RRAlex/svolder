@@ -58,20 +58,6 @@ fn adapter_name_matches_leading_token() {
     assert!(adapter_info_matches("hci0", "hci0"));
 }
 
-/// A name no controller answers to says which ones there were, so the user can name one
-/// of those instead; with none at all it says that rather than listing nothing.
-#[test]
-fn a_missing_adapter_names_the_adapters_there_are() {
-    assert_eq!(
-        no_adapter_named("hci9", &["hci0".to_string(), "hci1".to_string()]),
-        "no adapter named hci9; adapters: hci0, hci1"
-    );
-    assert_eq!(
-        no_adapter_named("hci9", &[]),
-        "no adapter named hci9; no adapters present"
-    );
-}
-
 #[test]
 fn tracing_is_off_unless_the_variable_asks_for_it() {
     assert!(!trace_enabled(None));

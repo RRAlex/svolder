@@ -131,7 +131,7 @@ There is a small handshake in the same answer. The `version` reply lists `featur
 what the daemon supports beyond the basics (`FEATURES` in `socket/protocol.rs`, the one list; today
 `reasons`, `unknown_request_code`, `device_crud`, `server_switch` and `guest_switch`
 ([server-switch.md](server-switch.md)), `walk` ([device-walk.md](device-walk.md)), `autoeq`
-([autoeq.md](autoeq.md)), `host_cover`, `preset_write` and `scenes` ([scenes.md](scenes.md))).
+([autoeq.md](autoeq.md)), `host_cover`, `preset_write`, `scenes` ([scenes.md](scenes.md)), `adapter_switch`).
 `preset_write` is the TUI's and the CLI's preset writes (`eq save`, `import`, `rename`, `delete`),
 ops `save`, `update`, `rename`, `delete`, on the web page's writers so a name is refused in the same
 words. A daemon too old to list any leaves the field out, which decodes as none. A front end asks

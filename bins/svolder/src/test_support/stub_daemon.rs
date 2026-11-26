@@ -108,6 +108,8 @@ pub(crate) struct StubDaemon {
     /// Whether its `version` answer says the configuration file changed since the last reload.
     config_changed: std::sync::atomic::AtomicBool,
     config_missing: std::sync::atomic::AtomicBool,
+    /// The adapter its `version` answer says it holds, and whether it says that is pinned.
+    adapter: Mutex<(Option<String>, bool)>,
     /// How many `version` requests it has answered.
     version_asks: std::sync::atomic::AtomicUsize,
     /// The link code a browser has used, which `web_link_open` answers as no longer open and
@@ -360,6 +362,7 @@ impl Handler for StubDaemon {
                     web,
                     web_token,
                 } = self.says.lock().expect("the status").clone();
+                let (adapter, adapter_pinned) = self.adapter.lock().expect("the adapter").clone();
                 Response::Version {
                     version: self.version.lock().expect("the version").clone(),
                     mqtt,
@@ -376,6 +379,8 @@ impl Handler for StubDaemon {
                     config_missing: self
                         .config_missing
                         .load(std::sync::atomic::Ordering::SeqCst),
+                    adapter,
+                    adapter_pinned,
                     activity: None,
                 }
             }
@@ -1185,6 +1190,12 @@ impl StubServer {
             .store(changed, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// Say in the `version` answer that the daemon holds `adapter`, `pinned` by its command line
+    /// or not.
+    pub(crate) fn holds_adapter(&self, adapter: &str, pinned: bool) {
+        *self.handler.adapter.lock().expect("the adapter") = (Some(adapter.to_string()), pinned);
+    }
+
     /// Whether the daemon's `version` reply says its configuration file is gone.
     pub(crate) fn config_missing(&self, missing: bool) {
         self.handler
@@ -1397,6 +1408,7 @@ pub(crate) async fn stub_daemon_at(socket: PathBuf) -> StubServer {
         says: Mutex::default(),
         config_changed: std::sync::atomic::AtomicBool::new(false),
         config_missing: std::sync::atomic::AtomicBool::new(false),
+        adapter: Mutex::new((None, false)),
         version_asks: std::sync::atomic::AtomicUsize::new(0),
         spent_link: Mutex::new(None),
         link_open_asks: std::sync::atomic::AtomicUsize::new(0),

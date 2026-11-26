@@ -151,6 +151,9 @@ pub enum Command {
     /// End the wait between connect attempts and try the device now (the web UI's Try now). A
     /// device that holds a link is left as it is.
     Wake,
+    /// The adapter changed under the actor: drop the link it holds, or the one an attempt in
+    /// flight is about to hand over, and connect again through the transport as it now stands.
+    Reconnect,
     /// Close the session and stop the actor.
     Shutdown,
 }
@@ -180,7 +183,7 @@ impl Command {
     /// bare profile reload would otherwise restart every waiting device's schedule.
     fn ends_the_wait(&self, config: &DeviceConfig) -> bool {
         self.needs_link()
-            || matches!(self, Command::Wake)
+            || matches!(self, Command::Wake | Command::Reconnect)
             || matches!(self, Command::Configure(entry) if entry != config)
     }
 }
@@ -526,6 +529,7 @@ fn spawn_reporting(
         last_failure: None,
         note: None,
         failures: 0,
+        drop_due: false,
         farewell: None,
         episode: Episode::default(),
         first_attempt,
@@ -629,6 +633,9 @@ struct Actor {
     /// How the configured passphrase last judged against the advertisement, which a change of
     /// is logged once and shown to the front ends through [`LiveInfo`].
     note: Option<PassphraseNote>,
+    /// Set by [`Command::Reconnect`]: the link held, or one an attempt hands over, is on an
+    /// adapter the daemon has left, and is released at the next chance.
+    drop_due: bool,
     /// How many attempts have failed in a row, which is the step of [`RETRY_SCHEDULE`] the
     /// next wait is taken from. A link, and a command that asks for one, put it back to zero.
     failures: u32,

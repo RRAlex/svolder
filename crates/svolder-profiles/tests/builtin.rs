@@ -866,7 +866,7 @@ fn freya2_and_hati_follow_the_app() {
         assert_eq!(power.id.to_string(), "10", "{name}");
         assert_eq!(power.label, "Power", "{name}");
     }
-    assert_eq!(values("hati", "input"), ["1=RCA 1", "2=RCA 2"]);
+    assert_eq!(values("hati", "input"), ["1=Balanced", "2=Single-Ended"]);
     assert_eq!(values("hati", "load_capacitance").len(), 8);
     assert_eq!(values("hati", "load_resistance").len(), 17);
     assert_eq!(control("hati", "remote_lock").label, "Remote lock");

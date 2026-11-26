@@ -51,15 +51,17 @@ use crate::tui::widgets;
 
 use super::devices::boxed;
 
+mod adapter_box;
 mod token_box;
 mod web_box;
 mod words;
 
+use self::adapter_box::draw_adapter_box;
 use self::token_box::draw_token_box;
 use self::web_box::draw_web_box;
 use self::words::{
-    NOT_SET, access, autoeq_line, connection_line, key_value, listen_word, mcp_word, mqtt_word,
-    password_word, refresh_word, token_word,
+    NOT_SET, access, adapter_line, adapter_word, autoeq_line, connection_line, key_value,
+    listen_word, mcp_word, mqtt_word, password_word, refresh_word, token_word,
 };
 pub use self::words::{config_line, explain};
 
@@ -129,6 +131,8 @@ pub enum Setting {
     HostAudio,
     /// How old the cached AutoEq index may get before it is fetched again.
     AutoEqRefresh,
+    /// The Bluetooth adapter svolder connects through, and the list that picks it.
+    Adapter,
     /// The web UI: its state, and the box that changes it.
     WebUi,
     /// Whether the daemon serves MCP.
@@ -205,6 +209,7 @@ pub const CATEGORIES: [(&str, &[Setting]); 5] = [
             Setting::Key(&INTRO_EFFECT),
             Setting::Key(&INTRO_SOUND),
             Setting::AutoEqRefresh,
+            Setting::Adapter,
         ],
     ),
     (
@@ -275,6 +280,7 @@ impl Setting {
             Setting::Mouse => MOUSE.label,
             Setting::HostAudio => HOST_AUDIO.label,
             Setting::AutoEqRefresh => "AutoEq refresh",
+            Setting::Adapter => "Bluetooth adapter",
             Setting::WebUi => "Web UI",
             Setting::McpEnabled => "MCP server",
             Setting::McpListen => "MCP listen",
@@ -313,7 +319,11 @@ impl Setting {
     pub(crate) fn reports_only(self) -> bool {
         matches!(
             self,
-            Setting::WebUi | Setting::McpToken | Setting::McpStatus | Setting::MqttStatus
+            Setting::WebUi
+                | Setting::Adapter
+                | Setting::McpToken
+                | Setting::McpStatus
+                | Setting::MqttStatus
         )
     }
 
@@ -390,6 +400,7 @@ impl Setting {
                 false => word(app.tui.host_audio),
             },
             Setting::AutoEqRefresh => refresh_word(app.presets.autoeq_weeks),
+            Setting::Adapter => adapter_word(app.overlays.conn.adapter.as_deref()),
             // The state alone: the column is 13 cells.
             Setting::WebUi => web_state::state_word(
                 app.overlays.conn.web_status.as_ref(),
@@ -668,6 +679,7 @@ fn draw_modal(
         }
         Modal::Web(web) => draw_web_box(frame, area, app, web, theme, live_hits),
         Modal::Token => draw_token_box(frame, area, app, theme, live_hits),
+        Modal::Adapters(list) => draw_adapter_box(frame, area, app, list, theme, live_hits),
         Modal::Rotating => {
             let lines = vec![
                 Line::from(Span::raw(" Replace the MCP token? [y/N]")),
@@ -774,6 +786,7 @@ fn explanation(setting: Setting, app: &App, theme: &Theme, width: u16) -> Vec<Li
     let placed = match (setting.is_connection(), setting) {
         (true, _) => connection_line(setting, &app.overlays.conn),
         (false, Setting::AutoEqRefresh) => autoeq_line(app.presets.autoeq_weeks),
+        (false, Setting::Adapter) => adapter_line(app.overlays.conn.adapter.as_deref()),
         (false, _) => config_line(setting, &app.tui),
     };
     for line in widgets::text::wrap(&placed, width) {

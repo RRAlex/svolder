@@ -22,6 +22,7 @@
 //! - [`transport`]: the transport abstraction: scan and connect, then read and write on a link.
 #![warn(missing_docs)]
 
+pub mod adapters;
 pub mod advert;
 pub mod bluez;
 pub mod episode;
@@ -31,6 +32,7 @@ mod log;
 mod power;
 pub mod session;
 pub mod state;
+pub mod switch;
 pub mod tap;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -46,5 +48,6 @@ pub use log::{LogLevel, set_logger};
 pub use session::{CLOSE_GRACE, FAREWELL_BOUND, IDENTIFY_GAP, Session, SessionConfig};
 pub use state::{Counters, DeviceState};
 pub use svolder_fake::SIGNAL_PERIOD;
+pub use switch::SwitchableTransport;
 pub use tap::{FrameDirection, FrameTap, TappedFrame, TappedTransport};
 pub use transport::{Advertisements, Link, Listening, Notifications, Transport};

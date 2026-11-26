@@ -74,6 +74,10 @@ impl Actor {
             }
             Command::Configure(config) => self.configure(config),
             Command::Wake => Response::Ack,
+            Command::Reconnect => {
+                self.drop_due = true;
+                Response::Ack
+            }
             // Every loop that forwards a command here takes `Shutdown` for itself first, so
             // this arm is unreachable from any of them.
             Command::Shutdown => Response::Ack,

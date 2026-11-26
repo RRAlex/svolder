@@ -119,6 +119,16 @@ pub enum Intent {
     /// Change one key of `[mcp]` or `[mqtt]`, which the loop writes to the config file and
     /// follows with a `reload`.
     Connection(ConnChange),
+    /// List the Bluetooth adapters with what each hears: a short scan on all of them, whose
+    /// answer fills the open list.
+    ListAdapters,
+    /// Save this adapter, by its address, as the one svolder connects through.
+    PickAdapter {
+        /// The adapter's address, or its name where BlueZ gave no address.
+        address: String,
+        /// The adapter's kernel name now, which the state file's remembered adapter follows.
+        name: String,
+    },
     /// Show the MCP token for a while.
     RevealToken,
     /// Copy the MCP token: to the terminal as OSC 52 and to the display's clipboard tool.

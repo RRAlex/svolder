@@ -59,7 +59,7 @@ pub(super) struct TonePane {
     /// The point the first of `bands` stands for: the table scrolls to keep the focused point
     /// in view where the pane is short.
     pub(super) bands_from: usize,
-    /// The Crossfeed row at the pane's bottom, on the computer side with crossfeed.
+    /// The Crossfeed row under the table, on the computer side with crossfeed.
     pub(super) crossfeed: Option<CrossfeedRow>,
     /// The Loudness row over it, in the chain's order, on the computer side with loudness.
     pub(super) loudness: Option<LoudnessRow>,
@@ -103,8 +103,8 @@ pub(super) fn tone_lines(app: &App, eq: &EqSpec, theme: &Theme, max_width: usize
 }
 
 /// `tone_lines` for a pane whose interior is `(max_width, max_height)` cells: the computer
-/// side keeps its Crossfeed row at the bottom of the pane, under a table that scrolls to leave
-/// it room.
+/// side puts its Loudness and Crossfeed rows right under the table, which scrolls to leave
+/// them room.
 pub(super) fn tone_lines_in(
     app: &App,
     eq: &EqSpec,
@@ -215,8 +215,8 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
         )));
     }
     let mut bands = Vec::new();
-    // The Crossfeed row (and its numbers under it, where the pane has the room) sit at the
-    // bottom: the table gives up rows to them, scrolled to keep the focused point in view.
+    // The Crossfeed row (and its numbers under it, where the pane has the room) follow the
+    // table: it gives up rows to them, scrolled to keep the focused point in view.
     let xf = app.crossfeed();
     let head = lines.len();
     // The numbers under the row: the crossfeed's one line, or the two lines of the space choice
@@ -265,7 +265,6 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
     let in_view = folded || visible == points.len();
     let ld_dim = ld.is_some() && in_view && spare >= 1;
     let ld_hint = ld_dim && dac_hint_wanted(app, max_width) && spare >= 2;
-    let tail = ld_base + usize::from(ld_dim) + usize::from(ld_hint) + xf_rows;
     for (at, point) in points.iter().enumerate().skip(first).take(visible) {
         bands.push(u16::try_from(lines.len()).unwrap_or(u16::MAX));
         let text = format!(
@@ -287,15 +286,12 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
             max_width,
         ));
     }
-    // Under the table, at the pane's bottom where its height is known.
-    if tail > 0 && !folded {
-        let target = match max_height {
-            usize::MAX => lines.len() + usize::from(gap),
-            h => h.saturating_sub(tail),
-        };
-        while lines.len() < target {
-            lines.push(Line::default());
-        }
+    // Under the table the rows follow it, a blank row between them where the pane has room; the
+    // pane's leftover rows fall at its bottom.
+    let tail = ld_base + usize::from(ld_dim) + usize::from(ld_hint) + xf_rows;
+    let spare_row = max_height != usize::MAX && max_height > lines.len() + tail;
+    if tail > 0 && !folded && (gap || spare_row) {
+        lines.push(Line::default());
     }
     let loudness = ld.map(|view| {
         let at = u16::try_from(lines.len()).unwrap_or(u16::MAX);
@@ -404,8 +400,8 @@ pub(crate) fn computer_folds(app: &App, (width, height): (usize, usize)) -> bool
         true => 2 + usize::from(dac_hint_wanted(app, width)),
         false => 0,
     } + match xf {
-        // the Crossfeed (or Space) row, its sub-rows, and the blank row over what is under, which
-        // only the layout with a Crossfeed row draws
+        // the Crossfeed (or Space) row, its sub-rows, and the blank row over what is under: a
+        // layout with a Crossfeed row needs it; a loudness-only pane draws it only from a spare row
         true => 1 + detail_rows(app) + 1,
         false => 0,
     };

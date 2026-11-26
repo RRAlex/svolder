@@ -932,3 +932,207 @@ async fn a_server_switch_refreshes_its_row_from_the_file_it_wrote() {
     assert!(said.contains("cannot start"), "{said}");
     watching.close().await;
 }
+
+// The Bluetooth adapter list's loop side: the scan that fills it and the pick that saves.
+
+use super::super::adapters;
+
+/// The unit and name a case configures, so the pick has a device to remember an adapter for.
+fn bf3() -> svolder_ipc::DeviceConfig {
+    svolder_ipc::DeviceConfig {
+        name: "BF3".into(),
+        udid: "0A1B2C3D4E5F6071".into(),
+        profile: None,
+        passphrase: "auto".into(),
+        inputs: Default::default(),
+    }
+}
+
+/// Picking an adapter under a running daemon writes the address into the file as `add` writes a
+/// device, tells the daemon to reload, makes the picked adapter the one the state file remembers
+/// for the device, and says the daemon takes it up when it restarts.
+#[tokio::test]
+async fn picking_an_adapter_under_a_daemon_writes_its_address_and_tells_the_daemon() {
+    let (daemon, path, watching) = on_a_daemon().await;
+    daemon.lists_features(&[svolder_ipc::FEATURE_ADAPTER_SWITCH]);
+    daemon.holds_adapter("hci2", false);
+    let device = bf3();
+    Config::add_device(&path, &device).expect("the device is added");
+    let opener = opener_on_nothing(path.clone());
+    let home = state_home();
+    let (mut look, _) = look_over(&home);
+
+    let watching = taken(
+        Intent::PickAdapter {
+            address: "AA:BB:CC:DD:EE:02".into(),
+            name: "hci2".into(),
+        },
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+
+    let config = Config::load_from(&path).expect("the file parses");
+    assert_eq!(config.adapter.as_deref(), Some("AA:BB:CC:DD:EE:02"));
+    assert_eq!(daemon.reloads(), 1, "the daemon was not told to reload");
+    assert_eq!(
+        watching.app.overlays.conn.adapter.as_deref(),
+        Some("AA:BB:CC:DD:EE:02"),
+        "the row does not say what is on disk"
+    );
+    assert_eq!(
+        crate::state::DeviceState::load_from(&home)
+            .last_adapter("0A1B2C3D4E5F6071", Some("AA:BB:CC:DD:EE:02")),
+        Some("AA:BB:CC:DD:EE:02".to_string()),
+        "the remembered adapter would outrank the pick, and a kernel number moves"
+    );
+    let words = watching
+        .app
+        .toast()
+        .expect("the pick was said")
+        .text
+        .clone();
+    assert!(words.contains("the daemon switched to it"), "{words}");
+    watching.close().await;
+}
+
+/// What the toast says after the pick of `hci2` under a daemon that reports it holds `holds`.
+async fn said_after_picking_under(holds: &str, pinned: bool) -> String {
+    let (daemon, path, watching) = on_a_daemon().await;
+    daemon.lists_features(&[svolder_ipc::FEATURE_ADAPTER_SWITCH]);
+    daemon.holds_adapter(holds, pinned);
+    Config::add_device(&path, &bf3()).expect("the device is added");
+    let opener = opener_on_nothing(path);
+    let (mut look, _) = look_over(&state_home());
+    let watching = taken(
+        Intent::PickAdapter {
+            address: "AA:BB:CC:DD:EE:02".into(),
+            name: "hci2".into(),
+        },
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    let words = watching
+        .app
+        .toast()
+        .expect("the pick was said")
+        .text
+        .clone();
+    watching.close().await;
+    words
+}
+
+/// A daemon pinned by its command line or `SVOLDER_ADAPTER` ignores the file's adapter: the toast
+/// says it stays where it is, not that it switched, and does not add the TUI's own `--adapter`
+/// to that.
+#[tokio::test]
+async fn a_pick_under_a_pinned_daemon_says_the_daemon_is_pinned() {
+    let words = said_after_picking_under("hci0", true).await;
+    assert!(!words.contains("switched"), "{words}");
+    assert!(
+        words.contains("the daemon is pinned to hci0 by --adapter or SVOLDER_ADAPTER"),
+        "{words}"
+    );
+}
+
+/// A daemon that could not open the picked adapter stays on the one it has, and the toast says so.
+#[tokio::test]
+async fn a_pick_the_daemon_could_not_open_says_it_stayed() {
+    let words = said_after_picking_under("hci0", false).await;
+    assert!(!words.contains("switched"), "{words}");
+    assert!(words.contains("the daemon stays on hci0"), "{words}");
+}
+
+/// Picking an adapter in a direct session writes the file alone and reconnects through it: the
+/// device is opened again.
+#[tokio::test]
+async fn picking_an_adapter_in_a_direct_session_reconnects() {
+    let (backend, gate, mut app) = fake(SHORT_DEADLINE).await;
+    app.session.device_name = "BF3".into();
+    let watching = watching(backend, app, Some("BF3"));
+    let path = scratch_config();
+    std::fs::create_dir_all(path.parent().expect("a directory")).expect("the directory is made");
+    std::fs::write(&path, Config::template()).expect("the template is written");
+    let log = Log::default();
+    let opener = Opener::new(
+        globals(false),
+        TuiConfig::default(),
+        path.clone(),
+        fake_open(Arc::clone(&log), gate, &[]),
+    );
+    let (mut look, _) = look_over(&state_home());
+
+    let watching = taken(
+        Intent::PickAdapter {
+            address: "AA:BB:CC:DD:EE:01".into(),
+            name: "hci0".into(),
+        },
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+
+    let config = Config::load_from(&path).expect("the file parses");
+    assert_eq!(config.adapter.as_deref(), Some("AA:BB:CC:DD:EE:01"));
+    assert_eq!(
+        opens(&log),
+        vec![(Some("BF3".to_string()), true)],
+        "the device was not opened again, the old session released first"
+    );
+    watching.close().await;
+}
+
+/// The list's scan runs in a task and comes back through the loop: over the fake transport,
+/// one adapter that hears each configured device.
+#[tokio::test]
+async fn the_lists_scan_comes_back_as_rows() {
+    let (backend, _gate, app) = fake(SHORT_DEADLINE).await;
+    let mut watching = watching(backend, app, None);
+    let path = scratch_config();
+    std::fs::create_dir_all(path.parent().expect("a directory")).expect("the directory is made");
+    std::fs::write(
+        &path,
+        "schema = 1\n[[device]]\nname = \"BF3\"\nudid = \"0A1B2C3D4E5F6071\"\n",
+    )
+    .expect("the file is written");
+    let opener = opener_on_nothing(path);
+
+    adapters::list(&opener, &mut watching);
+    let found = adapters::recv(&mut watching.adapters_scan)
+        .await
+        .expect("the scan answered")
+        .expect("the fake transport lists its adapters");
+
+    assert_eq!(found.rows.len(), 1);
+    assert_eq!(found.rows[0].heard[0].0, "BF3");
+    assert!(found.rows[0].in_use, "the only adapter is the one in use");
+    watching.close().await;
+}
+
+/// A daemon that cannot switch is told so in words that name the restart.
+#[tokio::test]
+async fn a_daemon_too_old_to_switch_is_told_to_restart() {
+    let (daemon, path, watching) = on_a_daemon().await;
+    daemon.lists_features(&[]);
+    let opener = opener_on_nothing(path.clone());
+    let (mut look, _) = look_over(&state_home());
+
+    let watching = taken(
+        Intent::PickAdapter {
+            address: "AA:BB:CC:DD:EE:02".into(),
+            name: "hci2".into(),
+        },
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+
+    let words = watching.app.toast().expect("said").text.clone();
+    assert!(words.contains("svolder daemon restart"), "{words}");
+    watching.close().await;
+}
