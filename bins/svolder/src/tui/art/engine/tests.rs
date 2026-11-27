@@ -554,7 +554,7 @@ async fn art_turned_on_makes_its_picker_off_the_loop() {
     assert!(art.picker.is_some());
 }
 
-/// A cover that is not square (a video's wide thumbnail) is drawn smaller than its box, and is
+/// A cover that is not square (a video's wide thumbnail) gets a box of its own shape, and is
 /// built once for that box: the frames after it build nothing again, however many of them steer.
 #[tokio::test]
 async fn a_wide_cover_is_built_once_for_its_box_and_not_again_every_frame() {
@@ -569,11 +569,32 @@ async fn a_wide_cover_is_built_once_for_its_box_and_not_again_every_frame() {
     let backend = Backend::stub_remote(&daemon.socket).await;
     let (mut art, mut app) = (halfblocks(), playing(Some("wide")));
     settle(&mut art, &mut app, Some(&backend), BIG).await;
+    assert_eq!(
+        app.host.cover.extent,
+        Some(("wide".into(), 160, 90)),
+        "the decoded size travels with the picture"
+    );
     let picture = app.host.cover.picture.as_ref().expect("a picture").size();
     let most = art_box(BIG, &app).expect("a box");
-    assert_ne!(picture, most, "the wide picture is smaller than its box");
+    assert_eq!(picture, most, "the picture fills the box of its own shape");
+    assert!(most.width > most.height * 2, "a wide box: {most:?}");
     for _ in 0..3 {
         art.steer(&mut app, Some(&backend), BIG);
         assert!(!art.busy(), "the picture is built again for the same box");
+    }
+}
+
+/// A wide cover in a box too narrow for its shape (the words cap it) is cropped, never left
+/// with bars: the built picture is as large as the box.
+#[test]
+fn a_wide_cover_in_a_capped_box_is_cropped_not_letterboxed() {
+    let picker = Picker::halfblocks();
+    let wide = DynamicImage::ImageRgb8(RgbImage::new(320, 180));
+    let tall = DynamicImage::ImageRgb8(RgbImage::new(180, 320));
+    for size in [Size::new(12, 4), Size::new(8, 4), Size::new(6, 12)] {
+        for image in [&wide, &tall] {
+            let protocol = build(&picker, image.clone(), size).expect("a picture");
+            assert_eq!(protocol.size(), size, "{size:?} is filled");
+        }
     }
 }

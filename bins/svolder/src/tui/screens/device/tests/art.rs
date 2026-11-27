@@ -11,6 +11,8 @@ use ratatui_image::picker::Picker;
 use super::*;
 use crate::tui::art::Picture;
 use crate::tui::art::engine::build;
+use crate::tui::screens::device::art::{GAP, MIN_COLS, MIN_WORDS};
+use crate::tui::screens::device::rows_of;
 
 /// A picture with a gradient, so every cell of it differs from the next.
 fn gradient() -> DynamicImage {
@@ -36,6 +38,12 @@ pub(super) fn with_art(mut app: App, area: Rect) -> App {
         hash: "0123456789abcdef".into(),
         sent: Default::default(),
     });
+    app
+}
+
+/// `app` with its cover decoded to `width` by `height` pixels.
+fn shaped(mut app: App, width: u32, height: u32) -> App {
+    app.host.cover.extent = Some(("0123456789abcdef".into(), width, height));
     app
 }
 
@@ -518,4 +526,153 @@ fn a_kitty_picture_is_held_by_a_toast_that_misses_its_corner() {
     app.tick(std::time::Instant::now() + std::time::Duration::from_secs(3600));
     assert!(app.toast().is_none());
     assert!(sent(&app), "not uploaded once the toast was gone");
+}
+
+/// The box is as tall as the pane's rows whatever the cover, as wide as the cover's own shape
+/// makes it at that height in the terminal's cells, and never leaves the words under 64 columns.
+#[test]
+fn the_box_takes_the_covers_own_shape_and_the_words_keep_their_columns() {
+    // (width, height) in pixels: a 16:9 thumbnail, a square cover, a 2:3 portrait.
+    for (w, h) in [(980u32, 551u32), (600, 600), (400, 600)] {
+        for (cols, rows) in [(200, 60), (100, 45), (120, 40)] {
+            let a = area(cols, rows);
+            let app = shaped(covered(), w, h);
+            let square = art_box(a, &covered()).expect("a square box");
+            let size = art_box(a, &app).unwrap_or_else(|| panic!("a box at {cols}x{rows} {w}x{h}"));
+            assert_eq!(size.height, square.height, "{cols}x{rows} {w}x{h}: height");
+            let (tier, [_, _, status]) = rows_of(a, &app);
+            let inner = tier.block().inner(status);
+            let trail = u16::try_from(tier.trail()).unwrap();
+            let room = inner.width - trail - GAP - MIN_WORDS;
+            // Cells are 8 by 16 pixels.
+            let wanted = (u32::from(size.height) * 16 * w).div_ceil(8 * h);
+            assert_eq!(
+                u32::from(size.width),
+                wanted.min(u32::from(room)),
+                "{cols}x{rows} {w}x{h}: width"
+            );
+            assert!(inner.width - trail - GAP - size.width >= MIN_WORDS);
+            if w == h {
+                assert_eq!(size, square, "a square cover keeps today's box");
+            }
+        }
+    }
+    // 200x60 is roomy: the wide box is really wider than the square one.
+    let wide = art_box(area(200, 60), &shaped(covered(), 980, 551)).unwrap();
+    let square = art_box(area(200, 60), &covered()).unwrap();
+    assert!(wide.width > square.width, "{wide:?} {square:?}");
+    let tall = art_box(area(200, 60), &shaped(covered(), 400, 600)).unwrap();
+    assert!(tall.width < square.width, "{tall:?} {square:?}");
+}
+
+/// A cover so tall that its shape would be narrower than the smallest box keeps the smallest box
+/// and is cropped, rather than vanishing where a square cover shows.
+#[test]
+fn a_very_tall_cover_keeps_the_smallest_box() {
+    let square = art_box(area(80, 24), &covered()).expect("a square box at 80x24");
+    let tall = art_box(area(80, 24), &shaped(covered(), 100, 600))
+        .expect("a 1:6 cover still shows at 80x24");
+    assert_eq!(tall.height, square.height);
+    assert_eq!(tall.width, MIN_COLS, "{tall:?}");
+}
+
+/// A cover of another track's size does not shape this track's box.
+#[test]
+fn the_shape_of_another_cover_is_not_used() {
+    let mut app = shaped(covered(), 980, 551);
+    app.host.cover.hash = Some("fedcba9876543210".into());
+    assert_eq!(
+        art_box(area(200, 60), &app),
+        art_box(area(200, 60), &covered())
+    );
+}
+
+/// Where the words' columns cap the box, the picture is cut from the centre to the box and is
+/// as tall as the rows: the leftmost and rightmost cells show the picture's pixels as far in
+/// from each edge.
+#[test]
+fn a_wide_cover_in_a_capped_box_is_cropped_from_the_centre() {
+    let mut app = shaped(covered(), 320, 180);
+    let a = area(80, 24);
+    let size = art_box(a, &app).expect("a box");
+    let uncapped = (u32::from(size.height) * 16 * 320).div_ceil(8 * 180);
+    assert!(u32::from(size.width) < uncapped, "the words cap the box");
+    let image = DynamicImage::ImageRgb8(RgbImage::from_fn(320, 180, |x, _| {
+        image::Rgb([(x * 255 / 319) as u8, 0, 0])
+    }));
+    let protocol = build(&Picker::halfblocks(), image, size).expect("a picture");
+    assert_eq!(protocol.size(), size, "the picture fills its box");
+    app.host.cover.picture = Some(Picture {
+        protocol,
+        hash: "0123456789abcdef".into(),
+        sent: Default::default(),
+    });
+    let slot = art_slot(a, &app).expect("a slot");
+    assert_eq!(slot.height, size.height);
+    let buffer = screen(&app);
+    let red = |x: u16| match buffer.cell((x, slot.y)).expect("a cell").fg {
+        ratatui::style::Color::Rgb(r, ..) => i32::from(r),
+        other => panic!("not a picture cell: {other:?}"),
+    };
+    let (left, right) = (red(slot.x), red(slot.right() - 1));
+    assert!(left > 10, "left {left}: not cut from the centre");
+    assert!(right < 245, "right {right}: not cut from the centre");
+    assert!(
+        (left + right - 255).abs() < 20,
+        "{left} {right}: off centre"
+    );
+}
+
+/// The wide box of a 16:9 cover is held by a toast or a tooltip over any part of it, as the
+/// square one is: the kitty upload waits until nothing covers the slot.
+#[test]
+fn a_kitty_picture_in_a_wide_slot_is_held_by_a_toast_and_a_tooltip() {
+    let mut picker = Picker::halfblocks();
+    picker.set_protocol_type(ratatui_image::picker::ProtocolType::Kitty);
+    let a = area(200, 60);
+    let build_app = || {
+        let mut app = shaped(covered(), 980, 551);
+        let size = art_box(a, &app).expect("a box");
+        let image = DynamicImage::ImageRgb8(RgbImage::new(980, 551));
+        let protocol = build(&picker, image, size).expect("a picture");
+        app.host.cover.picture = Some(Picture {
+            protocol,
+            hash: "0123456789abcdef".into(),
+            sent: Default::default(),
+        });
+        app
+    };
+    let mut app = build_app();
+    let slot = art_slot(a, &app).expect("a slot");
+    let square = art_box(a, &covered()).expect("a box");
+    assert!(slot.width > square.width, "the slot is wide: {slot:?}");
+    let sent = |app: &App| {
+        frame(app, a.width, a.height)
+            .cell((slot.x, slot.y))
+            .expect("the cell")
+            .symbol()
+            .contains("\x1b_G")
+    };
+    app.notify("ab");
+    let (_, [_, body]) = crate::tui::layout_tier::split(a);
+    let toast = crate::tui::boxes::toast::area(body, "ab").0;
+    assert!(toast.intersects(slot), "{toast:?} {slot:?}");
+    assert!(
+        !sent(&app),
+        "uploaded under a toast that meets the wide slot"
+    );
+    app.tick(std::time::Instant::now() + std::time::Duration::from_secs(3600));
+    assert!(sent(&app), "not uploaded once the toast was gone");
+
+    let mut app = build_app();
+    app.pointer.tooltip = Some(crate::tui::boxes::tooltip::Tooltip {
+        hit: crate::tui::mouse::Hit::WebLink,
+        at: (slot.right() - 1, slot.y),
+        since: std::time::Instant::now(),
+        shown: true,
+    });
+    assert!(
+        !sent(&app),
+        "uploaded under a tooltip at the wide slot's far edge"
+    );
 }

@@ -8,6 +8,14 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.39.12
+
+- **The TUI's cover takes the picture's own shape.** In the Status pane the cover is as tall as
+  the rows beside it whatever its shape: a 16:9 video thumbnail gets a wide box instead of
+  filling half a square one, a portrait cover a narrow one, and a square album cover looks as
+  before. Where the words beside it would lose room, the picture is cropped from the centre
+  rather than shrunk.
+
 ## 0.39.11
 
 - **The TUI says which Bluetooth adapter to try, where you would look.** When a device keeps

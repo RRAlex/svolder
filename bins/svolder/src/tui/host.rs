@@ -123,6 +123,9 @@ pub struct Cover {
     /// The terminal's cell size in pixels `(width, height)` while the art is drawn, which the
     /// layout sizes the picture's box by; `None` with the art off.
     pub font: Option<(u16, u16)>,
+    /// The decoded cover's size in pixels `(hash, width, height)`, which the layout shapes the
+    /// picture's box by; until the cover is decoded the box is square.
+    pub extent: Option<(String, u32, u32)>,
     /// The picture, sized for its box and ready to draw, for the track the daemon follows.
     pub picture: Option<crate::tui::art::Picture>,
 }

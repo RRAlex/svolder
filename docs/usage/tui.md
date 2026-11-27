@@ -669,13 +669,18 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
   volume and EQ are the daemon's, and every change of them is a request to it.
 - **Cover art**, at the right of the Status pane beside `Now playing`, while `[tui] cover_art` is
   `"auto"` (the default; the Settings box's **Host audio** category has the row): the cover of the
-  track the daemon follows, as tall as the pane's rows and as wide as a square of that height is in
-  your terminal's own cells. The Status pane is only as tall as its own rows, and in the tall tier one blank row at
-  its end, whatever the cover (the tall tier's blank top row comes on top): the cover is as tall as those rows, a small square beside the lines and the VU on a big
-  terminal, and the rows the pane does not need go to the Controls and Tone panes above it. A cover
-  that could not be fetched or decoded changes no height. The rows are written to what the picture
-  leaves, so it is never over a value, and it goes before the title does: the rows always keep at
-  least 64 columns, and a pane with no room beyond that has no picture.
+  track the daemon follows, as tall as the pane's rows. The box follows the cover's own shape: as
+  wide as the cover is at that height in your terminal's own cells, so a square album cover gets a
+  square, a 16:9 video thumbnail a wide box and a portrait cover a narrow one (until the cover has
+  arrived the box is square). The Status pane is only as tall as its own rows, and in the tall tier
+  one blank row at its end, whatever the cover (the tall tier's blank top row comes on top): the
+  cover is as tall as those rows, beside the lines and the VU on a big terminal, and the rows the
+  pane does not need go to the Controls and Tone panes above it. A cover that could not be fetched
+  or decoded changes no height. The rows are written to what the picture leaves, so it is never
+  over a value: the rows always keep at least 64 columns. When a wide cover would take more than
+  that leaves, the box stops widening there and the picture is cropped from the centre to the box
+  (never shrunk, so it stays as tall as the rows); a pane with no room for even a narrow box has no
+  picture, and it goes before the title does.
   It is the daemon's cover, so a TUI on another machine shows it too; a direct session (no daemon)
   has none, and neither has a daemon older than 0.34.0, which cannot send the picture. A new track
   clears the old picture at once and draws the next when it has arrived; a track with no cover has
@@ -1977,7 +1982,7 @@ version, and three entries (four while the daemon keeps scenes, below):
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                         v0.39.11 │
+│                         v0.39.12 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -1997,7 +2002,7 @@ nothing in the menu there.
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                         v0.39.11 │
+│                         v0.39.12 │
 │                                  │
 │             Settings             │
 │             Scenes z             │

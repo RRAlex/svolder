@@ -200,8 +200,8 @@ impl Art {
         self.making || self.fetching.is_some() || self.decoding.is_some() || self.building.is_some()
     }
 
-    /// Put the picture the app holds as `picture`, built for the box `size`: a picture of a cover
-    /// that is not square is smaller than its box, and it is the box a frame asks for again.
+    /// Put the picture the app holds as `picture`, built for the box `size` (cropped to fill it):
+    /// it is the box a frame asks for again, not the picture's own size.
     fn show(&mut self, app: &mut App, picture: Option<(Picture, Size)>) {
         self.shown = picture
             .as_ref()
@@ -373,7 +373,11 @@ impl Art {
                     return;
                 }
                 match image {
-                    Some(image) => self.image = Some((hash, image)),
+                    Some(image) => {
+                        // The layout shapes the box by the cover before the first build.
+                        app.host.cover.extent = Some((hash.clone(), image.width(), image.height()));
+                        self.image = Some((hash, image));
+                    }
                     None => {
                         app.host.cover.failed = Some(hash.clone());
                         self.missing.insert(hash);
@@ -434,9 +438,27 @@ pub(super) fn decode(bytes: &[u8]) -> Option<DynamicImage> {
     })
 }
 
-/// `image` sized to fill a box of `size` cells (keeping its proportions) and encoded for what
-/// `picker` draws, or `None` when it could not be.
+/// `image` cropped from the centre to the shape of a box of `size` cells (it is never shrunk to
+/// fit, so it fills the box) and encoded for what `picker` draws, or `None` when it could not be.
 pub(in crate::tui) fn build(picker: &Picker, image: DynamicImage, size: Size) -> Option<Protocol> {
+    let font = picker.font_size();
+    let (box_w, box_h) = (
+        u64::from(size.width) * u64::from(font.width),
+        u64::from(size.height) * u64::from(font.height),
+    );
+    let (w, h) = (u64::from(image.width()), u64::from(image.height()));
+    let image = if box_w == 0 || box_h == 0 || w == 0 || h == 0 {
+        image
+    } else if w * box_h > h * box_w {
+        // Wider than the box: keep the middle columns.
+        let keep = u32::try_from((h * box_w / box_h).max(1)).unwrap_or(u32::MAX);
+        image.crop_imm((image.width() - keep) / 2, 0, keep, image.height())
+    } else if w * box_h < h * box_w {
+        let keep = u32::try_from((w * box_h / box_w).max(1)).unwrap_or(u32::MAX);
+        image.crop_imm(0, (image.height() - keep) / 2, image.width(), keep)
+    } else {
+        image
+    };
     picker
         .new_protocol(image, size, Resize::Scale(Some(FilterType::CatmullRom)))
         .ok()

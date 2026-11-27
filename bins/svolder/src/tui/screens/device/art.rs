@@ -3,10 +3,12 @@
 
 //! The cover art at the right of the Status pane's rows, beside the track's title.
 //!
-//! The picture takes the height of the pane's rows and as many columns as a square of that height
-//! is wide in the terminal's own cells, and the pane's rows are fit to what it leaves, so it is
-//! never over a value. It goes when the rows would have less than [`MIN_WORDS`] columns left,
-//! which is before the title does at any narrower width.
+//! The picture takes the height of the pane's rows and as many columns as the cover's own shape
+//! is wide at that height in the terminal's own cells (a square cover: a square), and the pane's
+//! rows are fit to what it leaves, so it is never over a value. The box stops widening when the
+//! rows would have less than [`MIN_WORDS`] columns left, and the picture is then cropped from the
+//! centre to the box. It goes when the box would be narrower than [`MIN_COLS`], which is before
+//! the title does at any narrower width.
 //!
 //! The picture's height is the Status pane's rows: the pane is as tall as its rows (and a blank
 //! row at the end in the tall tier) whatever the cover, so the cover never grows the pane.
@@ -24,10 +26,10 @@ pub(super) const GAP: u16 = 2;
 
 /// The fewest columns the rows' words keep beside the art: what the Device row and the readouts
 /// need to say what they say at their usual length.
-const MIN_WORDS: u16 = 64;
+pub(super) const MIN_WORDS: u16 = 64;
 
 /// The fewest columns and rows a picture is worth drawing in.
-const MIN_COLS: u16 = 4;
+pub(super) const MIN_COLS: u16 = 4;
 const MIN_ROWS: u16 = 3;
 
 /// The terminal's cell size in pixels when `app` has a cover to show beside a `Now playing` row:
@@ -43,9 +45,11 @@ fn wanted(app: &App) -> Option<(u16, u16)> {
 }
 
 /// The most picture the Status pane at `status` (in a frame of `tier`) can take beside its rows
-/// for `app`: its rows' height (the pane's interior less its blank end row) by the columns that make a square in the terminal's cells,
-/// held to what leaves the words [`MIN_WORDS`]. `None` with no cover to show, art off, no
-/// `Now playing` row to be beside, or no room.
+/// for `app`: its rows' height (the pane's interior less its blank end row) by the columns that
+/// make the cover's own shape in the terminal's cells (a square until the cover is decoded), at
+/// least [`MIN_COLS`] (a very tall cover is cropped rather than lost), held to what leaves the
+/// words [`MIN_WORDS`]. `None` with no cover to show, art off, no `Now playing` row to be beside,
+/// or no room.
 pub(super) fn box_in(status: Rect, tier: Tier, app: &App) -> Option<Size> {
     let (cell_w, cell_h) = wanted(app)?;
     let inner = tier.block().inner(status);
@@ -53,10 +57,21 @@ pub(super) fn box_in(status: Rect, tier: Tier, app: &App) -> Option<Size> {
     let room = inner.width.saturating_sub(trail + GAP + MIN_WORDS);
     // The picture is as tall as the pane's rows: the tall tier's blank row at the pane's end stays blank.
     let rows = inner.height.saturating_sub(tier.end_blank());
-    let square = u32::from(rows) * u32::from(cell_h);
-    let square = u16::try_from(square.div_ceil(u32::from(cell_w))).unwrap_or(u16::MAX);
+    // The cover's width over its height, as pixel counts; a square until the cover is known.
+    let (shape_w, shape_h) = app
+        .host
+        .cover
+        .extent
+        .as_ref()
+        .filter(|(hash, ..)| app.host.cover.hash.as_deref() == Some(hash.as_str()))
+        .map_or((1, 1), |(_, w, h)| {
+            (u64::from(*w).max(1), u64::from(*h).max(1))
+        });
+    let wide = u64::from(rows) * u64::from(cell_h) * shape_w;
+    let wide = wide.div_ceil(u64::from(cell_w) * shape_h);
+    let wide = u16::try_from(wide).unwrap_or(u16::MAX);
     let size = Size {
-        width: square.min(room),
+        width: wide.max(MIN_COLS).min(room),
         height: rows,
     };
     (size.width >= MIN_COLS && size.height >= MIN_ROWS).then_some(size)
