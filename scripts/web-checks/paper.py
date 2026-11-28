@@ -183,8 +183,8 @@ def the_sheet(b, d):
     check('  the page without the theme is Ember', load(b, d, '?effects=off') == 'ember')
     b.press('T')
     cards = b.page(PICKER_CARDS)
-    check('  the picker lists Ember, Paper, Signal and Night drive',
-          cards == ['ember', 'paper', 'signal', 'nightdrive'], cards)
+    check('  the picker lists Ember, Paper, Signal, Night drive and Void Garden',
+          cards == ['ember', 'paper', 'signal', 'nightdrive', 'voidgarden'], cards)
     # a theme's picture is drawn once its module has loaded, so the card has none for a moment
     poll(lambda: b.page("!!document.querySelector('#picker .tcard[data-theme=paper] .tprev svg')"), 5.0)
     previews = b.page("[...document.querySelectorAll('#picker .tcard')]"

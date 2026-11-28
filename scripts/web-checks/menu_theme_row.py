@@ -45,7 +45,7 @@ def main():
     d = common.Daemon(host='fake')
     try:
         for theme in modal.THEMES:
-            b = (common.Chromium if browser == 'chromium' else common.Firefox)(size=SIZES[0])
+            b = modal.browser_for(browser, SIZES[0], theme)
             try:
                 load(b, d, theme)
                 for w, h in SIZES:

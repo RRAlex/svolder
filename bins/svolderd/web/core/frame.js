@@ -16,8 +16,8 @@
 //                      boolean or a function asked at each placing) places it against the window,
 //                      for a slot pinned at the top that never moves as the page scrolls
 //   realign()          place it again and bring the menu's rows up to date (after a redraw)
-//   fade(on)           the button fades after 2 s without a pointer move, touch or key (a theme
-//                      that fills the screen); any of those brings it back at once
+//   fade(on, ms)       the button fades after `ms` (2 s) without a pointer move, touch or key (a
+//                      theme that fills the screen); any of those brings it back at once
 //   openMenu(), closeMenu(), openPicker(), closePicker()
 //   inMenu(node)       whether a node is inside the menu, its button included
 //   menuOwns(event)    whether a key press is the menu's own, not the page's: any key while the focus
@@ -180,6 +180,7 @@ export function createFrame({ window, core, pick }) {
 
   // ---- the fade ----
   let fading = false;
+  let fadeMs = FADE_MS;
   let timer = 0;
   let listening = null;
 
@@ -187,7 +188,7 @@ export function createFrame({ window, core, pick }) {
   function wake() {
     clearTimeout(timer);
     button.classList.remove('faded');
-    if (fading) timer = setTimeout(sleep, FADE_MS);
+    if (fading) timer = setTimeout(sleep, fadeMs);
   }
 
   /** Whether a modal sheet stands over the page: one of the stack, or one a theme draws itself
@@ -229,14 +230,15 @@ export function createFrame({ window, core, pick }) {
   /** The wait is over: the button fades, unless the menu or a modal is open. */
   function sleep() {
     if (menu.opened() || modal.opened()) {
-      timer = setTimeout(sleep, FADE_MS);
+      timer = setTimeout(sleep, fadeMs);
       return;
     }
     button.classList.add('faded');
   }
 
-  function fade(on) {
+  function fade(on, ms = FADE_MS) {
     fading = Boolean(on);
+    fadeMs = ms;
     listening?.abort();
     listening = null;
     if (fading) {

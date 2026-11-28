@@ -819,7 +819,7 @@ out.`), and a name that is taken asks `Save over "Desk"?` in place. A recall tha
 preset on a device and on the computer at once asks the daemon's question in the row (`Recall
 anyway`); yes recalls the scene as it was saved. `Escape` closes an open question first and the
 popup after it. A scene that was deleted or renamed elsewhere answers `That scene is gone.`, and the
-list is read again once. The popup is the same in all four themes, drawn with each theme's own popup
+list is read again once. The popup is the same in all five themes, drawn with each theme's own popup
 look.
 
 **PipeWire config** is the menu's *PipeWire config…* row (plain, with no state text), in every
@@ -1128,6 +1128,68 @@ backing pixel per CSS pixel). A word that is not a name is listed as unknown. Th
 the query, not after a `#`, which the page drops at once; a step to another device drops it from the
 address, and the box stays until the page is reloaded. Signing in with a link also drops the query
 (the sign-in page goes on to `./`), so open the link once, then the address with the query.
+
+**Void Garden** is the page's fifth theme: a night garden that grows with the music (`?theme=voidgarden`;
+dark only, and it needs WebGPU or WebGL2). Its controls stay out of the scene's way:
+
+- **Two corners.** On a desktop the bottom left holds the device's chip and `This computer`, the
+  volume `−` figure `+`, mute and the input as one chip that opens a list; the bottom right holds the
+  cover and track, previous, play or pause, next and, in amber, the three explore keys. *Device
+  controls…* is the first row of the menu.
+- **Explore.** *New seed* (`S`) is a new set of worlds for the track, *Next scene* (`N`) the next world
+  of the set and *Effect* (`E`) one of the scene's effects. Each shows a two-line tooltip on hover or
+  keyboard focus. A new track starts its own set, and a seed always draws the same world. *Effect* flashes
+  only on Full, and within the page's limit of three flashes a second. `?` lists the keys.
+- **It fades.** With no pointer move, key or tap for 3 seconds (4 on a phone) the corners, the menu
+  button and the audio panel fade to nothing over about 0.6 s; any input brings them back, and the
+  press or tap that wakes them does nothing else. Keyboard focus in the corners, a held key and a
+  mouse resting on them keep them. The menu's *Pin features panel* keeps the panel on.
+- **Audio features panel.** Ten features, each with a 24-segment bar and its peak hold, a three-digit
+  figure and 18 seconds of history with marks at -15, -10 and -5 s, then the over and link lamps, the
+  rate, the seed and Q. It takes its colours from the scene's palette; *Audio panel* in the menu
+  keeps its Panel, Spread and Off.
+- **On a phone.** The features chip and one capsule (volume, play, `⋯`) fade after 4 seconds. The chip
+  opens the panel at the top, left of the menu button, with 9 seconds of history; the chip or a tap on
+  the panel closes it. `⋯` opens a sheet: the device, the computer and the input; the cover and the
+  whole title; previous, play, next and mute; the three explore actions. A swipe down or a tap above
+  closes it. Every target is 44 px.
+- **Keys.** `↑` and `↓` step the volume (a held key repeats), `A` cycles the audio panel (Panel,
+  Spread, Off), `S`, `N` and `E` are the explore keys; `T` opens the picker, `?` lists them all and
+  Space plays and pauses. On the phone's sheet `Esc` closes it.
+- **The menu.** *Device controls…* opens the device's full controls (and the computer's, with the
+  `Device | This computer` switch). *Motion* is Full, Calm or Still (a system that asks for reduced
+  motion starts on Calm). *Audio panel* is Panel, Spread or Off. *Pin features panel* keeps the
+  panel from fading. *Detail* is Auto, High or Low. *Renderer* is Auto, WebGPU or WebGL2. Each is kept
+  in the browser, and where the browser keeps nothing it stands until the page is closed.
+- **Smooth 30 or 60.** The scene aims at a smooth 60 frames a second on a desktop and at an even
+  30 on a phone or on a screen that cannot show 60, and gives up picture to hold it: first the far
+  picture's detail and its resolution, then the particles, then the effects, and the sphere and
+  the whole frame's resolution last. When the GPU can do 30 at full detail it stays at full detail
+  at 30; 60 is tried again twice, given up at once each time the GPU cannot hold it, and after two
+  failed tries not again until the page is loaded again.
+  Where it settled is remembered for that browser, that GPU and that window size, so a new GPU or a
+  differently sized window reads again. *Detail* High holds the top, Low holds the lowest step,
+  and Auto is all of this.
+- **Renderer.** On a browser's first visit with *Auto*, the scene measures WebGPU and WebGL2 for a
+  moment behind a black frame and keeps the faster for that browser, its version, the GPU and the
+  screen's size (an update, another GPU or another size measures again). Choosing WebGPU or
+  WebGL2 instead keeps that one; a change applies when the page is loaded again. Where neither is
+  available the page shows a still of the valley and says `This theme needs WebGPU or WebGL2`;
+  the controls still work.
+- **The audio panel and the HUD.** Besides the panel the scene shows readings that come in at the
+  music's moments (a new section, a new track, the path starting to change the sound, a new
+  rate): the computer's output, EQ, crossfeed and loudness, the signal path (amber when it changes
+  the sound), the DAC's volume, input, rate and link, and an amp's power, tone and meters. A reading
+  a device does not report is left out. A mute frosts the scene and a changed path thickens its fog;
+  nothing flashes more than three times a second.
+- **Address parameters.** `?vg-gpu=webgl2` (or `webgpu`) asks for one renderer for that visit.
+  `?vg-debug` shows a readout whose first line names the renderer (`WebGPU · amd`, `WebGL2 · no
+  adapter`, `WebGL2 · not a secure context`, `WebGL2 · chosen`), and
+  `?vg-debug=nosky,noland,noriver,noflora,nobeacons,nohero,noparticles,nopost,nodash,nohud,nopanel`
+  also turns the named layers or parts off, to find on a phone what costs the most. A word that is
+  not a name is listed as unknown.
+
+More on how it is built is in [Void Garden's design page](../design/web-voidgarden.md).
 
 ## web
 

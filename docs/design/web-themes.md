@@ -12,19 +12,7 @@ contract, and how to add one. The details sit in the pages it points to: [the fr
 [the page and its stream](web-ui.md), [Ember's effects and Arrange mode](themes-and-effects.md),
 [the checks](testing.md). It sits below [the map](../architecture.md).
 
-The page ships four themes. **Ember** is the test theme: it is complete and it looks and behaves as
-the page does, so it proves the core against every kind of device. **Paper** is a sheet of squared
-paper in light and dark, with written controls and handwritten notes ([web-paper.md](web-paper.md));
-building it on the core alone found seven gaps in the core, which that page lists. **Signal** is the
-sound's way from the player to the ears drawn as one line, dark only, with the chosen hop opened
-below it ([web-signal.md](web-signal.md)); it found three gaps: two in the page model's computer
-facts and the order in which the daemon shuts the web server and the host service down. **Night
-drive** is the music drawn as an outrun road, dark only, with the volume as a large neon number and
-the rest of the device on a sheet ([web-nightdrive.md](web-nightdrive.md)); it found gaps in the
-canvas loop, the analysis rules, the menu and the picker, and in the reserved keys, which that page
-lists. Its computer side is two keys by the menu button (the panel's top row on a phone) that turn the volume
-figure, the dash's keys and the curve on the mountains into the computer's
-([host-control-themes.md](host-control-themes.md#night-drive)).
+The page ships five themes. **Ember** is the test theme: it is complete and it looks and behaves as the page does, so it proves the core against every kind of device. **Paper** is a sheet of squared paper in light and dark, with written controls and handwritten notes ([web-paper.md](web-paper.md)); building it on the core alone found seven gaps in the core, which that page lists. **Signal** is the sound's way from the player to the ears drawn as one line, dark only, with the chosen hop opened below it ([web-signal.md](web-signal.md)); it found three gaps: two in the page model's computer facts and the order in which the daemon shuts the web server and the host service down. **Night drive** is the music drawn as an outrun road, dark only, with the volume as a large neon number and the rest of the device on a sheet ([web-nightdrive.md](web-nightdrive.md)); it found gaps in the canvas loop, the analysis rules, the menu and the picker, and in the reserved keys, which that page lists. Its computer side is two keys by the menu button (the panel's top row on a phone) that turn the volume figure, the dash's keys and the curve on the mountains into the computer's ([host-control-themes.md](host-control-themes.md#night-drive)). **Void Garden** is a night garden drawn on the GPU that grows with the music, dark only, on three.js ([web-voidgarden.md](web-voidgarden.md), [its checks](web-voidgarden-checks.md)): the one theme with a frame budget, a choice of WebGPU or WebGL2 and a library of its own, and the one that opens the core's Device controls popup for what its dash does not draw ([controls-popup.md](controls-popup.md)).
 
 ## Who owns what
 
@@ -150,13 +138,13 @@ a device's: a wait after a wake drops a raise for every device until the first r
 | `title` | the browser tab's title for every theme: `<device> · connected — svolder` (`reconnecting`, `reading again`, `resting`, the lowercased title of a card for a device out of reach, `fault`); `add(fn)` puts a theme's words after the status and returns the function that takes them away (the open popup's name stands there the same way; with no device shown the title is those words alone, `Devices — svolder`, and `svolder` without any); `statusOf(page, state)` is the status word for a theme's own trouble line |
 | `repeat` | `repeat(event, { root, step, … })`: a pressed `−` or `+` steps once and, held, repeats after `REPEAT_AFTER_MS` (380) every `REPEAT_EVERY_MS` (70), up to a cap of 10 s; it follows the button of the pressed one's id through a redraw and ends at the pointer's release anywhere, the window's blur, the page hidden and the other ends the node harness lists. `core.hold` (`hold.repeat`, `hold.AFTER_MS`, `hold.EVERY_MS`) is the old name, kept as a pinned alias: the current name is `core.repeat` |
 | `registry`, `theme`, `climb`, `toneNote`, `stream` | the registry of themes and the entry of the one mounted (`theme.id`, its `schemes`), the raised-volume toast, the tone mode's note, the stream |
-| `driver` | the checks' driver for the device's facts (`reach`, `shown`; see "Every theme is complete"); test surface, never called by a theme |
+| `driver` | the checks' driver for the device's facts (`reach`, `shown`; see "Every theme is complete") and, as `driver.controls` (`reach`, `operate`, `shown`, `state`), for the Device controls popup ([controls-popup.md](controls-popup.md)): only a theme's test driver hands the targets it does not draw to it (a theme with no sheet of its own for the controls); test surface, no theme calls it at run time |
 
 A theme reaches the core's services only through `core`; it imports a core module directly only for
 what holds no state and reaches no service. `PURE` in `scripts/theme-css-check.py` is the one list
-(`make theme-css-check` fails on a theme file that imports anything else, a namespace import and a
-dynamic import included; it reads the imports by pattern, so a path put together elsewhere and
-handed to `import()` is not seen). Whole modules: `act`, `contract`, `html`, `phone`, `plot`,
+(`make theme-css-check` fails on a theme file that imports anything else, a namespace or dynamic
+import included; it reads the imports by pattern, so a path put together elsewhere and handed to
+`import()` is not seen). Whole modules: `act`, `contract`, `html`, `path-words`, `phone`, `plot`,
 `tone-curve`, `viz-model` and `words`, and the two shared widgets `list` and `inline-ask`: they
 reach no service, and the one thing each keeps is which list or question is open in each scope (a
 modal of the stack, else the page; [frame.md](frame.md), "Parts a popup shares with the themes"), so
@@ -305,14 +293,14 @@ learns it once. Each line names its check, or says which theme does not keep it 
   Checked by `frame_button.py` (every listed theme, signed in, guest and with a long device name, at
   1280x800, 768x1024, 412x915 and 360x780: the exact rectangle, nothing under it at the top of the
   page, the same rectangle and an opaque backdrop after a scroll) and, for the menu's scrolling,
-  `effects_menu.py`. Kept by all four.
+  `effects_menu.py`. Kept by all five.
 - **Space plays and pauses the computer's player in every theme.** The frame's second reserved key:
   Space alone, not a repeat, with the focus neither in a field it would type into nor on a button, a
   link, a summary, a select or an element with a role Space activates (button, slider, switch,
   checkbox, tab, option, menu items), and no menu, picker or modal dialog open, posts one press of
   `pause` (while the player plays) or `play` through `core.actions.press`, and the page does not
   scroll. Night drive's sheet counts as a modal dialog. Nothing where the page has no player or the player has no buttons. Checked by
-  `space_key.py` (all four themes) and `node/frame-keys.mjs`.
+  `space_key.py` (every theme) and `node/frame-keys.mjs`.
 - **The device's connection state is a mark beside its name, and every state but connected is also
   in words**, never by colour alone. The words are checked in every theme by
   `contract.py` (`the_link_state_is_in_words_beside_the_name`, through the driver's `linkWords()`):

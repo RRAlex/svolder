@@ -4,6 +4,7 @@
 // the path's verdict, which trouble replaces), the EQ line and the volume. No DOM here; the
 // drawing is in draw/hud.js and draw/volume.js.
 
+import { computerOf, dacOf as dacWordsOf } from '../../core/path-words.js';
 import { fitWords, overlayNote } from '../../core/plot.js';
 import { TITLE, statusOf } from '../../core/title.js';
 import { HUD } from './words.js';
@@ -19,19 +20,9 @@ function inputAndRate(device) {
   return [input?.options?.find((o) => o.on)?.label, rate?.text];
 }
 
-/** The path's words that name a stage of the computer's filter chain: the words `chain_words` in
- * crates/svolder-ipc/src/host/path.rs gives them; change both together. */
-const STAGE_WORDS = ['host EQ on', 'loudness on', 'crossfeed on', 'virtual speakers on', 'EQ pass-through'];
-
-/** The words of the DAC hop's detail that name the DAC's own stage: the words `DacStage::hop_words` in
- * crates/svolder-ipc/src/host/path.rs gives them (a volume reads `volume -3.3 dB`); change both together. */
-const DAC_WORDS = ['tone control', 'balance off centre', 'muted', 'phase inverted', 'NOS filter'];
-
 /** The DAC's own stage the path names, in words (`volume −3.3 dB · tone control`), or ''. */
 function dacStage(page) {
-  const hop = page?.device?.playing?.path?.hops?.find((h) => h.label === 'DAC');
-  const said = String(hop?.detail ?? '').split(', ').filter((w) => w.startsWith('volume ') || DAC_WORDS.includes(w));
-  return said.join(' · ');
+  return dacWordsOf(page).join(' · ');
 }
 
 /** The verdict in words, and whether it is worth the amber: what the computer does to the sound, then
@@ -45,15 +36,12 @@ function verdictOf(page) {
 }
 
 /** What the computer does to the sound, in words, and whether it is worth the amber: the stages of the
- * filter chain the path names (`host EQ on`, `loudness on`, `crossfeed on`, ...; the route's host EQ with the fixed
- * words when the path has none), and the path's flag for the computer. */
+ * filter chain the path names (`host EQ on`, `loudness on`, `crossfeed on`, ...; the fixed words when
+ * the path names none), and the path's flag for the computer (core/path-words.js). */
 function computerVerdict(page) {
-  const hop = page?.device?.playing?.path?.hops?.find((h) => h.label === 'computer');
-  const eq = page?.host?.route?.host_eq === true;
-  const changes = hop ? hop.changes === true : eq;
+  const { eq, changes, stages } = computerOf(page);
   if (eq) {
-    const said = (page?.device?.playing?.path?.words ?? []).filter((w) => STAGE_WORDS.includes(w));
-    const stage = said.length ? said.join(' · ') : HUD.hostEq;
+    const stage = stages.length ? stages.join(' · ') : HUD.hostEq;
     return { words: changes ? `${stage} · ${HUD.changes}` : stage, tone: changes ? 'warn' : null };
   }
   return changes ? { words: HUD.changes, tone: 'warn' } : { words: '', tone: null };

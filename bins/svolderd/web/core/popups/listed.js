@@ -4,7 +4,7 @@
 // and its row in the frame's menu together, so a row cannot stand without its popup, nor a
 // popup without its row:
 //
-//   { name, title, entries?, stays?, load, row: { label, sees } }
+//   { name, title, entries?, stays?, load, row: { label, sees, menu? } }
 //
 //   name      the popup's name: the router's (`core.router.open(name)`) and its folder's
 //   title     its title, until a draw names another
@@ -15,7 +15,9 @@
 //   load      `() => import('./<name>/wire.js')`: the popup's code, fetched at its first opening
 //   row       its row in the menu: `label`, the row's words, and `sees`, who has the popup:
 //             `'everyone'`, or `'writer'` (a viewer who may write: no guest, and not on a page
-//             whose writes are off; `mayWrite` of write.js, the core's one rule)
+//             whose writes are off; `mayWrite` of write.js, the core's one rule), and `menu`, `false`
+//             for a popup a theme opens itself (`core.router.open(name)`) and the menu has no row
+//             for: it is gated by `sees` like any listed popup, and `frameRows` leaves it out
 //
 // `createCore` adds every entry to `core.popups` (popups.js), and the menu's rows
 // (menu-rows.js) are read from the same entries, in this order. `sees` is the popup's, not only
@@ -49,6 +51,10 @@ export const SPEAKERS = 'speakers';
  * deleted from one list (a writer's only). */
 export const SCENES = 'scenes';
 
+/** The name of the Device controls popup: the shown device's controls by kind, and the computer's
+ * side, for a theme that has no sheet of its own (a theme opens it; the menu has no row for it). */
+export const CONTROLS = 'controls';
+
 /** The name of the PipeWire config popup: the check of the sink the player's stream reaches
  * (read-only, the daemon's words), opened from the chip on a theme's path line or from its row. */
 export const SETUP = 'setup';
@@ -68,7 +74,9 @@ export const devicePage = (url) => `d-${url}`;
  * tabs are the pages (sound/draw.js). Scenes is a writer's too (a scene is saved and recalled
  * on the daemon, for the computer and every device) and stays through a change of the shown
  * device: it is about all of them, not the one on show. PipeWire config is everyone's (it only shows what the
- * daemon read) and closes with a change of the shown device: it is about that card's path. */
+ * daemon read) and closes with a change of the shown device: it is about that card's path. Device
+ * controls is everyone's (a reader's draws every control inert) and closes with a change of the
+ * shown device; it is opened by a theme and has no row in the menu (`menu: false`). */
 export const POPUPS = [
   {
     name: DEVICES,
@@ -98,6 +106,12 @@ export const POPUPS = [
     row: { label: 'PipeWire config…', sees: 'everyone' },
   },
   {
+    name: CONTROLS,
+    title: 'Device controls',
+    load: () => import('./controls/wire.js'),
+    row: { label: 'Device controls…', sees: 'everyone', menu: false },
+  },
+  {
     name: HELP,
     title: 'Help',
     entries: [
@@ -115,6 +129,9 @@ export const SEES = ['everyone', 'writer'];
 
 /** The id of the menu row of the popup `name`. */
 export const rowId = (name) => `menu-popup-${name}`;
+
+/** Whether the menu has a row for `popup`: every popup does but one listed with `menu: false`. */
+export const hasRow = (popup) => popup.row.menu !== false;
 
 /** Whether `viewer` (the page's: `guest`, `writes`) has `popup`: its row, and the popup. */
 export function seenBy(popup, viewer) {
@@ -140,6 +157,9 @@ export function checkListed(list) {
     if (!text(popup.row.label)) throw bad('its row has a `label`, the row\'s words');
     if (!SEES.includes(popup.row.sees)) {
       throw bad(`its row says who \`sees\` it: ${SEES.map((one) => `'${one}'`).join(' or ')}`);
+    }
+    if (popup.row.menu !== undefined && typeof popup.row.menu !== 'boolean') {
+      throw bad('its row\'s `menu` is true or false: false for a popup the menu has no row for');
     }
   }
 }

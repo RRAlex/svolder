@@ -205,6 +205,34 @@ pub(crate) static THEMES: &[Theme] = &[
             js "points-wire.js"
         ]
     },
+    theme! {
+        id: "voidgarden",
+        label: "Void Garden",
+        blurb: "a night garden that grows with the music",
+        styles: ["style.css"],
+        color_scheme: "dark",
+        theme_color: "#030406",
+        theme_color_dark: None,
+        schemes: ["dark"],
+        scripts: [],
+        metas: [],
+        files: [
+            css "style.css",
+            js "voidgarden.js", js "key-table.js", js "preview.js", js "driver.js", js "gpu.js",
+            js "scene-wire.js", js "layers.js", js "budget.js", js "motion.js", js "hud.js",
+            js "hud-wire.js", js "panel-wire.js", js "dash-wire.js", js "states.js", js "words.js",
+            js "debug.js", js "debug-wire.js", js "tier-probe.js",
+            js "features.js", js "director.js", js "cues.js", js "history.js", js "wave.js",
+            js "palette.js", js "rng.js",
+            js "layers/sky.js", js "layers/land.js", js "layers/land-cache.js", js "layers/river.js",
+            js "layers/flora.js",
+            js "layers/beacons.js", js "layers/hero.js", js "layers/particles.js",
+            js "layers/post.js",
+            js "tsl/lib.js", js "tsl/sprite.js", js "tsl/post.js",
+            js "draw/hud.js", js "draw/panel.js", js "draw/dash.js", js "draw/card.js",
+            js "vendor/three.core.js", js "vendor/three.tsl.js", js "vendor/three.webgpu.js"
+        ]
+    },
 ];
 
 /// A theme that exists only in the tests: it lets a test see the choice go to a theme the page does

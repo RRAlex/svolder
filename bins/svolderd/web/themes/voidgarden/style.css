@@ -1,0 +1,476 @@
+/* SPDX-FileCopyrightText: 2026 the svolder authors */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+
+/* The theme Void Garden: a night garden that grows with the music, on a near-black ground. Dark
+   only. The scene is one canvas under HTML layers; the page itself never scrolls. The frame's
+   button, menu and popups are dressed by the --frame-* tokens below and by nothing else. */
+
+/* frame tokens */
+
+:root[data-theme="voidgarden"] {
+  color-scheme: dark;
+  --vg-night: #030406;
+  --vg-deep: #0b1420;
+  --vg-ink: #e6f1f7;
+  --vg-mid: #a9bccb;
+  --vg-dim: #8aa0b1;
+  --vg-teal: #4fd1c5;
+  --vg-teal-ink: #7fe3c8;
+  --vg-teal-key: #c4f5ea;
+  --vg-warn: #f2c55c;
+  --vg-bad: #ff6b7a;
+  --vg-hair: rgba(230, 241, 247, .10);
+  --vg-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --vg-mono: "IBM Plex Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+  --frame-btn-fg: var(--vg-teal-ink);
+  --frame-btn-border: rgba(79, 209, 197, .55);
+  --frame-btn-fg-hover: var(--vg-teal-key);
+  --frame-btn-border-hover: var(--vg-teal-key);
+  --frame-btn-bg: var(--vg-night);
+  --frame-btn-size: 44px;
+  --frame-btn-radius: 50%;
+  --frame-surface: var(--vg-deep);
+  --frame-hover: #13202f;
+  --frame-ink: var(--vg-ink);
+  --frame-dim: var(--vg-mid);
+  --frame-faint: var(--vg-dim);
+  --frame-line: rgba(230, 241, 247, .19);
+  --frame-line-strong: rgba(230, 241, 247, .34);
+  --frame-accent: var(--vg-teal);
+  --frame-on-accent: var(--vg-night);
+  --frame-scrim: rgba(3, 4, 6, .72);
+  --frame-shadow: 0 12px 32px rgba(0, 0, 0, .55);
+  --frame-toast-shadow: 0 14px 34px -12px rgba(0, 0, 0, .8);
+  --frame-toast-lift: 84px;
+  --frame-field-bg: rgba(3, 4, 6, .6);
+  --frame-field-border: var(--vg-teal);
+  --frame-danger: var(--vg-bad);
+  --frame-ok: var(--vg-teal-ink);
+  --frame-warn: var(--vg-warn);
+  --frame-graph-series: var(--vg-teal);
+  --frame-graph-grid: var(--vg-hair);
+  --frame-graph-target: var(--vg-teal-key);
+  --frame-graph-gap: color-mix(in srgb, var(--vg-warn) 38%, transparent);
+  --frame-graph-compare: var(--vg-warn);
+  --frame-offline: var(--vg-dim);
+  --frame-font: var(--vg-sans);
+}
+
+/* the page: it fits the window and does not scroll */
+
+:root[data-theme="voidgarden"], :root[data-theme="voidgarden"] body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--vg-night);
+  color: var(--vg-ink);
+  font: 400 15px/1.5 var(--vg-sans);
+  -webkit-tap-highlight-color: transparent;
+}
+
+#voidgarden, #voidgarden *, #voidgarden *::before, #voidgarden *::after { box-sizing: border-box; }
+#voidgarden [hidden] { display: none !important; }
+#voidgarden {
+  position: relative; width: 100vw; height: 100dvh; overflow: hidden; background: var(--vg-night);
+}
+
+/* scene, dash, card, states */
+
+#vg-scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+/* a scene with no GPU: the still of the valley and its quiet line */
+#vg-still { position: absolute; inset: 0; }
+#vg-still svg { width: 100%; height: 100%; display: block; }
+#vg-quiet {
+  position: absolute; left: 0; right: 0; bottom: 18%; margin: 0; text-align: center; color: var(--vg-dim);
+}
+/* where the frame's menu button sits: the window's top right */
+#vg-slot {
+  position: fixed; right: max(8px, env(safe-area-inset-right, 0px));
+  top: max(8px, env(safe-area-inset-top, 0px)); width: 44px; height: 44px; pointer-events: none;
+}
+
+/* the page's state: opacity and filter only; the words of it stay readable */
+#voidgarden[data-mood="unreachable"] #vg-scene, #voidgarden[data-mood="wait"] #vg-scene {
+  filter: grayscale(1) brightness(.55);
+}
+#voidgarden[data-mood="lost"]::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: rgba(169, 188, 203, .16); backdrop-filter: blur(4px) saturate(.4);
+  -webkit-backdrop-filter: blur(4px) saturate(.4);
+}
+#vg-card {
+  position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); z-index: 3;
+  width: min(92vw, 30rem); text-align: center; pointer-events: none;
+}
+#vg-card .vg-cardslot > * { pointer-events: auto; }
+:is(#vg-dash, #vg-card) .vg-line {
+  margin: 0 0 12px; color: var(--vg-ink); font: 500 .95rem/1.4 var(--vg-sans);
+  text-shadow: 0 1px 8px var(--vg-night);
+}
+:is(#vg-dash, #vg-card) .vg-cardbox {
+  padding: 18px 20px; border-radius: 14px; background: color-mix(in srgb, var(--vg-deep) 90%, transparent);
+  border: 1px solid var(--vg-hair); box-shadow: var(--frame-shadow);
+}
+:is(#vg-dash, #vg-card) .vg-cardbox h2 { margin: 0 0 6px; font: 600 1.05rem/1.3 var(--vg-sans); color: var(--vg-ink); }
+:is(#vg-dash, #vg-card) .vg-detail { margin: 0 0 12px; color: var(--vg-mid); }
+:is(#vg-dash, #vg-card) .vg-detail code { font-family: var(--vg-mono); color: var(--vg-teal-key); }
+:is(#vg-dash, #vg-card) .vg-tryline { margin: 0; display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; }
+:is(#vg-dash, #vg-card) .vg-retry { color: var(--vg-mid); font: 400 .85rem/1.2 var(--vg-mono); }
+
+/* the dash: two glass capsules in the bottom corners (a phone: one capsule, the features chip and a
+   sheet). The theme's own night shows through them; they fade away with the rest of the chrome after
+   3 s without a pointer move (4 s on a phone), and any input brings them back (dash-wire.js) */
+#vg-dash {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; pointer-events: none;
+  padding: 0 max(18px, env(safe-area-inset-right, 0px)) max(18px, env(safe-area-inset-bottom, 0px))
+    max(18px, env(safe-area-inset-left, 0px));
+  --vg-amber: #f3c97a; --vg-glass: rgba(6, 9, 14, .62); --vg-glass-line: rgba(196, 236, 255, .18);
+}
+:is(#vg-dash, #vg-card) .vg-bar {
+  display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px;
+}
+#vg-dash .vg-bar > * { pointer-events: auto; }
+#vg-dash .vg-cap {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 16px; min-width: 0;
+  background: var(--vg-glass); border: 1px solid var(--vg-glass-line); white-space: nowrap;
+  backdrop-filter: blur(10px) saturate(1.1); -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  font: 400 .85rem/1.2 var(--vg-sans);
+}
+#vg-dash .vg-r { margin-left: auto; }
+#voidgarden.vg-dim #vg-dash .vg-cap, #voidgarden.vg-dim #vg-dash .vg-fchip, #voidgarden.vg-dim #vg-dash .vg-sheet {
+  opacity: 0; transition: opacity .6s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  #voidgarden.vg-dim #vg-dash .vg-cap, #voidgarden.vg-dim #vg-dash .vg-fchip, #voidgarden.vg-dim #vg-dash .vg-sheet { transition: none; }
+}
+:is(#vg-dash, #vg-card) .vg-grp { display: flex; align-items: center; gap: 8px; }
+:is(#vg-dash, #vg-card) .vg-swkeys { display: inline-flex; gap: 6px; }
+:is(#vg-dash, #vg-card) .vg-vgrp { display: inline-flex; align-items: center; gap: 2px; }
+:is(#vg-dash, #vg-card) .vg-why { color: #ffe08a; font: 400 .8rem/1.2 var(--vg-sans); white-space: normal; }
+:is(#vg-dash, #vg-card) .vg-k {
+  display: inline-flex; align-items: center; justify-content: center; position: relative;
+  min-width: 34px; height: 34px; padding: 0 12px; margin: 0; border-radius: 10px;
+  border: 1px solid transparent; background: transparent; color: var(--vg-ink);
+  font: 500 .85rem/1 var(--vg-sans); cursor: pointer; user-select: none; -webkit-user-select: none;
+  touch-action: manipulation; white-space: nowrap;
+}
+:is(#vg-dash, #vg-card) .vg-k::after { content: ""; position: absolute; inset: -5px; }
+/* a hover look only where a pointer hovers: a finger's tap leaves none behind (the touch browsers keep :hover) */
+@media (hover: hover) {
+  :is(#vg-dash, #vg-card) .vg-k:hover { background: rgba(230, 241, 247, .12); }
+}
+:is(#vg-dash, #vg-card) .vg-k { -webkit-tap-highlight-color: transparent; }
+:is(#vg-dash, #vg-card) .vg-k:focus-visible { outline: 2px solid var(--vg-teal-key); outline-offset: 2px; }
+:is(#vg-dash, #vg-card) .vg-k.quiet { opacity: .5; }
+:is(#vg-dash, #vg-card) .vg-k.cy { border-color: rgba(79, 209, 197, .55); color: var(--vg-teal-ink); }
+:is(#vg-dash, #vg-card) .vg-k.on:not(.vg-chip):not(.vg-round) { background: var(--vg-teal); color: var(--vg-night); }
+:is(#vg-dash, #vg-card) .vg-round { width: 34px; padding: 0; border-radius: 50%; }
+:is(#vg-dash, #vg-card) .vg-round.on { background: rgba(127, 227, 214, .22); color: #a6f3ea; }
+:is(#vg-dash, #vg-card) .vg-big { width: 40px; height: 40px; border-color: var(--vg-glass-line); }
+:is(#vg-dash, #vg-card) .vg-chip {
+  height: 28px; padding: 0 12px; border-radius: 99px; border: 1px solid rgba(196, 236, 255, .45); font-size: .8rem;
+}
+:is(#vg-dash, #vg-card) .vg-chip.on { border-color: rgba(127, 227, 214, .55); color: #a6f3ea; }
+:is(#vg-dash, #vg-card) .vg-ic { width: 16px; height: 16px; display: block; }
+:is(#vg-dash, #vg-card) .vg-sv { width: 18px; height: 18px; }
+:is(#vg-dash, #vg-card) .vg-vol {
+  min-width: 5.6em; text-align: center; color: var(--vg-ink); font: 500 .95rem/1 var(--vg-mono);
+  font-variant-numeric: tabular-nums;
+}
+:is(#vg-dash, #vg-card) .vg-vol.muted { color: var(--vg-ink); }
+:is(#vg-dash, #vg-card) .vg-now { display: flex; align-items: center; gap: 10px; min-width: 0; }
+:is(#vg-dash, #vg-card) .vg-cover img { display: block; width: 32px; height: 32px; border-radius: 5px; object-fit: cover; }
+:is(#vg-dash, #vg-card) .vg-track { display: flex; flex-direction: column; min-width: 0; max-width: 19rem; }
+:is(#vg-dash, #vg-card) .vg-title { font: 500 .9rem/1.25 var(--vg-sans); color: var(--vg-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(#vg-dash, #vg-card) .vg-sub { color: var(--vg-ink); font: 400 .8rem/1.25 var(--vg-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#vg-dash .vg-tr { display: inline-flex; align-items: center; gap: 4px; }
+#vg-dash .vg-sep { width: 1px; height: 22px; background: var(--vg-glass-line); }
+#vg-dash .vg-explore { display: inline-flex; align-items: center; gap: 6px; }
+#vg-dash .vg-xp { color: var(--vg-amber); }
+@media (hover: hover) {
+  #vg-dash .vg-xp:hover { background: rgba(243, 201, 122, .16); }
+}
+/* the explore keys' tooltip: two lines (name and key, then what it does), see-through */
+#vg-dash .vg-tip {
+  position: absolute; right: -6px; bottom: calc(100% + 12px); display: grid; gap: 1px; padding: 6px 10px; border-radius: 8px;
+  background: rgba(6, 9, 14, .70); border: 1px solid rgba(243, 201, 122, .30); white-space: nowrap;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); pointer-events: none; opacity: 0;
+  transition: opacity .15s ease; font: 400 .8rem/1.3 var(--vg-sans); color: var(--vg-ink); text-align: left;
+}
+#vg-dash .vg-tip b { color: var(--vg-amber); font-weight: 500; }
+#vg-dash .vg-tip kbd { margin-left: .4em; padding: 0 4px; border: 1px solid var(--vg-glass-line); border-radius: 4px; font: 400 .85em var(--vg-mono); color: var(--vg-ink); }
+#vg-dash .vg-k:hover > .vg-tip, #vg-dash .vg-k:focus-visible > .vg-tip { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { #vg-dash .vg-tip { transition: none; } }
+/* the phone's parts exist only where the markup draws them (PHONE_QUERY): the features chip beside the
+   menu button, one capsule, and the sheet `⋯` opens */
+#vg-dash .vg-fchip {
+  position: fixed; top: max(8px, env(safe-area-inset-top, 0px)); height: 44px; min-width: 44px; padding: 0 14px;
+  right: calc(max(8px, env(safe-area-inset-right, 0px)) + 52px); gap: 8px; border-radius: 99px; pointer-events: auto;
+  background: var(--vg-glass); border: 1px solid var(--vg-glass-line); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+#vg-dash .vg-fchip.vg-gone, #vg-dash[data-sheet="open"] .vg-fchip { display: none; }
+#vg-dash .vg-pcap { margin: 0 auto; gap: 4px; padding: 4px 10px; border-radius: 99px; }
+#vg-dash[data-sheet="open"] .vg-pcap { visibility: hidden; }
+#vg-dash .vg-pcap .vg-k, #vg-dash .vg-sheet .vg-k { min-height: 44px; }
+#vg-dash .vg-pcap .vg-round, #vg-dash .vg-sheet .vg-round { width: 44px; height: 44px; }
+#vg-dash .vg-pcap .vg-big { width: 48px; height: 48px; }
+#vg-dash .vg-sheet-back, #vg-dash .vg-sheet { display: none; }
+#vg-dash[data-sheet="open"] .vg-sheet-back { display: block; position: fixed; inset: 0; pointer-events: auto; background: transparent; }
+#vg-dash[data-sheet="open"] .vg-sheet {
+  display: grid; position: fixed; left: 12px; right: 12px; gap: 10px; padding: 14px; border-radius: 16px; pointer-events: auto;
+  bottom: max(12px, env(safe-area-inset-bottom, 0px)); max-height: 70dvh; overflow-y: auto; overscroll-behavior: contain;
+  background: rgba(6, 9, 14, .78); border: 1px solid var(--vg-glass-line); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  white-space: normal; touch-action: pan-y;
+}
+#vg-dash .vg-sh-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+#vg-dash .vg-sheet .vg-chip { height: 44px; padding: 0 14px; font-size: .9rem; }
+#vg-dash .vg-sheet .vg-now { flex-wrap: nowrap; align-items: flex-start; }
+#vg-dash .vg-sheet .vg-track { max-width: none; flex: 1; min-width: 0; }
+#vg-dash .vg-sheet .vg-title { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+#vg-dash .vg-sheet .vg-sub { white-space: normal; }
+#vg-dash .vg-sheet .vg-cover img { width: 44px; height: 44px; }
+#vg-dash .vg-sh-tr { gap: 12px; }
+#vg-dash .vg-sh-ex { flex-wrap: nowrap; justify-content: space-between; gap: 6px; }
+#vg-dash .vg-xl {
+  flex: 1 1 0; min-width: 0; gap: 6px; padding: 0 8px; border-radius: 99px; color: var(--vg-amber);
+  border-color: rgba(243, 201, 122, .35); font-size: .78rem;
+}
+#vg-dash .vg-xl .vg-xn { white-space: nowrap; }
+
+/* the bisect switches (debug.js) and the readout's box */
+.vg-no-dash #vg-dash, .vg-no-hud #vg-hud, .vg-no-panel #vg-panel { display: none; }
+.vg-debug {
+  position: fixed; left: 8px; top: 8px; z-index: 5; margin: 0; padding: 6px 8px; border-radius: 6px;
+  background: rgba(3, 4, 6, .78); color: var(--vg-teal-key); font: 400 11px/1.35 var(--vg-mono);
+  white-space: pre; pointer-events: none;
+}
+
+/* HUD and panel */
+/* Every rule of this region is under #vg-hud or #vg-panel and every class of it starts `vg-h-`. The
+   bottom of the screen is the dash's: `--vg-dash-h` (set on #voidgarden by the dash) is its height
+   with its offset, and everything of this region at the bottom stands above it. */
+#vg-hud, #vg-panel {
+  position: absolute; inset: 0; pointer-events: none;
+  --vg-c0: var(--vg-teal); --vg-c1: var(--vg-teal-ink); --vg-c2: #b7a6ff; --vg-c3: var(--vg-ink);
+  --vg-pane: rgba(3, 4, 6, .86);
+  --vg-above: calc(var(--vg-dash-h, 72px) + 10px);
+  font: 400 12px/1.4 var(--vg-mono);
+}
+/* the traces' canvas stands ABOVE the boxes' own backgrounds (their markup is the layer below): a box's
+   translucent fill over the canvas dimmed every bar to a third of its colour */
+#vg-hud .vg-h-cv, #vg-panel .vg-h-pcv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: 1; }
+#vg-hud .vg-h-mods, #vg-panel .vg-h-pbox { position: absolute; inset: 0; z-index: 0; }
+
+/* the top line: the device and its link words, the verdict or the trouble */
+#vg-hud { transition: opacity .3s ease; }
+#vg-hud .vg-h-top {
+  position: absolute; left: 20px; top: 14px; max-width: min(340px, calc(100% - 140px)); padding: 3px 8px;
+  background: var(--vg-pane); border-radius: 4px; display: flex; flex-direction: column;
+}
+#vg-hud .vg-h-top:empty { display: none; }
+#vg-hud[data-spread="1"] .vg-h-top { top: 78px; }
+#vg-hud .vg-h-l { color: var(--vg-ink); }
+#vg-hud .vg-h-r { color: var(--vg-mid); font-size: 11px; letter-spacing: .04em; }
+#vg-hud .vg-h-r[data-tone="warn"] { color: var(--vg-warn); }
+#vg-hud .vg-h-r[data-tone="bad"] { color: var(--vg-bad); }
+
+/* the HUD's modules: Host on the left, the DAC on the right, the Amp beneath it; a module that is
+   out takes no pointer */
+#vg-hud .vg-h-mod {
+  position: absolute; width: 304px; padding: 8px 10px 10px; background: var(--vg-pane);
+  border: 1px solid var(--vg-hair); border-radius: 4px; color: var(--vg-ink); pointer-events: none;
+}
+#vg-hud .vg-h-mod[data-on="1"] { pointer-events: auto; }
+#vg-hud .vg-h-mod[data-mod="host"] { left: 20px; top: 30%; }
+#vg-hud .vg-h-mod[data-mod="dac"] { right: 20px; top: 42%; }
+#vg-hud .vg-h-mod[data-mod="amp"] { right: 20px; bottom: calc(var(--vg-above) + 20px); }
+#vg-hud .vg-h-title {
+  margin: 0 0 6px; font: 600 11px/1.3 var(--vg-mono); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--vg-teal-ink);
+}
+#vg-hud .vg-h-sub { color: var(--vg-mid); font-weight: 400; }
+#vg-hud .vg-h-row {
+  display: grid; grid-template-columns: 62px minmax(0, 1fr); column-gap: 8px; align-items: baseline; min-height: 18px;
+}
+#vg-hud .vg-h-k { color: var(--vg-mid); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+#vg-hud .vg-h-v { color: var(--vg-ink); overflow-wrap: anywhere; }
+#vg-hud .vg-h-row[data-tone="on"] .vg-h-v { color: var(--vg-teal-key); }
+#vg-hud .vg-h-row[data-tone="warn"] .vg-h-v, #vg-hud .vg-h-note { color: var(--vg-warn); }
+#vg-hud .vg-h-row[data-tone="bad"] .vg-h-v { color: var(--vg-bad); }
+#vg-hud .vg-h-note { grid-column: 2; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+#vg-hud .vg-h-slot { grid-column: 2; display: block; height: 6px; margin: 2px 0 5px; }
+#vg-hud .vg-h-slot[data-slot="spark"] { width: 64px; height: 16px; }
+#vg-hud .vg-h-slot[data-slot="link"] { width: 100%; height: 16px; }
+#vg-hud .vg-h-chip {
+  grid-column: 2; justify-self: start; margin: 3px 0 2px; min-height: 24px; padding: 2px 9px; font: inherit;
+  font-size: 11px; color: var(--vg-teal-key); background: transparent; border: 1px solid var(--vg-teal);
+  border-radius: 12px; cursor: pointer;
+}
+#vg-hud .vg-h-chip[data-outcome="changes"], #vg-hud .vg-h-chip[data-outcome="unread"],
+#vg-hud .vg-h-chip[data-outcome="not_read"], #vg-hud .vg-h-chip[data-outcome="other_version"] {
+  color: var(--vg-warn); border-color: var(--vg-warn);
+}
+#vg-hud .vg-h-chip:hover { background: rgba(79, 209, 197, .14); }
+#vg-hud .vg-h-chip:focus-visible { outline: 2px solid var(--vg-teal-key); outline-offset: 2px; }
+
+/* the HUD fades with the dash (the page root carries `vg-dim`): opacity only, the words stay in the page */
+#voidgarden.vg-dim #vg-hud { opacity: 0; transition: opacity .6s ease; }
+@media (prefers-reduced-motion: reduce) { #vg-hud, #voidgarden.vg-dim #vg-hud { transition: none; } }
+/* the phone's sheet stands where the HUD's module would: the module waits */
+#voidgarden[data-sheet="open"] #vg-hud .vg-h-mod { display: none; }
+
+/* the audio panel: one box at the top right, clear of the menu button's slot; Spread gives every
+   feature a pane of its own around the sides */
+#vg-panel .vg-h-pn {
+  position: absolute; right: 64px; top: 16px; width: 384px; padding: 8px 10px; background: var(--vg-pane);
+  border: 1px solid var(--vg-hair); border-radius: 4px;
+}
+#vg-panel .vg-h-feat {
+  display: grid; grid-template-columns: 66px 40px minmax(0, 1fr); column-gap: 6px; align-items: center; min-height: 18px;
+}
+#vg-panel .vg-h-feat .vg-h-v { text-align: right; font-variant-numeric: tabular-nums; }
+#vg-panel .vg-h-k { color: var(--vg-mid); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+#vg-panel .vg-h-v { color: var(--vg-ink); }
+#vg-panel .vg-h-tr { display: block; height: 12px; }
+#vg-panel .vg-h-title {
+  margin: 0 0 6px; font: 600 11px/1.3 var(--vg-mono); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--vg-teal-ink);
+}
+#vg-panel .vg-h-foot {
+  display: flex; gap: 14px; align-items: center; margin: 6px 0 0; padding-top: 6px; border-top: 1px solid var(--vg-hair);
+}
+#vg-panel .vg-h-lamp { color: var(--vg-mid); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+#vg-panel .vg-h-lamp::before {
+  content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%;
+  background: var(--vg-hair); vertical-align: baseline;
+}
+#vg-panel .vg-h-lamp[data-on="1"] { color: var(--vg-warn); }
+#vg-panel .vg-h-lamp[data-on="1"]::before { background: var(--vg-warn); }
+#vg-panel .vg-h-rate { margin-left: auto; color: var(--vg-mid); }
+
+#vg-panel .vg-h-pn[data-mode="spread"] { display: contents; }
+#vg-panel .vg-h-pn[data-mode="spread"] .vg-h-title {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+#vg-panel .vg-h-pn[data-mode="spread"] .vg-h-feat {
+  position: absolute; padding: 4px 6px; background: var(--vg-pane); border-radius: 4px;
+}
+#vg-panel .vg-h-pn[data-mode="spread"] .vg-h-feat[data-form="col"] {
+  bottom: var(--vg-above); width: 52px; grid-template-columns: 1fr; grid-template-areas: "tr" "k" "v"; row-gap: 2px;
+}
+#vg-panel .vg-h-pn[data-mode="spread"] .vg-h-feat[data-form="col"] .vg-h-tr { grid-area: tr; height: 120px; width: 36px; }
+#vg-panel .vg-h-pn[data-mode="spread"] .vg-h-feat[data-form="col"] .vg-h-k { grid-area: k; }
+#vg-panel .vg-h-pn[data-mode="spread"] .vg-h-feat[data-form="col"] .vg-h-v { grid-area: v; text-align: left; }
+#vg-panel .vg-h-pn[data-mode="spread"] [data-key="bass"] { left: 14px; }
+#vg-panel .vg-h-pn[data-mode="spread"] [data-key="mid"] { left: 72px; }
+#vg-panel .vg-h-pn[data-mode="spread"] [data-key="high"] { left: 130px; }
+#vg-panel .vg-h-pn[data-mode="spread"] .vg-h-feat[data-form="strip"] {
+  left: 50%; transform: translateX(-50%); width: min(520px, 70vw); grid-template-columns: 62px minmax(0, 1fr) 36px;
+}
+#vg-panel .vg-h-pn[data-mode="spread"] [data-key="loud"] { top: 10px; }
+#vg-panel .vg-h-pn[data-mode="spread"] [data-key="flux"] { top: 40px; }
+#vg-panel .vg-h-pn[data-mode="spread"] .vg-h-feat[data-form="dial"] {
+  top: 70px; width: 76px; grid-template-columns: 1fr; grid-template-areas: "tr" "k" "v"; justify-items: center; row-gap: 0;
+}
+#vg-panel .vg-h-pn[data-mode="spread"] .vg-h-feat[data-form="dial"] .vg-h-tr { grid-area: tr; width: 56px; height: 56px; }
+#vg-panel .vg-h-pn[data-mode="spread"] .vg-h-feat[data-form="dial"] .vg-h-k { grid-area: k; }
+#vg-panel .vg-h-pn[data-mode="spread"] .vg-h-feat[data-form="dial"] .vg-h-v { grid-area: v; text-align: center; }
+#vg-panel .vg-h-pn[data-mode="spread"] [data-key="cent"] { right: 150px; }
+#vg-panel .vg-h-pn[data-mode="spread"] [data-key="flat"] { right: 66px; }
+#vg-panel .vg-h-pn[data-mode="spread"] .vg-h-feat[data-form="row"] {
+  left: 50%; transform: translateX(-50%); width: min(380px, 90vw);
+}
+#vg-panel .vg-h-pn[data-mode="spread"] [data-key="l"] { bottom: calc(var(--vg-above) + 52px); }
+#vg-panel .vg-h-pn[data-mode="spread"] [data-key="r"] { bottom: calc(var(--vg-above) + 26px); }
+#vg-panel .vg-h-pn[data-mode="spread"] [data-key="width"] { bottom: var(--vg-above); }
+#vg-panel .vg-h-pn[data-mode="spread"] .vg-h-foot {
+  position: absolute; right: 66px; top: 190px; padding: 4px 8px; background: var(--vg-pane); border: 0;
+  border-radius: 4px; margin: 0;
+}
+
+/* a phone (PHONE_QUERY, as the dash's): the modules share one slot above the dash, one at a time (hud-wire),
+   short, the panel runs the width under the menu button */
+@media (max-width: 719px), (pointer: coarse) and (max-height: 500px) {
+  /* no top line on a phone: the sheet's first line names the device, the computer and the input */
+  #vg-hud .vg-h-top { display: none; }
+  #vg-hud .vg-h-mod[data-mod] {
+    left: 10px; right: 10px; top: auto; bottom: var(--vg-above); width: auto;
+    max-height: max(96px, 26%); overflow-y: auto; scrollbar-width: thin;
+  }
+  /* Spread pins its ten features from the top down to the Width row (its top 378px, 28px tall,
+     plus a gap): the module above the dash takes what is left, however tall the dash is, and
+     scrolls when it needs more; a short window keeps it a usable 96px */
+  #vg-hud[data-spread="1"] .vg-h-mod[data-mod] {
+    max-height: max(96px, calc(100% - var(--vg-above) - 416px - env(safe-area-inset-top, 0px)));
+    overflow-y: auto;
+  }
+  #vg-panel .vg-h-pn[data-mode="spread"] .vg-h-feat[data-form="strip"] { width: calc(100vw - 20px); }
+  #vg-panel .vg-h-pn[data-mode="spread"] [data-key="loud"] { top: calc(64px + env(safe-area-inset-top, 0px)); }
+  #vg-panel .vg-h-pn[data-mode="spread"] [data-key="flux"] { top: calc(92px + env(safe-area-inset-top, 0px)); }
+  #vg-panel .vg-h-pn[data-mode="spread"] .vg-h-feat[data-form="col"] {
+    top: calc(130px + env(safe-area-inset-top, 0px)); bottom: auto;
+  }
+  #vg-panel .vg-h-pn[data-mode="spread"] .vg-h-feat[data-form="col"] .vg-h-tr { height: 96px; }
+  #vg-panel .vg-h-pn[data-mode="spread"] .vg-h-feat[data-form="dial"] { top: calc(130px + env(safe-area-inset-top, 0px)); }
+  #vg-panel .vg-h-pn[data-mode="spread"] [data-key="cent"] { right: 90px; }
+  #vg-panel .vg-h-pn[data-mode="spread"] [data-key="flat"] { right: 10px; }
+  #vg-panel .vg-h-pn[data-mode="spread"] .vg-h-foot { right: 10px; top: calc(246px + env(safe-area-inset-top, 0px)); max-width: 130px; flex-wrap: wrap; gap: 2px 8px; }
+  #vg-panel .vg-h-pn[data-mode="spread"] .vg-h-rate { white-space: normal; flex-basis: 100%; text-align: right; }
+  #vg-panel .vg-h-pn[data-mode="spread"] [data-key="l"] { top: calc(322px + env(safe-area-inset-top, 0px)); bottom: auto; }
+  #vg-panel .vg-h-pn[data-mode="spread"] [data-key="r"] { top: calc(350px + env(safe-area-inset-top, 0px)); bottom: auto; }
+  #vg-panel .vg-h-pn[data-mode="spread"] [data-key="width"] { top: calc(378px + env(safe-area-inset-top, 0px)); bottom: auto; }
+}
+
+/* the Panel. A box of 384 px at the top right (clear of the menu button's slot) with an
+   outline in the scene palette's second colour; each feature a label, a 24-segment bar with its peak
+   hold and ticks, a three-digit figure and a trace of its history, drawn on the canvas under the words
+   (draw/panel.js); the history's axis, the lamps and the rate, seed and quality at the foot. The box
+   is dark enough for its figures to hold 4.5:1 over a white sky (rgba(3,6,10,.64): a box at .46 gives
+   2.4:1 there). The colours follow the scene's live palette (panel-wire.js sets --vg-pal0 to 2). */
+#vg-panel .vg-h-pn[data-mode="panel"] {
+  right: 64px; top: 16px; width: 384px; padding: 6px 8px 8px; border-radius: 0;
+  background: rgba(3, 6, 10, .64); font: 400 9px/9px var(--vg-mono);
+  border: 1px solid color-mix(in srgb, var(--vg-pal1, var(--vg-teal)) 60%, transparent);
+}
+#vg-panel .vg-h-pn[data-mode="panel"] .vg-h-title {
+  margin: 0 0 9px; font: 400 9px/9px var(--vg-mono); letter-spacing: 0; color: rgba(236, 246, 255, .92);
+}
+#vg-panel .vg-h-pn[data-mode="panel"] .vg-h-feat {
+  grid-template-columns: 58px 100px 44px 6px minmax(0, 1fr); column-gap: 0; height: 15px; min-height: 15px; align-items: start;
+}
+#vg-panel .vg-h-pn[data-mode="panel"] .vg-h-k { grid-column: 1; grid-row: 1; font-size: 9px; letter-spacing: 0; color: rgba(236, 246, 255, .85); }
+#vg-panel .vg-h-pn[data-mode="panel"] .vg-h-v {
+  grid-column: 3; grid-row: 1; justify-self: end; font-size: 9px; color: rgba(236, 246, 255, .92); white-space: nowrap;
+}
+#vg-panel .vg-h-pn[data-mode="panel"] .vg-h-tr { grid-column: 2 / 6; grid-row: 1; height: 15px; width: 100%; }
+#vg-panel .vg-h-axis { display: grid; grid-template-columns: 58px 100px 44px 6px minmax(0, 1fr); margin: 1px 0 0; height: 9px; }
+#vg-panel .vg-h-axbox { grid-column: 5; position: relative; display: block; font-size: 8px; line-height: 9px; color: rgba(236, 246, 255, .85); }
+#vg-panel .vg-h-axbox > span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+#vg-panel .vg-h-axbox > .vg-h-now { left: auto; right: 0; transform: none; }
+#vg-panel .vg-h-pn[data-mode="panel"] .vg-h-foot {
+  gap: 8px; margin: 6px 0 0; padding-top: 4px; border-top: 1px solid rgba(236, 246, 255, .12);
+}
+#vg-panel .vg-h-pn[data-mode="panel"] .vg-h-lamp { font-size: 9px; letter-spacing: 0; color: rgba(236, 246, 255, .85); }
+#vg-panel .vg-h-pn[data-mode="panel"] .vg-h-lamp::before { width: 6px; height: 6px; background: rgba(236, 246, 255, .16); }
+#vg-panel .vg-h-pn[data-mode="panel"] .vg-h-lamp[data-on="1"] { color: rgba(236, 246, 255, .92); }
+#vg-panel .vg-h-pn[data-mode="panel"] .vg-h-lamp[data-on="1"]::before { background: #ff7b5c; }
+#vg-panel .vg-h-pn[data-mode="panel"] .vg-h-rate { margin-left: auto; font-size: 9px; color: rgba(236, 246, 255, .85); white-space: pre; }
+
+/* the chrome's fade takes the panel too, unless the menu pinned it */
+#voidgarden.vg-dim:not([data-pinned="1"]) #vg-panel > * { opacity: 0; transition: opacity .6s ease; }
+@media (prefers-reduced-motion: reduce) { #voidgarden.vg-dim:not([data-pinned="1"]) #vg-panel > * { transition: none; } }
+
+/* a phone: the panel is shown only while the features chip has it open: at the very top, left of the menu
+   button, 9 s of history; a tap on it closes it */
+@media (max-width: 719px), (pointer: coarse) and (max-height: 500px) {
+  #voidgarden:not([data-feat="open"]) #vg-panel .vg-h-pn[data-mode="panel"] { display: none; }
+  #vg-panel .vg-h-pn[data-mode="panel"] {
+    left: max(8px, env(safe-area-inset-left, 0px)); right: calc(max(8px, env(safe-area-inset-right, 0px)) + 52px);
+    top: max(8px, env(safe-area-inset-top, 0px)); width: auto; pointer-events: auto; cursor: pointer;
+  }
+  /* the Audio panel row says Off: the chip has nothing to open */
+  #voidgarden:has(#vg-panel[hidden]) #vg-dash .vg-fchip { display: none; }
+  @media (orientation: landscape) {
+    #vg-panel .vg-h-pn[data-mode="panel"] { left: auto; width: 300px; }
+  }
+}

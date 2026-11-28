@@ -536,7 +536,7 @@ try:
     click_el(b, '#menu-theme')
     # each theme's picture is drawn once its module has loaded
     for _ in range(50):
-        if b.ev("document.querySelectorAll('#picker .tprev svg').length") >= 4:
+        if b.ev("document.querySelectorAll('#picker .tprev svg').length") >= 5:
             break
         b.sleep(0.1)
     p = b.ev(PICKER)
@@ -546,7 +546,9 @@ try:
                              ['paper', None, 'Paper', 'light, ink and notes', True],
                              ['signal', None, 'Signal', 'the line the sound takes', True],
                              ['nightdrive', None, 'Night drive',
-                              'an outrun road that moves with the music', True]]
+                              'an outrun road that moves with the music', True],
+                             ['voidgarden', None, 'Void Garden',
+                              'a night garden that grows with the music', True]]
           and not p['menuOpen'] and p['focus'] == 'ember' and p['inert'] is True, p)
     check('  the sheet says the choice is per browser and how to get back',
           p and p['note'] == "Each browser keeps its own choice. Your sections' order stays with "
@@ -581,7 +583,7 @@ try:
 
     # the picker's close button: inside the window, 44 x 44, closes it with the focus back on the menu button
     pb = make()
-    for theme in ('ember', 'paper', 'signal', 'nightdrive'):
+    for theme in ('ember', 'paper', 'signal', 'nightdrive', 'voidgarden'):
         for w, h in ((1280, 800), (412, 915), (360, 780)):
             pb.resize(w, h)
             pb.goto(f'{dac.url}?theme={theme}')
@@ -669,7 +671,8 @@ try:
     b.press('T')
     cards = b.ev("[...document.querySelectorAll('#picker .tcard')].map(c => c.dataset.theme)")
     check('the picker has a card for each listed theme, the test ones too',
-          cards == ['ember', 'paper', 'signal', 'nightdrive', 'probe', 'second'], cards)
+          cards == ['ember', 'paper', 'signal', 'nightdrive', 'voidgarden', 'probe', 'second'],
+          cards)
     click_el(b, '#picker .tcard[data-theme=second]')
     b.sleep(1.0)
     on = b.ev("""({ theme: document.documentElement.dataset.theme,

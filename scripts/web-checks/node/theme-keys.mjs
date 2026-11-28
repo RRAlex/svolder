@@ -1,6 +1,6 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// Node harness for the four themes' key tables (themes/<id>/key-table.js): each is one the core
+// Node harness for the five themes' key tables (themes/<id>/key-table.js): each is one the core
 // can read and bind (core/keys.js refuses a malformed entry and a reserved key), every entry has
 // an id of its own, a widget's entry has no `run` and names a selector the browser can parse, a
 // zone's entries stand together, every keycap is one a keyboard has (one name a
@@ -17,11 +17,12 @@ import { KEYS as ember } from '../../../bins/svolderd/web/themes/ember/key-table
 import { KEYS as nightdrive } from '../../../bins/svolderd/web/themes/nightdrive/key-table.js';
 import { KEYS as paper } from '../../../bins/svolderd/web/themes/paper/key-table.js';
 import { KEYS as signal } from '../../../bins/svolderd/web/themes/signal/key-table.js';
+import { KEYS as voidgarden } from '../../../bins/svolderd/web/themes/voidgarden/key-table.js';
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log('ok', name); };
 
-const TABLES = { ember, paper, signal, nightdrive };
+const TABLES = { ember, paper, signal, nightdrive, voidgarden };
 
 /** Each theme's table as a person reads it: the key, the zone and the words, in table order. */
 const WORDS = {
@@ -103,6 +104,14 @@ const WORDS = {
     ['Esc', '.nd-askbox', 'Cancel and change nothing'],
     ['Esc', '#nd-dialog', 'Close the sheet'],
   ],
+  voidgarden: [
+    [['↑', '↓'], 'page', 'Volume one step'],
+    ['A', 'page', 'Cycle the audio panel'],
+    ['S', 'page', 'New seed: a new world for this track'],
+    ['N', 'page', 'Next scene: another world on the same track'],
+    ['E', 'page', 'Effect: fire one of the scene’s effects'],
+    ['Esc', '#vg-dash', 'Close the phone\u2019s sheet'],
+  ],
 };
 
 /** The keys of the whole page each theme binds (the entries a mount gives a `run`), by id. */
@@ -111,6 +120,7 @@ const PAGE_KEYS = {
   paper: [],
   signal: [],
   nightdrive: ['volume'],
+  voidgarden: ['volume', 'panel', 'explore-seed', 'explore-scene', 'explore-effect'],
 };
 
 /** The keycaps a table may name: a letter or a digit, or one of these. A name of two words is
@@ -123,6 +133,7 @@ const OWN = {
   paper: [],
   signal: [],
   nightdrive: [],
+  voidgarden: [],
 };
 
 const p = page('<div id="theme"></div>');
@@ -153,7 +164,9 @@ for (const [id, table] of Object.entries(TABLES)) {
 
   ok(`${id}_every_zone_is_a_selector_and_a_zones_entries_stand_together`, () => {
     const zones = [...new Set(table.filter((e) => e.zone !== 'page').map((e) => e.zone))];
-    assert.ok(zones.length >= 4, `${zones.length} widgets`);
+    // Void Garden's keys are the page's plus its phone sheet's Escape: one widget zone, by design
+    const vgZones = id === 'voidgarden' && zones.every((z) => z === '#vg-dash');
+    assert.ok(zones.length >= 4 || vgZones, `${zones.length} widgets`);
     for (const zone of zones) p.document.querySelector(zone);
     // the entries of one zone stand together (a gesture's row stands among the page's keys)
     const order = table.filter((e) => e.zone !== 'page' && !e.gesture).map((e) => e.zone);
@@ -193,7 +206,7 @@ for (const [id, table] of Object.entries(TABLES)) {
     assert.ok(reader.length < writer.length, `${reader.length} of ${writer.length}`);
     // the keys of the page a viewer who may not write still has
     assert.deepEqual(reader.filter((e) => e.zone === 'page').map((e) => e.id), {
-      ember: ['look', 'arrange'], paper: [], signal: [], nightdrive: [],
+      ember: ['look', 'arrange'], paper: [], signal: [], nightdrive: [], voidgarden: ['panel', 'explore-seed', 'explore-scene', 'explore-effect'],
     }[id]);
     for (const e of reader) {
       assert.doesNotMatch(e.words, /^(Volume|The scale|The slider|Back to|Apply|Put the old|Frequency|Gain|Mute|Centre)/,

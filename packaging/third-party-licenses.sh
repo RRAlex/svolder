@@ -7,8 +7,8 @@
 # in besides: libdbus, from the source libdbus-sys bundles; the Rust standard library; musl
 # libc, which the Rust musl target carries; the NOTICE of the sofar crate (the SOFA reader),
 # whose code derives from libmysofa and a KD-tree, both BSD-3-Clause; and the files the web UI
-# serves, the IBM Plex and Geist, Crimson Pro, Caveat, Russo One and Mr Dafoe fonts and htmx,
-# with the licences they ship with.
+# serves, the IBM Plex and Geist, Crimson Pro, Caveat, Russo One and Mr Dafoe fonts, htmx and
+# three.js, with the licences they ship with.
 # `make 3rdpartylicenses` runs it in the build container from the repository root. The
 # crates are fetched first, then cargo-about runs --frozen, off the network, so the file depends
 # only on Cargo.lock.
@@ -102,4 +102,6 @@ SOFAR
   cat bins/svolderd/web/fonts/OFL-MrDafoe.txt
   section 'htmx, served by the web UI (0BSD)'
   cat bins/svolderd/web/themes/ember/htmx.LICENSE
+  section 'three.js r187, served by the web UI (MIT)'
+  cat bins/svolderd/web/themes/voidgarden/vendor/three.LICENSE
 } >> "$out"

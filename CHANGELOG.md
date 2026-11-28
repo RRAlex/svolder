@@ -8,6 +8,58 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.40.0
+
+- **Void Garden, the web page's fifth theme.** A night garden that grows with the music
+  (`?theme=voidgarden`; dark only; it needs WebGPU or WebGL2). A sky that moves between six moods and
+  is coloured from the track's cover, a valley of eroded terrain carved by a winding river that forks
+  (ten kinds of world, from canyons to fjords) with seven kinds of tree, waterfalls, fog and mist, a
+  sculpture over the river that the music deforms (nine forms, one of them a sculpture of up to a
+  hundred thousand points), motes that fly around it, beacons that light up with the beat, and effects
+  (bloom, streaks, grain, glitches) that pass the page's limit of three flashes a second and show only
+  on Full motion. A seed always draws the same world; a new track starts its own set. A mute frosts the
+  land and a path that changes the sound thickens the fog.
+- **The controls stay out of the way.** On a desktop two dark-glass capsules in the bottom corners
+  hold the device and `This computer`, the volume with mute and the input, the cover and track, the
+  transport and the explore keys; on a phone, a features chip and one capsule with a sheet behind `⋯`.
+  They fade after 3 seconds (4 on a phone) and any move, key or tap brings them back; the press that
+  wakes them does nothing else. *Device controls…* is the first row of the theme's menu and opens the
+  device's full controls, with the computer's side beside it.
+- **Keys.** `↑` `↓` the volume (a held key repeats), `S` a new seed, `N` the next scene, `E` an
+  effect, `A` the audio panel's mode; `?` lists them. *Effect* flashes only on Full.
+- **The features panel and readings.** Ten audio features, each with a 24-segment bar and peak hold, a
+  three-digit figure and 18 seconds of history, in the scene's own colours; Panel, Spread around the
+  screen or Off, fading with the controls unless pinned (*Pin features panel*). The scene also brings in
+  readings at the music's moments (a new section, a new track, a new rate, the path starting to
+  change the sound): the computer's output, EQ, crossfeed and loudness, the signal path, the DAC's
+  volume, input, rate and link with signal bars, and an amp's power, tone and meters.
+- **On a phone.** A compact see-through features box at the top (two columns, a bar to each
+  feature), one row of ghost keys or the sheet along the foot, every target 44 px, text readable over
+  a bright scene, no stuck hover look after a tap, and a phone turned sideways has its own layout.
+- **Smooth 60 or an even 30, and it adapts.** The scene aims at a smooth 60 frames a second on a
+  desktop and an even 30 on a phone or a screen that cannot show 60, and gives up picture in the
+  order you notice least: the far picture's detail and resolution first (the central sphere stays
+  sharp), then the particles, then the effects, and the whole frame's resolution last. A GPU that can
+  do 30 at full detail gets full detail at 30, and 60 is tried twice more, then not until the page is
+  loaded again. It reads the GPU's own frame time where the browser gives it and remembers where it
+  settled for that browser, GPU and window size. *Detail* (Auto, High, Low) and *Motion* (Full, Calm, Still) are in the menu.
+- **WebGPU or WebGL2, your choice.** On a browser's first visit the scene measures both renderers for
+  a moment, behind a black frame, and keeps the faster for that browser, its version, the GPU and the
+  screen's size; the menu's *Renderer* row (Auto, WebGPU, WebGL2) chooses one instead. Without either
+  the page shows a still of the valley and says so.
+- **Faster everywhere.** The land is shaded from textures drawn as the flight reaches it, the sky is
+  drawn only where it shows, the effects at rest cost nothing, the scene is drawn once a frame,
+  materials compile before the first frame so the page stays live while it loads, and Firefox's WebGPU
+  no longer drops to 20 frames a second as soon as a frame is slow.
+- **Sound that is heard keeps the scene moving**, even when the computer's player says it is paused
+  or stopped (a stale player, or another one: the capture is the whole sink); a silent stream still
+  drifts to rest.
+- **For people who build it.** `make vendor-three` fetches the vendored three.js (MIT) and checks its
+  hash; `?vg-gpu=` and `?vg-debug` (a readout and switches to turn parts off) are on the address;
+  `make voidgarden-measure` prints a step's cost and what the budget settles on on your GPU;
+  `make voidgarden-shots` draws its stills; the browser checks of all five themes run the new one.
+  The design is in `docs/design/web-voidgarden.md`.
+
 ## 0.39.12
 
 - **The TUI's cover takes the picture's own shape.** In the Status pane the cover is as tall as

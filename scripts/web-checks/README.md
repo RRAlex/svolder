@@ -956,6 +956,24 @@ and a guest's taps asked of the core and posting nothing, the device's slots (a 
   live, the quiet line's words; in a browser a dropped device (the road stops, the sun greys, the mountains flatten, the card, the dash out of
   reach, Try now posting `connect`), a lost stream, a page reading again and resting, a host with no capture (`SVOLDER_FAKE_CAPTURE=off`),
   a guest, a refused write and a card arriving while the top is faded.
+- `voidgarden_theme.py`, `voidgarden_states.py`, `voidgarden_phone.py`, `voidgarden_timing.py` (shared helpers in `voidgarden_base.py`) and
+  the layer checks `voidgarden_gpu.py`, `voidgarden_overlay.py`, `voidgarden_land.py`, `voidgarden_hero.py`, `voidgarden_fx.py`, `voidgarden_perf.py` (the post chain draws the scene once per frame; the `vg-debug` switches do what they say): the theme
+  Void Garden in a browser. A cell is one engine at one tier: `none` (both 3D APIs off), `webgl2` (stock) and `webgpu` (Chromium: the four
+  SwiftShader flags; Firefox: `dom.webgpu.enabled` in user.js); the tier checks run every cell, the page checks `none` and a few cases on
+  `webgl2` with the Still motion level kept. `voidgarden_theme.py`: what mounts (layers in order, the slot last, the ground), the menu's rows and
+  their kept choices (across a reload and with storage refused), `A`, the volume keys, the dash's keys and the driver, reduced motion on
+  Calm, the fade by opacity only. `voidgarden_states.py`: the card, a lost stream, reading again and resting, no capture,
+  a guest, a refused write, a card while faded. `voidgarden_phone.py`: at 360, 390, 768 and 844 wide, in each panel mode on each side, the
+  page never scrolls sideways, the dash and its keys are inside the window and 24 px or more, the menu button is clear, the modules stand
+  above the dash (a key past the window's edge passes inside a sideways scroller that brings it in); the phone layout of 0.40.0 on the `none` cell at 390, 412, 600, 844 sideways and 1280 (a compact see-through panel at the top, 44 px keys in one scrolling row, text over a bright scene at 4.5:1, one HUD module at a time, the style.css phone `@media` lines read as `hud.js` PHONE_QUERY, Tab to the Host module's last chip); Chromium's finger: the first tap on a faded dash only wakes, a tap opens the menu, a phone starts capped.
+  `voidgarden_timing.py` (the serial lane): no draw while hidden, each level's pace as a ceiling, a held key's pace (the 15 s idle time is on a fake clock in `voidgarden_theme.py`).
+  No case reads a colour, a place or a density of the scene (the look run moves those): they live in `contrast-baseline.json`,
+  `phone-baseline.json` and the stills of `make voidgarden-shots` (`voidgarden_shots.py`). `contract.py`, `completeness.py` and `keys.py`
+  run the theme. Every check that is not about the scene loads Void Garden with both 3D APIs off (Chromium: `--disable-3d-apis`, Firefox: the
+  `webgl.disabled` pref; `modal.browser_for`, the sweeps' `browser_of`, contract, completeness, keys, frame_button): on software rendering a live
+  scene blocks the page's main thread for seconds at every draw, even in Still (a driver call took 3.3 s), and the still stands for the scene.
+  The live scene is `voidgarden_theme.py`'s webgl2 cell, the tier checks' and the stills'. Contract and `modal.HOOK` also keep the Still level for
+  Firefox's live scene.
 - `paper_shots.py` (`make paper-shots`, Chromium): Paper's stills, a DAC and an amp at desktop and
   phone size in light and dark paper, into `target/web-shots/paper`; no check, only pictures.
 - `arrange.py`: Ember's Arrange mode in one browser (a fake DAC with a player, a DAC and an amp

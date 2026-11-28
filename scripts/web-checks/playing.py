@@ -20,6 +20,7 @@ import sys
 import time
 
 import common
+import modal
 
 browser = sys.argv[1] if len(sys.argv) > 1 else 'chromium'
 fails = []
@@ -760,13 +761,13 @@ SAYS = """(() => {
       c.querySelectorAll('.np-sr').forEach((n) => n.remove()); return c.textContent; })() : null,
     title: q('.np-title')?.textContent.trim() ?? null,
     sgTitle: q('.sg-title')?.textContent.trim() ?? null }; })()"""
-THEMES = ('ember', 'paper', 'signal', 'nightdrive')
+THEMES = ('ember', 'paper', 'signal', 'nightdrive', 'voidgarden')
 for which, env in (('no-mpris', {'SVOLDER_FAKE_ROUTE': 'no-mpris'}),
                    ('several', {'SVOLDER_FAKE_ROUTE': 'changed'})):
     d = common.Daemon(host='fake', env=env)
     try:
         for theme in THEMES:
-            b = (common.Chromium if browser == 'chromium' else common.Firefox)(size=(1280, 900))
+            b = modal.browser_for(browser, (1280, 900), theme)
             try:
                 b.goto(f'{d.url}?theme={theme}&effects=off', settle=1.2)
                 b.sleep(1.0)
@@ -780,6 +781,10 @@ for which, env in (('no-mpris', {'SVOLDER_FAKE_ROUTE': 'no-mpris'}),
                 for size in ((1280, 900), (390, 800)):
                     b.resize(*size)
                     b.sleep(0.6)
+                    if theme == 'voidgarden' and size[0] < 600:
+                        # the phone keeps the track line in the ⋯ sheet, which is not shown until opened
+                        b.ev("document.querySelector('#vg-more')?.click()")
+                        b.sleep(0.6)
                     says = b.ev(SAYS)
                     where = f'{theme} {which} {size[0]}x{size[1]}'
                     if SHOTS:

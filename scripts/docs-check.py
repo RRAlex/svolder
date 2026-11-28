@@ -56,6 +56,8 @@ DOCS = {
 
 # Files the tag check leaves alone.
 TAG_SKIP_FILES = {"Cargo.lock", "scripts/docs-check.py"}
+# Folders of third-party files kept unmodified: their text is not ours to word.
+VENDOR_PREFIXES = ("bins/svolderd/web/themes/voidgarden/vendor/",)
 # `path:line` -> why a match there is not a process tag.
 TAG_ALLOW = {}
 
@@ -171,7 +173,7 @@ def tracked_text_files():
     except (subprocess.CalledProcessError, OSError):
         sys.exit("docs-check: git ls-files failed; this check needs a git checkout")
     for p in out:
-        if not p or p in TAG_SKIP_FILES or not_shipped(p):
+        if not p or p in TAG_SKIP_FILES or p.startswith(VENDOR_PREFIXES) or not_shipped(p):
             continue
         full = os.path.join(ROOT, p)
         if not os.path.isfile(full) or os.path.islink(full):

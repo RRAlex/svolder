@@ -1982,7 +1982,7 @@ version, and three entries (four while the daemon keeps scenes, below):
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                         v0.39.12 │
+│                          v0.40.0 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -2002,7 +2002,7 @@ nothing in the menu there.
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                         v0.39.12 │
+│                          v0.40.0 │
 │                                  │
 │             Settings             │
 │             Scenes z             │

@@ -142,6 +142,8 @@ The per-popup hook: an entry of `POPUPS`, `name: { ... }` with
   ask      the id of a control on its first page that opens an inline ask, or None
   form     the id of a control on its first page that opens a name form, or None
   list     the id of a chip on its first page that opens a list (core/list.js), or None
+  tabs     how many Tabs the walk presses to see the focus come round (default 12; a popup with more
+           stops than that says so)
   extra    a function `(b, d, tag, theme)` for what only this popup has, or None: `b` is the
            browser with the popup open at 1280 px, `d` the daemon (so it can load another page of
            it, a guest's)
@@ -153,7 +155,7 @@ import time
 
 import common
 import modal
-from modal import AT, BODY, ENTRY, HOOK, INERT, STATE, THEMES, check, load, poll
+from modal import AT, BODY, ENTRY, HOOK, INERT, POSTS, STATE, THEMES, check, load, poll
 
 if not common.LIVE_ASSETS:
     sys.exit('popups.py needs the tree\'s files (the sample popup is not in the binary): '
@@ -170,6 +172,189 @@ def sample_extra(b, d, tag, theme):
     live = b.page("document.getElementById('popup-sample-live')?.textContent ?? null")
     check(f'{tag}: the live line names the device it follows', isinstance(live, str) and live.startswith(f'{name}: '),
           [name, live])
+
+
+# every target of the shown device, in the page, and the computer's
+CONTROL_TARGETS = ("(async () => { const m = await import(new URL('assets/core/contract.js', document.baseURI));"
+                   " return { device: m.targetsOf(__core.model.device()),"
+                   " computer: m.computerTargetsOf(__core.model.page()) }; })()")
+
+
+def change_of(target, model):
+    """What to ask of `target` of the fake DAC's `model`, as a theme's driver is asked, or None for a
+    target that is only read."""
+    if 'control' in target:
+        key = target['control']
+        if key == model['volume']['key']:
+            return {'step': 1}
+        if key == model['volume']['mute']:
+            return {'on': True}
+        control = next(c for c in model['controls'] if c['key'] == key)
+        return {'readout': None, 'toggle': {'on': not control.get('on')},
+                'slider': {'step': 1},
+                'choice': {'value': next((o['label'] for o in control.get('options', []) if not o['on']),
+                                         None)}}[control['kind']]
+    if 'band' in target:
+        return {'step': 1}
+    if 'loudness' in target:
+        return {'step': 1}
+    return {}
+
+
+# the computer side's points: the pane's reach and every field's right edge against the pane's
+POINTS_FIT = ("""(() => { const pane = document.querySelector('#popup-controls .fp-page');
+  const edge = pane.getBoundingClientRect().right;
+  const fields = [...pane.querySelectorAll('[data-act="c-point"], [data-act="c-remove"]')];
+  return { fields: fields.length, over: pane.scrollWidth - pane.clientWidth,
+    out: fields.filter((f) => f.getBoundingClientRect().right > edge + 0.5 || f.getBoundingClientRect().left < 0)
+      .map((f) => f.id) }; })()""")
+
+
+def points_fit(b, tag):
+    """On This computer with three points, nothing of the pane scrolls sideways and every field of every
+    point lies inside it, wide and on a phone; with WEB_CHECK_SHOTS a picture of each size."""
+    shots = os.environ.get('WEB_CHECK_SHOTS')
+
+    def shoot(name):
+        if shots:
+            os.makedirs(shots, exist_ok=True)
+            with open(os.path.join(shots, f'{name}.png'), 'wb') as out:
+                out.write(b.shot())
+
+    if shots:
+        for size in (DESK, (390, 844)):
+            b.resize(*size)
+            time.sleep(0.4)
+            shoot(f'{tag.split()[-1]}-device-{size[0]}')
+        b.resize(*DESK)
+    check(f'{tag}: the flip to the computer is reached',
+          b.page('__core.driver.controls.operate({computer:"flip"}, {side:"computer"})') is True, '')
+    poll(lambda: b.page("!!document.getElementById('ctl-c-add')"), 4.0)
+    rows = "document.querySelectorAll('#popup-controls [data-points] :is(tr, [data-row])[data-n]').length"
+    for want in (2, 3):
+        if b.page(rows) < want:
+            b.page("(document.getElementById('ctl-c-add')?.click(), 1)")
+            poll(lambda: b.page(rows) >= want, 4.0)
+    for size in (DESK, (390, 844)):
+        b.resize(*size)
+        time.sleep(0.4)
+        got = b.page(POINTS_FIT)
+        label = f'{tag} at {size[0]}'
+        check(f'{label}: three points are drawn', got['fields'] >= 12, got)
+        check(f'{label}: the pane does not scroll sideways', got['over'] <= 0, got)
+        check(f'{label}: every field and the remove button lie inside the pane', not got['out'], got['out'])
+        shoot(f'{tag.split()[-1]}-computer-{size[0]}')
+    b.resize(*DESK)
+    b.page('__core.computer.flip("dac")')
+    time.sleep(0.3)
+
+
+def controls_extra(b, d, tag, theme):
+    """Device controls, once (Ember, 1280 px): every target of the fake DAC reached and operated through
+    `core.driver.controls` and seen at the daemon as a POST naming the device; the flip writes nothing and
+    the computer's writes go through `actions.computer` to the host's routes."""
+    points_fit(b, f'controls_points {theme}')
+    if theme != 'ember':
+        return
+    tag = f'controls_extra {tag}'
+    close_popup(b, 'controls')
+    b.page(BODY)
+    b.page("(document.getElementById('fx-button').focus(), 1)")
+    check(f'{tag}: the popup opens by a click', open_popup(b, 'controls') is True, '')
+    targets = b.page(CONTROL_TARGETS)
+    model = d.model()
+    check(f'{tag}: the fake DAC has targets to operate', len(targets['device']) > 20, len(targets['device']))
+    unreached, silent, said = [], [], []
+
+    def applied():
+        return json.dumps(d.model(), sort_keys=True)
+
+    for target in targets['device']:
+        arg = json.dumps(target)
+        if b.page(f'__core.driver.controls.reach({arg})') is not True:
+            unreached.append(target)
+            continue
+        change = change_of(target, model)
+        if change is None or (change.get('value', 0) is None):
+            continue
+        before, posts = applied(), len(b.page(POSTS))
+        done = b.page(f'__core.driver.controls.operate({arg}, {json.dumps(change)})')
+        if 'transport' in target:
+            # a player's button is the host's, not the device's: its route, seen leaving the page
+            route = 'api/v1/host/press'
+            took = poll(lambda: any(route in post[0] for post in b.page(POSTS)[posts:]), 4.0)
+        else:
+            # the daemon's own model, changed by the write (the harness's bounded poll)
+            took = poll(lambda: applied() != before, 4.0)
+            # a recall of presets goes on in steps: the next target waits till the model stands still
+            end, last = time.time() + 4.0, None
+            while time.time() < end and applied() != last:
+                last = applied()
+                time.sleep(0.25)
+        if done is not True or not took:
+            silent.append([target, done])
+        elif 'transport' not in target and b.page(f'__core.driver.controls.state({arg})')['said'] is not None:
+            said.append([target, b.page(f'__core.driver.controls.state({arg})')['said']])
+    check(f'{tag}: every target of the fake DAC is reached through core.driver.controls', not unreached, unreached[:3])
+    check(f'{tag}: each target that writes changes what the fake daemon holds (the host\'s route for the player)',
+          not silent, silent[:3])
+    check(f'{tag}: a write the daemon takes leaves no refusal words', not said, said[:3])
+    # a value the loop did not just set: unmute, then two steps down must move the daemon's volume
+    d.post('Gungnir 2', 'controls/mute', {'value': False})
+    volume = model['volume']['key']
+    poll(lambda: d.model()['volume']['muted'] is False, 4.0)
+    held = d.model()['volume']['text']
+    b.page(f'__core.driver.controls.reach({{control: {json.dumps(volume)}}})')
+    b.page(f'__core.driver.controls.operate({{control: {json.dumps(volume)}}}, {{step: -2}})')
+    moved = poll(lambda: d.model()['volume']['text'] != held, 4.0)
+    check(f'{tag}: two steps down move the daemon\'s volume and the popup shows its words',
+          bool(moved) and poll(lambda: b.page(f'__core.driver.controls.shown({{control: {json.dumps(volume)}}})')
+                               == d.model()['volume']['text'], 4.0) is True,
+          [held, d.model()['volume']['text'], b.page(f'__core.driver.controls.shown({{control: {json.dumps(volume)}}})')])
+    # the flip writes nothing; the computer's writes go to the host's routes
+    posts = len(b.page(POSTS))
+    check(f'{tag}: the flip is reached', b.page('__core.driver.controls.operate({computer:"flip"}, {side:"computer"})') is True, '')
+    time.sleep(0.4)
+    check(f'{tag}: a flip posts nothing', len(b.page(POSTS)) == posts, b.page(POSTS)[posts:])
+    check(f'{tag}: the page is on the computer\'s side', b.page('__core.computer.side()') == 'computer', '')
+    wrote = {}
+    for target, change, route in (({'computer': 'volume'}, {'step': -1}, 'api/v1/host/volume'),
+                                  ({'computer': 'mute'}, {'on': True}, 'api/v1/host/mute'),
+                                  ({'computer': 'mute'}, {'on': False}, 'api/v1/host/mute')):
+        before = len(b.page(POSTS))
+        arg = json.dumps(target)
+        done = b.page(f'__core.driver.controls.operate({arg}, {json.dumps(change)})')
+        got = poll(lambda: any(route in post[0] for post in b.page(POSTS)[before:]), 4.0)
+        wrote[f'{target} {change}'] = [done, bool(got)]
+    check(f'{tag}: the computer\'s volume and mute write the host\'s routes through actions.computer',
+          all(v == [True, True] for v in wrote.values()), wrote)
+    check(f'{tag}: every computer target is reached', all(
+        b.page(f'__core.driver.controls.reach({json.dumps(t)})') is True for t in targets['computer']),
+        [t for t in targets['computer'] if b.page(f'__core.driver.controls.reach({json.dumps(t)})') is not True][:3])
+    b.page('__core.computer.flip("dac")')
+    # a guest's tap says the core's words and sends nothing
+    g = common.Daemon(host='fake', web='guest = "read"')
+    gb = modal.browser_for(browser, DESK, theme)
+    try:
+        gb.preload(HOOK + ' ' + WARNS)
+        load(gb, g, theme)
+        gb.page(BODY)
+        gb.page("(document.getElementById('fx-button').focus(), 1)")
+        check(f'{tag}, a guest: the popup opens', open_popup(gb, 'controls') is True, '')
+        gb.page("(document.querySelector('#popup-controls [data-act=\"volume-up\"]').click(), 1)")
+        words = poll(lambda: gb.page("document.getElementById('ctl-say')?.textContent.trim() || null"), 4.0)
+        check(f'{tag}, a guest: a tap says the core\'s words in place', words == 'Sign in to change this', words)
+        check(f'{tag}, a guest: nothing was sent', gb.page(POSTS) == [], gb.page(POSTS))
+        check(f'{tag}, a guest: every control is inert',
+              gb.page("[...document.querySelectorAll('#popup-controls button[data-act]')]"
+                      ".filter((e) => !['side', 'sound'].includes(e.dataset.act))"
+                      ".every((e) => e.getAttribute('aria-disabled') === 'true')") is True, '')
+    finally:
+        gb.close()
+        g.stop()
+    # leave the popup as the generic cases expect it: open
+    check(f'{tag}: the popup still stands', b.page(f"!!{el('controls')}") is True, '')
+
 
 
 # the rows Help shows: their entries' ids, and the note over them
@@ -247,8 +432,10 @@ def here_of_a_widget(b, d, theme):
     b.page(BODY)
     first = tab_to_a_widget(b)
     if first is None or b.page("!!document.querySelector('[aria-modal=true]')"):
-        # Night drive's zones are its sheet's, a list's and a question's: none stands on the page
-        if theme == 'nightdrive':
+        # Night drive's zones are its sheet's, a list's and a question's; Void Garden's keys are all the page's: no zone
+        if theme == 'voidgarden':
+            print(f'note {tag}: the keys of {theme} are all the page\'s, it has no zone of a widget, no case')
+        elif theme == 'nightdrive':
             print(f'note {tag}: the page of {theme} has no control in a zone outside a sheet of its own, no case')
         else:
             check(f'{tag}: Tab reaches a control in a zone of the theme\'s table', False, first)
@@ -273,6 +460,10 @@ def here_of_a_widget(b, d, theme):
     back = b.page(ZONED)
     check(f'{tag}: after Escape the focus is on that control again', back is not None and back['at'] == first['at'],
           [first, back])
+    if theme == 'voidgarden':
+        # its table has the one zone (the phone sheet's, `#vg-dash`): there is no control of another zone to go on to
+        print(f'note {tag}: the table of {theme} has one zone only, no second zone to Tab on to')
+        return
     second = tab_to_a_widget(b, other=first)
     if second is None:
         check(f'{tag}: Tab goes on to a control of another zone', False)
@@ -296,6 +487,10 @@ def by_the_menu(b, name='help'):
     if poll(lambda: b.page("!document.getElementById('fx-menu').hidden"
                            f" && !!document.getElementById('menu-popup-{name}')"), 3.0) is not True:
         return False
+    # a theme with many rows (Void Garden's 18) has a menu that scrolls: the row is brought into view first, as a person
+    # (and the menu's own keys) do, so the click lands on the row and not on what stands under its place
+    b.page(f"(document.getElementById('menu-popup-{name}').scrollIntoView({{ block: 'nearest' }}), 1)")
+    time.sleep(0.2)
     b.click(*centre(b, f'#menu-popup-{name}'))
     return ready(b, name)
 
@@ -696,6 +891,19 @@ POPUPS = {
         'list': None,
         'extra': None,
     },
+    # opened by a theme, never from the menu (no row): the check opens it as it opens the sample
+    'controls': {
+        'title': 'Device controls',
+        'folder': 'core/popups/controls/',
+        # the page holds more than twelve stops (every band has its steppers): enough Tabs to come round
+        'tabs': 150,
+        'add': None,
+        'entries': [],
+        'ask': None,
+        'form': None,
+        'list': None,
+        'extra': controls_extra,
+    },
     'help': {
         'title': 'Help',
         'folder': 'core/popups/help/',
@@ -721,7 +929,7 @@ POPUPS = {
     },
 }
 # the sample first: the entry animation's case and the open by script are made on the first
-ORDER = ['sample', 'devices', 'sound', 'help']
+ORDER = ['sample', 'devices', 'sound', 'controls', 'help']
 ONLY = [name for name in ORDER
         if name in os.environ.get('WEB_CHECK_POPUPS', ','.join(ORDER)).split(',')]
 
@@ -1008,8 +1216,9 @@ def desk(b, d, theme, name, hook):
     check(f'the_popup_is_on_top_of_the_theme {tag}: the box at its centre, the veil at the corners',
           top == ['box', 'veil', 'veil'], top)
     check(f'the_page_behind_is_inert {tag}', b.page(INERT) == [True, True, False], b.page(INERT))
-    inside, names = tab_walk(b, name, 12)
-    check(f'tab_stays_inside {tag}: twelve Tabs never leave the popup and come round',
+    presses = hook.get('tabs', 12)
+    inside, names = tab_walk(b, name, presses)
+    check(f'tab_stays_inside {tag}: {presses} Tabs never leave the popup and come round',
           inside and len(set(names)) < len(names) and len(set(names)) > 1, names)
     if hook['entries']:
         check(f'the_list_and_the_page_stand_side_by_side {tag}',
@@ -1139,7 +1348,7 @@ def main():
     d = common.Daemon(host='fake', more=[('Second', '1112131415161718')])
     try:
         for theme in THEMES:
-            b = (common.Chromium if browser == 'chromium' else common.Firefox)(size=DESK)
+            b = modal.browser_for(browser, DESK, theme)
             try:
                 b.preload(HOOK + ' ' + WARNS)
                 load(b, d, theme)
@@ -1177,7 +1386,7 @@ def main():
             g = common.Daemon(host='fake', web='guest = "read"')
             try:
                 for theme in THEMES:
-                    b = (common.Chromium if browser == 'chromium' else common.Firefox)(size=DESK)
+                    b = modal.browser_for(browser, DESK, theme)
                     try:
                         b.preload(HOOK + ' ' + WARNS)
                         load(b, g, theme)

@@ -69,6 +69,40 @@ fn nightdrive_is_listed_dark_only() {
     assert!(night.scripts.is_empty() && night.metas.is_empty());
 }
 
+/// Void Garden is the fifth theme: dark only, on the night's near-black, and it asks for the
+/// meters, the host and the music's analysis through the page's registry (not here).
+#[test]
+fn voidgarden_is_listed_dark_only() {
+    let garden = theme("voidgarden").expect("Void Garden is shipped");
+    assert!(std::ptr::eq(garden, &THEMES[4]));
+    assert_eq!(garden.label, "Void Garden");
+    assert_eq!(garden.blurb, "a night garden that grows with the music");
+    assert_eq!(garden.module, "themes/voidgarden/voidgarden.js");
+    assert_eq!(garden.styles, ["themes/voidgarden/style.css"]);
+    assert_eq!(garden.schemes, ["dark"]);
+    assert_eq!(garden.color_scheme, "dark");
+    assert_eq!(garden.colour_for(Some("dark")), "#030406");
+    assert_eq!(garden.colour_for(None), "#030406");
+    assert!(garden.scripts.is_empty() && garden.metas.is_empty());
+    // the three.js build files are served as scripts, by their relative names
+    for name in ["three.core.js", "three.tsl.js", "three.webgpu.js"] {
+        let path = format!("themes/voidgarden/vendor/{name}");
+        let (_, mime, _) = garden
+            .files
+            .iter()
+            .find(|(listed, ..)| *listed == path)
+            .unwrap_or_else(|| panic!("{path} is listed"));
+        assert_eq!(*mime, "text/javascript; charset=utf-8", "{path}");
+    }
+    // its licence text is kept beside them and not served
+    assert!(
+        !garden
+            .files
+            .iter()
+            .any(|(name, ..)| name.contains("LICENSE"))
+    );
+}
+
 /// A theme's module and styles are among its files, every file is served by its name, and no
 /// two themes bring the same name.
 #[test]
@@ -189,6 +223,18 @@ fn the_list_is_the_pickers_and_the_registrys_data() {
             "metas": [],
             "color_scheme": "dark",
             "theme_color": "#0a0018",
+            "theme_color_dark": null,
+            "schemes": ["dark"],
+        }, {
+            "id": "voidgarden",
+            "label": "Void Garden",
+            "blurb": "a night garden that grows with the music",
+            "module": "themes/voidgarden/voidgarden.js",
+            "styles": ["themes/voidgarden/style.css"],
+            "scripts": [],
+            "metas": [],
+            "color_scheme": "dark",
+            "theme_color": "#030406",
             "theme_color_dark": null,
             "schemes": ["dark"],
         }])

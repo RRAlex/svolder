@@ -444,6 +444,7 @@ declare -A weight=(
     [effects_cycle]=50 [scroll]=40 [sources]=115 [smoke_page]=95 [smoke_quick]=6
     [smoke_core]=145 [haze]=200 [touch]=35 [tone_touch]=50
     [computer_nightdrive]=515 [ha_cards]=25
+    [voidgarden_theme]=120 [voidgarden_states]=60 [voidgarden_phone]=140 [voidgarden_overlay]=75 [voidgarden_land]=300 [voidgarden_hero]=130 [voidgarden_gpu]=140 [voidgarden_fx]=150 [voidgarden_perf]=50
 )
 by_weight() {
     local e script
@@ -458,10 +459,19 @@ by_weight() {
 # approved look skip themselves in the other harnesses while it does.
 node_entries=()
 for name in effects facts model sources notes director keep tone-curve plot tone-drag playing viz vu \
+    voidgarden-budget voidgarden-scene \
     core-store core-api core-stream core-actions core-device-config core-device-settings core-device-readings core-device-facts core-device-wire core-device-walk core-computer core-words core-table core-point-drag core-prefs core-registry core-climb core-loop core-title core-old-readings core-repeat core-freeze core-names core-html core-inline-ask core-list core-driver core-clock core-volume-ask core-mounted core-menu-rows core-menu core-popups core-stay core-devices core-eq-library core-loudness core-crossfeed core-speakers core-scenes core-help core-setup dom-skip core-keys theme-keys ember-parts ember-keys \
+    voidgarden-mount \
+    core-popups-controls core-path-words \
     level-write toast frame-keys core-modal core-router switch ember-order contract \
+    voidgarden-hud \
     core-volume-wires \
     paper-tokens paper-words paper-live paper-ruler paper-draw paper-notes \
+    voidgarden-feed voidgarden-director voidgarden-cues voidgarden-palette \
+    voidgarden-dash \
+    voidgarden-terrain \
+    voidgarden-hero \
+    voidgarden-fx \
     signal-line signal-draw signal-vu nightdrive-scene nightdrive-sky nightdrive-hud nightdrive-tune nightdrive-draw nightdrive-ridge nightdrive-floor nightdrive-budget nightdrive-debug nightdrive-glow nightdrive-mood nightdrive-states nightdrive-controls nightdrive-eqkey nightdrive-dash-clock nightdrive-keys signal-controls signal-palette; do
     node_entries+=("node-$name|node/$name.mjs|")
 done
@@ -477,23 +487,27 @@ node_entries+=("ha-strategy|ha/strategy.mjs|" "ha-cards|ha/cards.mjs|")
 # (label NAME-ENGINE, cached, alone retry) and `--part timing` in the serial lane (label
 # NAME_timing-ENGINE, cold, exclusive). Which case is which is in each script's `--part` selection
 # (parts.py: part_has, counts) and in the README's "The serial lane's timing parts".
-split_scripts=(smoke_core smoke_page haze effects_cycle scroll smoke_quick sources)
+split_scripts=(smoke_core smoke_page haze effects_cycle scroll smoke_quick sources voidgarden_theme)
 # serial_scripts: whole scripts that are timing: nightdrive_timing is Night drive's draw cost, its
-# phone budget and its tap under a slowed CPU; notes forms its notes from real input pace and smoke
+# phone budget and its tap under a slowed CPU; voidgarden_timing is Void Garden's real-clock cases (draws
+# while hidden, each level's pace as a ceiling, the idle time, a held key's pace); notes forms its notes from real input pace and smoke
 # timing (its logic cases fail in a loaded pool), so it is not split. The pace asserts that moved to a fake clock
-# (fakeclock.py: nightdrive_theme's Still and readout rates) stay in the pool.
-serial_scripts=(nightdrive_timing notes)
+# (fakeclock.py: nightdrive_theme's Still and readout rates) stay in the pool. voidgarden_theme, voidgarden_gpu and voidgarden_fx
+# draw the live scene in software rendering on Chromium, which takes every core while it draws: voidgarden_theme's live `webgl2` cell
+# (its `--part timing`, NAME_timing-ENGINE) failed its fade case in a pool of six even run again alone, so it runs here; its `none` cell
+# (`--part logic`), voidgarden_gpu and voidgarden_fx (419 s and 921 s under the pool, passing) stay in the pool.
+serial_scripts=(nightdrive_timing voidgarden_timing notes)
 
 # contrast and phone_sweep (the sweeps, minutes of wall time each) are in the full gate only
 if [ "$quick" -eq 1 ]; then
     browser_checks=(effects_menu effects_layout tone_note knob_click tone_drag playing \
         device_presets reduced_motion visualizer arrange contract frame_button keys space_key modal popups devices_popup eq_library loudness_popup setup_popup crossfeed_popup speakers_popup scenes_popup menu_theme_row tone_overlay ember_link core_rows computer_core computer_ember computer_paper computer_signal signal_vu paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing smoke_quick \
-        computer_nightdrive ha_cards)
+        computer_nightdrive ha_cards voidgarden_theme voidgarden_states voidgarden_phone voidgarden_gpu voidgarden_overlay voidgarden_land voidgarden_hero voidgarden_fx voidgarden_perf voidgarden_timing)
 else
     browser_checks=(smoke_core smoke_page effects_menu effects_layout sources notes sweep haze \
         scroll tone_note knob_click tone_drag playing device_presets reduced_motion visualizer \
         arrange contract frame_button keys space_key modal popups devices_popup eq_library loudness_popup setup_popup crossfeed_popup speakers_popup scenes_popup menu_theme_row tone_overlay contrast phone_sweep ember_link core_rows computer_core computer_ember computer_paper computer_signal signal_vu paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing effects_cycle \
-        computer_nightdrive ha_cards)
+        computer_nightdrive ha_cards voidgarden_theme voidgarden_states voidgarden_phone voidgarden_gpu voidgarden_overlay voidgarden_land voidgarden_hero voidgarden_fx voidgarden_perf voidgarden_timing)
 fi
 entries=()
 serial_entries=()

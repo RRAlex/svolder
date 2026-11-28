@@ -208,7 +208,7 @@ def child(theme, out):
     rig = S.Rig()
     run = Run({})
     shots = os.environ.get('WEB_CHECK_SHOTS')
-    b = S.browser_of()
+    b = S.browser_of(theme=theme)
     try:
         b.preload(modal.HOOK + ' ' + S.WARNS)
         S.open_page(b, rig.writer, theme)

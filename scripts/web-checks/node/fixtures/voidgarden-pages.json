@@ -1,0 +1,2341 @@
+{
+ "licence_1": "SPDX-FileCopyrightText: 2026 the svolder authors",
+ "licence_2": "SPDX-License-Identifier: GPL-3.0-or-later",
+ "now_ms": 1800000000000,
+ "pages": {
+  "base": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−58 dBm live",
+      "heard_at_ms": 1799999998000,
+      "live": true
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "playing",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "muted_dac": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": true,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−58 dBm live",
+      "heard_at_ms": 1799999998000,
+      "live": true
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "playing",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "muted_sink": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−58 dBm live",
+      "heard_at_ms": 1799999998000,
+      "live": true
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "playing",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": true
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "paused_player": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−58 dBm live",
+      "heard_at_ms": 1799999998000,
+      "live": true
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "paused",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "stopped_player": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−58 dBm live",
+      "heard_at_ms": 1799999998000,
+      "live": true
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "stopped",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "no_player": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−58 dBm live",
+      "heard_at_ms": 1799999998000,
+      "live": true
+     }
+    }
+   },
+   "host": {
+    "track": null,
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "crossfeed_on": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "changed",
+      "end_to_end": "untouched",
+      "words": [
+       "host EQ on",
+       "crossfeed on"
+      ],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−58 dBm live",
+      "heard_at_ms": 1799999998000,
+      "live": true
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "playing",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "other_stage_words": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [
+       "host EQ on",
+       "loudness on"
+      ],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−58 dBm live",
+      "heard_at_ms": 1799999998000,
+      "live": true
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "playing",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "link_lost": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "not connected",
+     "state": "off",
+     "old": true
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−58 dBm live",
+      "heard_at_ms": 1799999998000,
+      "live": true
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "playing",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "link_waiting": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connecting…",
+     "state": "wait",
+     "old": true
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−58 dBm live",
+      "heard_at_ms": 1799999998000,
+      "live": true
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "playing",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "weak_signal": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−83 dBm advert, 10 s ago",
+     "signal_age": {
+      "head": "−83 dBm advert",
+      "heard_at_ms": 1799999990000,
+      "live": false
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "playing",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "weak_live": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−90 dBm live",
+      "heard_at_ms": 1799999999000,
+      "live": true
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "playing",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "edge_signal": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−80 dBm advert",
+      "heard_at_ms": 1799999999000,
+      "live": false
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "playing",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "old_weak_signal": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−90 dBm advert",
+      "heard_at_ms": 1799999700000,
+      "live": false
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "playing",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "no_signal": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "—",
+     "signal_age": null
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "playing",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "no_facts": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "playing",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "no_host": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": 100,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−58 dBm live",
+      "heard_at_ms": 1799999998000,
+      "live": true
+     }
+    }
+   },
+   "host": null
+  },
+  "amp_no_volume": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "amp",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": null,
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−58 dBm live",
+      "heard_at_ms": 1799999998000,
+      "live": true
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "playing",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  },
+  "unread_volume": {
+   "v": 1,
+   "viewer": {
+    "signed_in": true,
+    "guest": false,
+    "writes": true,
+    "read_only": null
+   },
+   "shown": "Bifrost%203",
+   "fleet": {
+    "devices": [
+     {
+      "name": "Bifrost 3",
+      "url": "Bifrost%203",
+      "family": "dac",
+      "family_word": "DAC",
+      "link": {
+       "word": "connected",
+       "state": "on",
+       "old": false
+      }
+     }
+    ],
+    "hops": []
+   },
+   "device": {
+    "name": "Bifrost 3",
+    "url": "Bifrost%203",
+    "family": "dac",
+    "link": {
+     "word": "connected",
+     "state": "on",
+     "old": false
+    },
+    "volume": {
+     "key": "volume",
+     "lo": 0,
+     "hi": 200,
+     "raw": null,
+     "text": "-50.0 dB",
+     "muted": false,
+     "mute": "mute"
+    },
+    "controls": [
+     {
+      "key": "input",
+      "kind": "choice",
+      "options": [
+       {
+        "label": "Optical",
+        "on": false
+       },
+       {
+        "label": "USB",
+        "on": true
+       }
+      ]
+     },
+     {
+      "key": "sample_rate",
+      "kind": "readout",
+      "text": "96 kHz"
+     }
+    ],
+    "playing": {
+     "now_ms": 1800000000000,
+     "track": {
+      "headline": "Song",
+      "artist": "Artist",
+      "status": "playing"
+     },
+     "path": {
+      "verdict": "untouched",
+      "end_to_end": "untouched",
+      "words": [],
+      "hops": []
+     }
+    },
+    "facts": {
+     "now_ms": 1800000000000,
+     "link": "connected",
+     "signal": "−58 dBm live",
+     "signal_age": {
+      "head": "−58 dBm live",
+      "heard_at_ms": 1799999998000,
+      "live": true
+     }
+    }
+   },
+   "host": {
+    "track": {
+     "headline": "Song",
+     "artist": "Artist",
+     "album": "",
+     "source": "Player",
+     "status": "playing",
+     "cover": "abc",
+     "length_us": null,
+     "progress": null
+    },
+    "route": {
+     "sink": {
+      "words": "Schiit Bifrost 3",
+      "rate_hz": 96000,
+      "format": "S32LE",
+      "volume_pct": 100,
+      "muted": false
+     },
+     "player_rate_hz": 44100,
+     "host_eq": false,
+     "eq_preset": null,
+     "eq_autoeq": false,
+     "others_mixing": 0
+    },
+    "computer": {
+     "volume": {
+      "pct": 25,
+      "muted": false,
+      "sink": "Schiit Bifrost 3"
+     },
+     "eq": {
+      "on": false
+     }
+    }
+   }
+  }
+ }
+}

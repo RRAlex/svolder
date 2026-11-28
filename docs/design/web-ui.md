@@ -179,7 +179,7 @@ bound from its [key table](key-table.md); `?` is the frame's and opens Help. The
 frame ([frame.md](frame.md); `templates/page.html`: the theme's root,
 the page's model and the list of themes as data) that starts the core (`core/boot.js`) and mounts
 the theme Ember (`themes/ember/ember.js`), which draws every part from the model (`draw/`) and
-follows the store (`live.js`); htmx is its swap engine only (one htmx file is vendored). Every
+follows the store (`live.js`); htmx is its swap engine only (htmx is vendored, and three.js for Void Garden alone: [web-voidgarden.md](web-voidgarden.md#vendored-threejs)). Every
 write is a core action (`core/actions.js`, joined from one file per domain, see
 [web-themes](web-themes.md)), which toasts a refusal and reads the device again. The modules register nothing when imported: each exports an `install…` call that `ember.js` makes,
 its listeners ended by the mount's signal.

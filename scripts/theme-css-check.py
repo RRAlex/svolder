@@ -99,6 +99,9 @@
 #      `.device(` and `.refresh(` have one: the device's address, not `undefined` or `null`;
 #    - both by another name the file gives the actions or the store (`const s = core.model`), and
 #      by a quoted name (`core.actions['identify'](...)`);
+#    - the members of `actions.computer` (or a `const c = core.actions.computer` alias of it) that no
+#      `aimed(options)` wraps act on the computer and need no `{ device }`, whatever name they share
+#      with a device action (`setMode`); an alias named `computer` of `core.actions` is no such exemption;
 #    - neither is taken off its object: `const { part } = store`, `actions.identify.call(...)`, an
 #      action handed on as a value and an action called by a computed name (`actions[name]()`)
 #      fail as they stand, since the call could not be read;
@@ -151,6 +154,7 @@ PURE = {
     # longer follows `sliderKeys`'s receiver: its callers, `*/controls-wire.js`, `*/volume-wire.js`
     # and `*/computer-wire.js`, all pass a section's box)
     "html.js": ALL,
+    "path-words.js": ALL,  # computerOf, dacOf, changedOf: the path's stages picked out of a page
     "phone.js": ALL,
     "place.js": ALL,
     "plot.js": ALL,
@@ -176,7 +180,7 @@ PURE = {
                 "zoneOf", "zonesOf"},
     "old-readings.js": {"deviceOld"},  # a pure function of one device's model (the frame owns the badge)
     "registry.js": {"registerTheme"},  # how a theme tells the page it exists
-    "repeat.js": {"REPEAT_AFTER_MS", "REPEAT_EVERY_MS"},
+    "repeat.js": {"REPEAT_AFTER_MS", "REPEAT_CAP_MS", "REPEAT_EVERY_MS"},
     "table.js": {"isLong"},
     "title.js": {"TITLE", "statusOf"},
     "tone-drag.js": {"BAND_PARAM", "LABEL_GAP_PX", "REACH", "grab", "labelAt", "wheelSteps"},
@@ -205,6 +209,10 @@ LISTENERS = [
      "any key press ends the deaf time after the press that woke the dash; no key is read"),
     ("themes/nightdrive/hud-wire.js", "keydown", None,
      "any input wakes the faded HUD (the list of waking events); no key is read"),
+    ("themes/voidgarden/voidgarden.js", "keyup", "volume",
+     "the release of `↑` or `↓`, which ends the repeat of the held key `bind` dispatched"),
+    ("themes/voidgarden/states.js", "keydown", None,
+     "any input wakes the faded dash (the list of waking events); no key is read"),
 ]
 # The key listeners on a receiver the check cannot follow: `(file under bins/svolderd/web, the
 # function, its parameter, reason)`. The receiver is a parameter of a function whose callers the
@@ -721,6 +729,17 @@ def device_actions():
     return tuple(sorted(set(AIMED.findall((WEB / "core" / "actions.js").read_text()))))
 
 
+def computer_aimed():
+    """The names of the computer's actions that take a device: the members of `computerOn` in
+    core/actions.js that hand their `options` on through `aimed(options)` (the preset calls). Every
+    other member of `actions.computer` acts on the computer alone, whatever a device action of the
+    same name does (`setMode`), so it is no action on a device and needs no `{ device }`."""
+    text = (WEB / "core" / "actions.js").read_text()
+    block = text[text.index("const computerOn = {"):]
+    block = block[:block.index("\n  };")]
+    return set(re.findall(r"^\s+(\w+):\s*\([^)\n]*\)\s*=>[^\n]*aimed\(options\)", block, re.M))
+
+
 def aliases(flat, tail):
     """The names a file binds to an expression that ends in `tail` (a pattern): `s = core.model`."""
     found = re.finditer(r"(?:const|let|var)\s+([\w$]+)\s*=\s*[\w$.?]*\b(?:%s)\s*[;\n]" % tail, flat)
@@ -741,6 +760,7 @@ def unnamed_devices(web):
                "(the members that hand their `options` on): bring rule 6 in step with the file")
         return
     named = "|".join(actions)
+    aimed_on_computer = computer_aimed()
     popups = web / "core" / "popups"
     folders = sorted(path for path in popups.iterdir() if path.is_dir()) if popups.is_dir() else []
     for path in sorted(file for folder in folders for file in folder.rglob("*.js")):
@@ -749,10 +769,16 @@ def unnamed_devices(web):
         where = lambda at: f"{shown(path)}:{flat.count(chr(10), 0, at) + 1}"  # noqa: E731
         acts = receiver(r"actions(?:\s*\??\.\s*computer)?",
                         aliases(flat, r"actions(?:\s*\??\.\s*computer)?"))
+        computer_names = aliases(flat, r"actions\s*\??\.\s*computer")
         store = receiver("store|model", aliases(flat, "store|model"))
         member = r"(?:\s*\??\.\s*(?P<name>%s)\b|\s*\??\.?\s*\[\s*['\"](?P<quoted>%s)['\"]\s*\])"
         for found in re.finditer(acts + member % (named, named), plain):
             name = found.group("name") or found.group("quoted")
+            # a member of `actions.computer` that no `aimed(options)` wraps acts on the computer only
+            on_computer = re.match(r"actions\s*\??\.\s*computer\b", found.group(0)) or any(
+                re.match(re.escape(one) + r"\b", found.group(0)) for one in computer_names)
+            if on_computer and name not in aimed_on_computer:
+                continue
             opened = re.compile(r"\s*\(").match(flat, found.end())
             if not opened:
                 yield (f"{where(found.start())}: `actions.{name}` is taken off the actions and not "
@@ -1025,6 +1051,20 @@ def self_test():
         "a popup's wire calls a preset action of the computer with no device": (
             acts("core.actions.computer.recallPreset('Flat');"),
             "`actions.recallPreset` is called with no `{ device }`"),
+        "a popup's wire sets the computer's mode, which names no device": (
+            acts("core.actions.computer.setMode('eq');"), None),
+        "a popup's wire sets the computer's mode through an alias of actions.computer": (
+            acts("const c = core.actions.computer;\nc.setMode('eq');"), None),
+        "a popup's wire sets the computer's mode by a quoted name": (
+            acts("core.actions.computer['setMode']('eq');"), None),
+        "a popup's wire calls the device setMode through an alias named computer": (
+            acts("const computer = core.actions;\ncomputer.setMode('eq');"),
+            "`actions.setMode` is called with no `{ device }`"),
+        "a popup's wire calls the device action of the same name with no device": (
+            acts("core.actions.setMode('eq');"),
+            "`actions.setMode` is called with no `{ device }`"),
+        "a popup's wire calls a preset action of the computer that names its device": (
+            acts("core.actions.computer.recallPreset('Flat', { device });"), None),
         "a popup's wire calls a device action that names its device": (
             acts("core.actions.setControl('input', { value: 2 }, { device });\n"
                  "core.actions.identify({ device: page });"), None),

@@ -86,7 +86,7 @@ Each says how a part works now and the principles behind it.
 - [The web page's visualizer](design/web-visualizer.md): the looks, cost, the sink label, timing.
 - [Dragging the curve's points](design/web-curve-dragging.md): the Response graph under a mouse and
   a finger: grab reach, the axis hold, Q by wheel, right drag and pinch, the swap hold.
-- [Web themes](design/web-themes.md), [the frame](design/frame.md), [the key table](design/key-table.md), [popups](design/popups.md), [Paper](design/web-paper.md), [Signal](design/web-signal.md) with [its palettes and popups](design/web-signal-popups.md), [Night drive](design/web-nightdrive.md) and [its checks](design/web-nightdrive-checks.md): the contract.
+- [Web themes](design/web-themes.md), [the frame](design/frame.md), [the key table](design/key-table.md), [popups](design/popups.md) with [the Device controls popup](design/controls-popup.md), [Paper](design/web-paper.md), [Signal](design/web-signal.md) with [its palettes and popups](design/web-signal-popups.md), [Night drive](design/web-nightdrive.md) and [its checks](design/web-nightdrive-checks.md), [Void Garden](design/web-voidgarden.md) and [its checks](design/web-voidgarden-checks.md): the contract.
 - [Themes and effects](design/themes-and-effects.md): Ember's effects, the smoke, Arrange mode.
 - [The capture file](design/capture.md): what `svolder capture` records, the scrub, and the daemon
   it stops and brings back.

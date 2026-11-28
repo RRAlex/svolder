@@ -9,7 +9,7 @@ The file has two parts:
 - **Things you may run into** is for people who use the CLI, the TUI, the daemon, the GNOME
   indicator or Home Assistant: something shown or printed wrong, a wait, a key that does nothing, a
   config the tool refuses or reads wrong. It is grouped by area: Bluetooth and devices, Daemon, CLI,
-  TUI, Web UI, GNOME indicator.
+  TUI, Web UI, Void Garden, GNOME indicator.
 - **Maintainer notes** is for people who change the code: code shape, missing tests, and races or
   edges no user meets outside contrived cases. It is grouped by the part of the code it concerns.
 
@@ -903,6 +903,52 @@ that branch rather than listed here.
   first row holds four keys and the transport, so the key lands after the track instead of beside EQ
   (`bins/svolderd/web/themes/nightdrive/style.css`, pinned in
   `scripts/web-checks/computer_nightdrive.py`).
+
+### Void Garden
+
+- [limit] **Firefox gives the scene no GPU timer.** Chromium lets the scene read the GPU's own frame
+  time on the WebGL2 tier; Firefox does not, so there the frame budget reads the draws a second
+  only. It chases 60 with its quietest steps while the rate is low, gives 60 up when two steps have
+  not raised it and then finds its 30 by the rate, so a slow machine settles a few seconds later than
+  in Chromium; it tries 60 again after a minute and after two more, and after two failed tries in a
+  row not until the page is loaded again (`budget.js`, `gpu.js`).
+- [observed] **WebGPU is the less measured tier.** Every real-GPU measurement was made on WebGL2,
+  because the test machine's browser offers no WebGPU adapter. On Firefox the same GPU's WebGPU draws
+  the top step at about half the rate of its WebGL2 (the time goes outside the render and compute
+  passes), which is why *Auto* measures both on a first visit and keeps the faster
+  (`tier-probe.js`, `budget.js`).
+- [trade-off] **A change of Renderer shows after the page is loaded again.** The row is read when
+  the scene starts, and no toast says so (`voidgarden.js`, `gpu.js`).
+- [trade-off] **A slow integrated GPU holds 60 with a softer far picture.** At 1080p on an integrated
+  GPU the budget holds 60 only at the end of the far picture's steps (it drawn at half the window's
+  size, the sphere and the front kept sharp), and the land's ring density never drops by default,
+  because at half the vertices the mesas' terraces turn jagged (`budget.js`, `layers/land.js`).
+- [trade-off] **The far land keeps less fine shading than the near.** Past about 150 units the
+  per-pixel material noise is finer than a pixel and would alias, so the terrain cache's texels
+  filter it (`layers/land-cache.js`).
+- [trade-off] **A new track or a seek draws the whole view at once.** The terrain cache fills every
+  level's shown tiles before the frame, about 25 ms of GPU once on a fast desktop GPU and more on a
+  phone, so there is never a half-built land (`layers/land-cache.js`).
+- [observed] **The frame budget has a few narrow edges.** A screen that shows 30 a second only costs
+  two steps down before the budget aims at 30 from the top step; a compositor-bound page at a steady
+  48 fps on a 144 Hz screen, or 24 on a 120 Hz one, reads as the display's own rate and can sit at the
+  top step below 60; moving the window from a 144 Hz to a 50 Hz screen can cost one step of render
+  scale for 5 minutes; at 4K on a GPU that cannot hold 60, each of the two trials of 60 shows a
+  dip of about a second; and a stall of the whole page (a suspend, a debugger pause) can cost one
+  step that the way up gives back after 12 seconds of calm (`budget.js`).
+- [limit] **Without a GPU the page shows a still and one dim line.** The still's line
+  `This theme needs WebGPU or WebGL2` reads 2.24:1 against the picture, under the 4.5:1 the page holds
+  its words to, and is held in the contrast baseline as a known failure (`scene-wire.js`,
+  `style.css`).
+- [trade-off] **A track announced again resets the explored world.** A player that sends the same
+  title again cannot be told from a replay, so the scene returns to the track's first world
+  (`director.js`).
+- [trade-off] **Keyboard focus on the frame's menu button does not hold the chrome shown.** It fades
+  after 3 seconds under the focus ring; the dash's own focus holds it (`states.js`).
+- [trade-off] **The desktop keys are 34 px.** Their hit area reaches 44 px through `::after`
+  (`style.css`).
+- [limit] **The audio panel's traces are drawn on a 2D canvas on both tiers**, not by the GPU, and
+  the panel's box can overlap the HUD on a window under about 700 px high (`panel-wire.js`).
 
 ### GNOME indicator
 

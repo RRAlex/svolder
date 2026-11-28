@@ -1760,7 +1760,7 @@ fn a_change_outranks_an_unknown() {
 
 #[test]
 fn the_new_words_never_say_bit_perfect_or_a_stage_word() {
-    // The five words themes/nightdrive/hud.js 24 (`STAGE_WORDS`) picks out of the path.
+    // The five words core/path-words.js (`STAGE_WORDS`) picks out of the path.
     const STAGE_WORDS: [&str; 5] = [
         "host EQ on",
         "loudness on",

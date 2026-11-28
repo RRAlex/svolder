@@ -190,7 +190,7 @@ MEASURE = r"""((scopeSel) => {
     return { rgb, open: cover >= 0.004 && !base, image, cover, stop };
   };
   // something else stands over the middle of `e` at this scroll offset (a fixed bar, a sheet): a shot here shows that, not the ground
-  const swid = (e) => { window.__sw = (window.__sw || 0) + 1; e.dataset.swid = String(window.__sw); return window.__sw; };
+  const swid = (e) => { window.__sw = (window.__sw || 0) + 1; e.dataset.swid = String(window.__sw); (window.__swEls = window.__swEls || {})[window.__sw] = e; return window.__sw; };
   const coveredAt = (e) => {
     const r = e.getBoundingClientRect();
     if (r.top < 0 || r.bottom > innerHeight) return false;
@@ -381,6 +381,23 @@ OVERLAYS = """((items) => {
     return out; }); })"""
 
 
+# bring the element tagged `id` into view inside every pane that scrolls on its own and clips it (a popup's body):
+# the new `[x, y, w, h]` (null when no pane had to move); SCROLL_BACK puts every pane back where it was.
+SCROLL_IN = """((id) => {
+  const e = (window.__swEls || {})[id] || document.querySelector('[data-swid="' + id + '"]'); window.__swSaved = [];
+  if (!e) return null;
+  for (let p = e.parentElement; p && p !== document.documentElement; p = p.parentElement) {
+    if (!/(auto|scroll)/.test(getComputedStyle(p).overflowY) || p.scrollHeight <= p.clientHeight) continue;
+    const pr = p.getBoundingClientRect(), r = e.getBoundingClientRect();
+    let d = 0;
+    if (r.top < pr.top) d = r.top - pr.top; else if (r.bottom > pr.bottom) d = Math.min(r.bottom - pr.bottom, r.top - pr.top);
+    if (d) { window.__swSaved.push([p, p.scrollTop]); p.scrollTo({ top: p.scrollTop + d, behavior: 'instant' }); }
+  }
+  if (!window.__swSaved.length) return null;
+  const r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; })"""
+SCROLL_BACK = "(() => { for (const [p, t] of (window.__swSaved || []).reverse()) p.scrollTo({ top: t, behavior: 'instant' }); window.__swSaved = []; return 1; })()"
+
+
 def sample_ground(b, rects):
     """The luminance range of the screenshot's pixels in each box `(x, y, w, h[, ring[, covered[, id]]])` (css px in the
     window now; the browser is at dpr 1), with the text hidden. Each box is read in one shot only, where it stands on
@@ -464,6 +481,29 @@ def sample_ground(b, rects):
     return out
 
 
+def sample_ground_in_panes(b, items):
+    """`sample_ground` for `(rect, ring, covered, id)` items, where a box that a pane scrolling on its own clips
+    (a popup's body: the window never scrolls it) is read with its pane scrolled to show it, the pane put back after.
+    `[(lo, hi)]` as `sample_ground`."""
+    out = [None] * len(items)
+    plain = []
+    for i, (rect, ring, covered, ident) in enumerate(items):
+        moved = b.page(f'({SCROLL_IN})({json.dumps(ident)})')
+        if moved is None:
+            plain.append(i)
+            continue
+        try:
+            time.sleep(0.12)
+            out[i] = sample_ground(b, [tuple(moved) + (ring, covered, ident)])[0]
+        finally:
+            b.page(SCROLL_BACK)
+    if plain:
+        got = sample_ground(b, [tuple(items[i][0]) + items[i][1:] for i in plain])
+        for i, g in zip(plain, got):
+            out[i] = g
+    return out
+
+
 def analyse(b, run, tag, state, scope=None, only_focus=False):
     """Measure the page in its present state and record each pair under `tag|state|signature|kind`."""
     group = state.split('/')[0]
@@ -493,7 +533,7 @@ def analyse(b, run, tag, state, scope=None, only_focus=False):
             continue
         run.add(key, ratio(t['fg'], t['bg']), need, f'{t["what"]!r} at {state}')
     if pictures:
-        ranges = sample_ground(b, [tuple(t['rect']) + (-3 if min(t['rect'][2:]) > 12 else 0, t['covered'], t['id']) for _, t, _ in pictures])
+        ranges = sample_ground_in_panes(b, [(tuple(t['rect']), -3 if min(t['rect'][2:]) > 12 else 0, t['covered'], t['id']) for _, t, _ in pictures])
         for (key, t, need), rng in zip(pictures, ranges):
             if rng is None:
                 run.skip(key, 'a picture ground, the text is outside the window')
@@ -669,6 +709,8 @@ def write_palette(run, folder):
 # (the artefact class: a sample that manufactures a failure), each with what was found there (a name and a reason: the
 # guard fails on any other)
 ALLOWED_GAPS = [   # [(regex on the key, what was found and why the sample is right)]
+    (r'^voidgarden\.dark\|[a-z]+\|p#vg-quiet\|text$',
+     'the no-GPU line stands over the still (an SVG valley the check reads at its lightest and darkest): the line\'s readability over it is the look run\'s, held in the baseline'),
     (r'^nightdrive\.dark\|(page|guest|off|config)\|text\|text-large$',
      'the rotated pink dB label stands over the scene\'s pink neon line (same colour): 1.0:1 where they cross'),
     (r'\|button#(p|sg)-pt-\d\|edge$',
@@ -729,12 +771,32 @@ def canary_sampler(b, rig, theme):
               moved is not None and moved < 0.05, [before, got])
 
 
+def canary_pane(b, rig, theme):
+    """A box below the fold of a pane that scrolls on its own (a popup's body) is measured: an orange box is planted
+    at the foot of a tall scrolling pane on a white veil, and the sampler must read the box's own orange there (the
+    window-only sampler read the page behind the pane), with the pane scrolled back after."""
+    S.open_page(b, rig.writer, theme)
+    b.page("(() => { const p = document.createElement('div'); p.id = 'canary-pane';"
+           " p.style.cssText = 'position:fixed;left:200px;top:10px;width:300px;height:100px;overflow-y:auto;z-index:2147483000;background:#ffffff';"
+           " const t = document.createElement('div'); t.style.cssText = 'height:600px;position:relative'; p.append(t);"
+           " const q = document.createElement('div'); q.dataset.swid = 'canary-p'; q.style.cssText = 'position:absolute;left:20px;top:500px;width:100px;height:30px;background:#f0a73a';"
+           " t.append(q); document.body.append(p); return 1; })()")
+    time.sleep(0.3)
+    r = b.page("(() => { const r = document.querySelector('[data-swid=\"canary-p\"]').getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; })()")
+    got = sample_ground_in_panes(b, [(tuple(r), -3, False, 'canary-p')])[0]
+    back = b.page("document.getElementById('canary-pane').scrollTop")
+    b.page("(document.getElementById('canary-pane').remove(), 1)")
+    want = lum([0xf0, 0xa7, 0x3a])
+    check(f'contrast ({theme}): a box below the fold of a scrolling pane is measured, the pane put back',
+          got is not None and abs(got[0] - want) < 0.03 and abs(got[1] - want) < 0.03 and back == 0, [got, want, back])
+
+
 def child(theme, out):
     """One theme: every scheme, every visitor, in one browser; the result goes to `out` as JSON."""
     rig = S.Rig()
     run = Run({})
     palette_dir = os.environ.get('WEB_CHECK_PALETTE')
-    b = S.browser_of()
+    b = S.browser_of(theme=theme)
     try:
         b.preload(modal.HOOK + ' ' + S.WARNS)
         S.open_page(b, rig.writer, theme)
@@ -780,6 +842,7 @@ def child(theme, out):
             if n == 0:
                 canary(b, rig, theme, tag)
                 canary_sampler(b, rig, theme)
+                canary_pane(b, rig, theme)
             print(f'  {tag}: {len(run.pairs)} pairs')
     finally:
         b.close()

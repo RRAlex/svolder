@@ -20,7 +20,7 @@ LLD_DIR = $(CURDIR)/target/lld-bin
 DEV_TARGETS = test check check-no-bluez check-tests-private clippy build docs-env tui-harness \
   tui-hangup-check speakers-fixtures demo demo-dac demo-amp demo-computer demo-computer-amp \
   demo-safe sim-app screenshots mascot-shots vu-shots web-icons vu-golden vu-golden-check \
-  paper-shots signal-shots nightdrive-shots web-checks web-checks-cold web-checks-quick \
+  paper-shots signal-shots nightdrive-shots voidgarden-shots web-checks web-checks-cold web-checks-quick \
   web-checks-task web-checks-affected e2e host-e2e host-e2e-bits web-shots ha-shots \
   speakers-catalogue-check
 ifneq ($(LLD),)
@@ -344,7 +344,7 @@ gnome-extension-check: ## Test the GNOME indicator: gjs tests, pack, headless lo
 
 spdx-check: deps-check ## Fail if a source file lacks its SPDX header
 	@files=$$(git ls-files) || { echo "spdx-check: git ls-files failed; this check needs a git checkout"; exit 1; }; \
-	files=$$(echo "$$files" | grep -E '\.rs$$|\.toml$$|\.ya?ml$$|^Dockerfile|^scripts/|^systemd/|^packaging/|^Makefile$$|^flake\.nix$$|^contrib/gnome-shell/.*\.(js|css)$$|^contrib/gnome-shell/tests/fake-svolder$$|^bins/svolderd/templates/.*\.html$$|^bins/svolderd/web/.*\.(css|js|svg)$$' | grep -v '^bins/svolderd/web/themes/ember/htmx\.min\.js$$'); \
+	files=$$(echo "$$files" | grep -E '\.rs$$|\.toml$$|\.ya?ml$$|^Dockerfile|^scripts/|^systemd/|^packaging/|^Makefile$$|^flake\.nix$$|^contrib/gnome-shell/.*\.(js|css)$$|^contrib/gnome-shell/tests/fake-svolder$$|^bins/svolderd/templates/.*\.html$$|^bins/svolderd/web/.*\.(css|js|svg)$$' | grep -v '^bins/svolderd/web/themes/ember/htmx\.min\.js$$' | grep -v '^bins/svolderd/web/themes/voidgarden/vendor/'); \
 	if [ -z "$$files" ]; then echo "spdx-check: no source files found; this check needs a git checkout"; exit 1; fi; \
 	echo "$$files" | tr '\n' '\0' | xargs -0 sh scripts/spdx-check.sh || exit 1; \
 	echo "spdx-check: $$(echo "$$files" | wc -l) files carry the SPDX headers"
@@ -645,6 +645,13 @@ vu-golden-check: ## Fail if the VU golden file is not what the engine gives
 release-notes-test: ## Run the release-notes extraction on a temp repo
 	@bash packaging/release-notes.sh --self-test >/dev/null || bash packaging/release-notes.sh --self-test
 
+##@ Pictures and generated docs
+.PHONY: vendor-three
+#: Fetches three.js r187 from the npm registry, checks the pinned sha256 and writes its three build
+#: files, unmodified, into the theme Void Garden's vendor folder (a second run writes nothing).
+vendor-three: ## Fetch the vendored three.js files for Void Garden
+	@sh scripts/vendor-three.sh
+
 ##@ Long checks (not part of check)
 #: Measures on the real PipeWire session with silent streams.
 rate-check: ## By hand: does the capture leave the rate to the player?
@@ -696,6 +703,21 @@ nightdrive-shots: deps-build ## Night drive's stills into target/web-shots/night
 	@$(CARGO) build -q -p svolderd
 	@python3 scripts/web-checks/nightdrive_shots.py
 
+.PHONY: voidgarden-shots
+#: Chromium (the stock WebGL2 tier, Full motion): desktop at rest, the panel spread, out of reach, no
+#: capture, and a phone upright and sideways (the device's side and the computer's).
+voidgarden-shots: deps-build ## Void Garden's stills into target/web-shots/voidgarden
+	@$(CARGO) build -q -p svolderd
+	@python3 scripts/web-checks/voidgarden_shots.py
+
+.PHONY: voidgarden-measure
+#: Chromium with the machine's GPU (not SwiftShader), the fake host's music: the cost of a frame at each
+#: step of the budget's ladder, and what the budget settles on. `make voidgarden-measure ARGS='1920x1080 full
+#: step:0,4 settle:60'` (the cases are listed in scripts/web-checks/voidgarden_measure.py); prints JSON lines.
+voidgarden-measure: deps-build ## Void Garden's frame cost and budget on the real GPU
+	@$(CARGO) build -q -p svolderd
+	@python3 scripts/web-checks/voidgarden_measure.py $(ARGS)
+
 ##@ Check
 #: Needs python3 only.
 web-snippets: ## Fail on a moved mutant snippet or an unlisted node harness
@@ -703,6 +725,7 @@ web-snippets: ## Fail on a moved mutant snippet or an unlisted node harness
 	@python3 -I scripts/web-checks/node-list.py --self-test
 	@python3 -I scripts/web-checks/node-list.py
 	@python3 -I scripts/web-checks/touched.py --self-test
+	@python3 -I scripts/web-checks/common.py --self-test
 	@python3 -I scripts/web-affected.py --self-test
 	@bash scripts/gate-fails.sh --self-test
 

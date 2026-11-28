@@ -8,11 +8,12 @@ Usage: python3 space_key.py chromium|firefox"""
 import sys
 
 import common
+import modal
 
 browser = sys.argv[1] if len(sys.argv) > 1 else 'chromium'
 fails = []
 passed = 0
-THEMES = ('ember', 'paper', 'signal', 'nightdrive')
+THEMES = ('ember', 'paper', 'signal', 'nightdrive', 'voidgarden')
 
 
 def check(name, cond, detail=''):
@@ -34,7 +35,7 @@ BODY = "(document.activeElement && document.activeElement.blur(), document.body.
 
 
 def make(daemon, theme, size=(1280, 500)):
-    b = (common.Chromium if browser == 'chromium' else common.Firefox)(size=size)
+    b = modal.browser_for(browser, size, theme)
     b.goto(f'{daemon.url}?theme={theme}', settle=1.5)
     b.ev(HOOK)
     b.ev(BODY)

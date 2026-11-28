@@ -20,6 +20,7 @@ import sys
 import time
 
 import common
+from voidgarden_base import STILL
 
 browser = sys.argv[1] if len(sys.argv) > 1 else 'chromium'
 fails = []
@@ -92,7 +93,7 @@ CORE_FREEZE = ['createLive', 'createRelease', 'keeper']
 CORE_STREAM = ['batch', 'close', 'follow', 'followed', 'needed', 'open', 'renamed', 'want']
 CORE_POPUPS = ['add', 'listed', 'names', 'openDevice']
 CORE_KEYS = ['bind', 'frame', 'listed', 'zoneOf', 'zonesOf']
-CORE_DRIVER = ['reach', 'shown']
+CORE_DRIVER = ['controls', 'reach', 'shown']
 CORE_CLOCK = ['AGES_EVERY_MS', 'clockOffset', 'daemonClock', 'daemonNow', 'elapsedUs', 'fraction', 'tickAges', 'timeWords']
 # `core.eq` (the tone control's hands) and its three parts: the band drag is the drag's own functions,
 # the point drag and the table are makers that carry their helpers. `core.drag` is its old name, pinned
@@ -172,9 +173,20 @@ def poll(read, secs=5.0):
     return got
 
 
+def scene_ready(b, theme):
+    """Void Garden's scene is ready once it has drawn twice, or stands as the still (no 3D)."""
+    if theme == 'voidgarden':
+        check(f'{theme}: the scene is ready (its tier is the still, or it has drawn twice)',
+              bool(poll(lambda: b.page("(() => { const p = __core.theme.driver.perf(); return !!p && (p.tier === 'none' || p.draws >= 2); })()"), 40.0)),
+              b.page('__core.theme.driver.perf()'))
+
+
 def make(size=(1280, 900), **kw):
-    b = (common.Chromium if browser == 'chromium' else common.Firefox)(size=size, **kw)
-    b.preload(HOOK)
+    # Chromium without both 3D APIs: Void Garden stands as its still (a live scene on software rendering blocks the page's
+    # main thread for seconds at every draw, even in Still, so each driver call takes seconds); Firefox runs the live scene
+    b = (common.Chromium(size=size, args=['--disable-3d-apis'], **kw) if browser == 'chromium'
+         else common.Firefox(size=size, **kw))
+    b.preload(HOOK + STILL)
     return b
 
 
@@ -191,6 +203,7 @@ def start(b, daemon, theme, query=''):
     b.goto(f'{daemon.url}?theme={theme}&effects=off{query}', settle=1.0)
     mounted = b.page(BOOT)
     check(f'{theme}: the page mounts the theme', mounted == theme, mounted)
+    scene_ready(b, theme)
     time.sleep(0.5)
 
 
@@ -429,6 +442,9 @@ def button_everywhere(b, d, theme):
                    "() => new Promise((r) => setTimeout(r, 700)))")
             # a person arrives at the top of the page (Ember's button sits in its header)
             b.page('window.scrollTo(0, 0)')
+            # a person at the page has moved the pointer: a theme that fades the button (Void Garden) shows it again
+            if theme == 'voidgarden':
+                b.page("window.dispatchEvent(new PointerEvent('pointermove'))")
             time.sleep(0.2)
             got = b.page(BUTTON)
             check(f'{theme} / {name} / {size[0]} x {size[1]}: the menu button is shown, at least '
@@ -447,6 +463,7 @@ def lost_and_back(theme):
     try:
         b.goto(f'{daemon.url}?theme={theme}&effects=off', settle=1.0)
         b.page(BOOT)
+        scene_ready(b, theme)
         time.sleep(0.5)
         p = Pass(b, daemon, theme)
         check(p.tag('the_device_lost_and_back: not lost to begin with'), not p.state()['lost'])
@@ -481,6 +498,7 @@ def guest_pass(theme):
     try:
         b.goto(f'{daemon.url}?theme={theme}&effects=off', settle=1.0)
         b.page(BOOT)
+        scene_ready(b, theme)
         time.sleep(0.5)
         p = Pass(b, daemon, theme)
         steps = [({'control': 'volume'}, {'step': 1}), ({'control': 'mute'}, {'on': True}),
@@ -516,6 +534,7 @@ def refused_pass(theme):
     try:
         b.goto(f'{daemon.url}?theme={theme}&effects=off', settle=1.0)
         b.page(BOOT)
+        scene_ready(b, theme)
         time.sleep(0.5)
         refused_write(Pass(b, daemon, theme))
     finally:
@@ -529,7 +548,7 @@ try:
     b = make()
     b.goto(f'{fleet.url}?effects=off', settle=1.0)
     b.page(BOOT)
-    themes = [t for t in listed(b) if not ONLY or t in ONLY]
+    themes = [t for t in listed(b) if (not ONLY or t in ONLY)]
     check('WEB_CHECK_THEMES names only listed themes', ONLY <= set(listed(b)), sorted(ONLY - set(listed(b))))
     check('the page lists a theme', len(themes) > 0, themes)
     members = sorted(b.page('Object.keys(__core)'))
@@ -540,11 +559,11 @@ try:
               sorted(set(keys) ^ set(EXPECTED_KEYS[name])))
     listed = b.page('__core.popups.listed().map((p) => [p.name, p.row.sees, p.stays === true])')
     check('the page lists Devices (everyone\'s, which stays through a device switch), Sound (a '
-          'writer\'s), Scenes (a writer\'s, which stays), PipeWire config (everyone\'s) and Help, in '
-          'that order',
+          'writer\'s), Scenes (a writer\'s, which stays), PipeWire config (everyone\'s), Device '
+          'controls (everyone\'s, a theme opens it: no menu row) and Help, in that order',
           listed == [['devices', 'everyone', True], ['sound', 'writer', False],
                      ['scenes', 'writer', True], ['setup', 'everyone', False],
-                     ['help', 'everyone', False]], listed)
+                     ['controls', 'everyone', False], ['help', 'everyone', False]], listed)
     check('core.words words a step of a level', b.page(
         "[__core.words.stepWords({ lo: 2, texts: ['a', 'b'] }, 3), __core.words.stepWords({ lo: 0 }, 7)]")
         == ['b', '7'])

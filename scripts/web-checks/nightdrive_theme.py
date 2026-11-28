@@ -104,8 +104,8 @@ def the_mount(b, d):
     check('  the page without the theme is Ember', load(b, d, '?effects=off') == 'ember')
     b.press('T')
     cards = b.page(PICKER_CARDS)
-    check('  the picker lists Ember, Paper, Signal and Night drive',
-          cards == ['ember', 'paper', 'signal', 'nightdrive'], cards)
+    check('  the picker lists Ember, Paper, Signal, Night drive and Void Garden',
+          cards == ['ember', 'paper', 'signal', 'nightdrive', 'voidgarden'], cards)
     # a theme's picture is drawn once its module has loaded, which takes a moment more with every file it has
     poll(lambda: b.page("!!document.querySelector('#picker .tcard[data-theme=nightdrive] .tprev svg')"), 5.0)
     card = b.page("(() => { const c = document.querySelector('#picker .tcard[data-theme=nightdrive]');"

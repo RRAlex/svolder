@@ -37,6 +37,7 @@ import sys
 import time
 
 import common
+from voidgarden_base import STILL
 
 fails = []
 passed = 0
@@ -463,20 +464,25 @@ def computer_targets(run):
 
 
 d = common.Daemon('gungnir2-v2', host='fake', fleet=FLEET, env={'SVOLDER_FAKE_SIGNAL': '1'})
-b = common.Chromium(size=(1280, 900))
+# no 3D: Void Garden stands as its still (a live scene on software rendering blocks the main thread for seconds at every
+# draw, even in Still, so every driver call takes seconds)
+b = common.Chromium(size=(1280, 900), args=['--disable-3d-apis'])
 try:
-    b.preload(HOOK)
+    b.preload(HOOK + STILL)
     b.goto(d.url, settle=1.0)
     b.page(BOOT)
     listed = [t['id'] for t in b.page('__core.registry.list()')]
-    check('the page lists the themes the checks go through', listed == ['ember', 'paper', 'signal', 'nightdrive'], listed)
+    check('the page lists the themes the checks go through', listed == ['ember', 'paper', 'signal', 'nightdrive', 'voidgarden'], listed)
     check('WEB_CHECK_THEMES names only listed themes', ONLY <= set(listed), sorted(ONLY - set(listed)))
-    themes = [t for t in listed if not ONLY or t in ONLY]
+    themes = [t for t in listed if (not ONLY or t in ONLY)]
     for theme in themes:
         # the Gungnir 2 starts in Loudness, where the strength has its target
         assert d.post('Gungnir 2', 'eq/mode', {'mode': 'loudness'})[0] == 200
         b.goto(f'{d.url}?theme={theme}&effects=off', settle=1.5)
         check(f'{theme}: the page mounts it', b.page(BOOT) == theme)
+        if theme == 'voidgarden':
+            check('voidgarden: the page stands as its still on a browser with no 3D (the tier is none)',
+                  bool(poll(lambda: b.page("__driver.perf().tier === 'none'"), 20.0)), b.page('__driver.perf()'))
         for name in DEVICES:
             one_device(b, d, name, theme)
         check(f'{theme}: a device with reading rows had its ages looked at', theme in AGED)

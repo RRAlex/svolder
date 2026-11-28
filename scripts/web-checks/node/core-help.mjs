@@ -6,7 +6,7 @@
 // an `own` entry of another widget, then the whole page with the frame's keys), the line that
 // says the focus is nowhere, Everywhere, and About (the version, the words a guest reads in its
 // place, the daemon, links that open in a new tab and are the ones the repository ships).
-// Then that Help cannot drift, on the four themes' real tables, for a writer and a guest and
+// Then that Help cannot drift, on the five themes' real tables, for a writer and a guest and
 // with the focus in each zone in turn: every row Help draws is an entry of the theme's table or
 // of the frame's list as `listed` gives them (the tables `keys.py` proves bound in a browser),
 // and Help draws every listed entry of each zone it names; every zone has a name a person reads.
@@ -26,6 +26,7 @@ import {
 } from '../../../bins/svolderd/web/core/popups/help/draw.js';
 import * as ember from '../../../bins/svolderd/web/themes/ember/key-table.js';
 import * as nightdrive from '../../../bins/svolderd/web/themes/nightdrive/key-table.js';
+import * as voidgarden from '../../../bins/svolderd/web/themes/voidgarden/key-table.js';
 import * as paper from '../../../bins/svolderd/web/themes/paper/key-table.js';
 import * as signal from '../../../bins/svolderd/web/themes/signal/key-table.js';
 
@@ -207,7 +208,7 @@ await ok('the_links_are_the_ones_the_repository_ships', () => {
 
 // ---- Help cannot drift from the tables ----
 
-const THEMES = { ember, paper, signal, nightdrive };
+const THEMES = { ember, paper, signal, nightdrive, voidgarden };
 const VIEWERS = { writer: { canWrite: true, help: true }, guest: { canWrite: false, help: true } };
 
 for (const [theme, { KEYS, ZONES }] of Object.entries(THEMES)) {

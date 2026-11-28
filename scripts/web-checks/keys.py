@@ -184,6 +184,8 @@ REACTS = {
     ('ember', 'arrange', 'a'): lambda was, now: now['arranging'] and not was['arranging'],
     ('nightdrive', 'volume', 'ArrowUp'): lambda was, now: now['raw'] == was['raw'] + 1,
     ('nightdrive', 'volume', 'ArrowDown'): lambda was, now: now['raw'] == was['raw'] - 1,
+    ('voidgarden', 'volume', 'ArrowUp'): lambda was, now: now['raw'] == was['raw'] + 1,
+    ('voidgarden', 'volume', 'ArrowDown'): lambda was, now: now['raw'] == was['raw'] - 1,
 }
 # The page's answer to an `own` key of the page: `(theme, entry id, key)` to a function of the
 # state before and after. An `own` page entry with no line here fails the check.
@@ -281,7 +283,9 @@ def check(name, cond, detail=''):
 def make():
     if browser != 'chromium':
         return common.Firefox(size=(1280, 900))
-    b = common.Chromium(size=(1280, 900))
+    # no 3D APIs: Void Garden stands as its still (a live scene on software rendering blocks the page for seconds at
+    # every draw); no other theme's keys read a scene
+    b = common.Chromium(size=(1280, 900), args=['--disable-3d-apis'])
     # a headless page that no key or pointer has touched does not count as focused, and Chromium
     # then sends no focus event for a `focus()` by script: a state entered by script would leave
     # the frame no last focus, which no person's page does
@@ -598,7 +602,8 @@ def zones(b, daemon, theme, entries):
                if e['i'] not in seen]
     check(f'every_widget_entrys_zone_matches_an_element: {theme}: each of its {len(widgets)} '
           f'widget entries is listed with an element in its zone, on the page or in a state of it',
-          len(widgets) > 0 and missing == [] and bad == [], [missing, bad])
+          # Void Garden's keys are all the page's (↑ ↓, A and the explore keys S N E): it has no widget zone
+          (len(widgets) > 0 or theme == 'voidgarden') and missing == [] and bad == [], [missing, bad])
 
 
 def run(who, daemon, themes, writer=True, card=True):
@@ -619,7 +624,7 @@ def run(who, daemon, themes, writer=True, card=True):
             entries = got['entries']
             check(f'the_table_is_the_mounted_instances_and_every_entry_is_whole: {theme} for {who}: '
                   f'{len(entries)} entries, each with an id, its keycaps, a zone and words',
-                  got['mine'] and len(entries) >= 8 and all(e['whole'] for e in entries),
+                  got['mine'] and len(entries) >= (2 if theme == 'voidgarden' else 8) and all(e['whole'] for e in entries),
                   [got['mine'], [e for e in entries if not e['whole']]])
             b.page(SPY)
             count = owned(b, theme, who, entries)
@@ -628,7 +633,7 @@ def run(who, daemon, themes, writer=True, card=True):
                   count == expected, count)
             if writer and card:
                 count = bound(b, theme, who, entries)
-                expected = {'ember': 7, 'nightdrive': 1}.get(theme, 0)
+                expected = {'ember': 7, 'nightdrive': 1, 'voidgarden': 5}.get(theme, 0)
                 check(f'  {theme} binds {expected} keys of the page for {who}', count == expected, count)
                 stray(b, theme, who, entries)
                 helped(b, theme, who, 'on the page as it opens', by_key=True)
@@ -641,7 +646,7 @@ def run(who, daemon, themes, writer=True, card=True):
                 ids = sorted(e['id'] for e in off)
                 if not writer:
                     want = {'ember': ['centre', 'flat', 'mute', 'preset', 'volume'],
-                            'nightdrive': ['volume']}.get(theme, [])
+                            'nightdrive': ['volume'], 'voidgarden': ['volume']}.get(theme, [])
                     what = 'a guest has no key that writes'
                 else:
                     want = {'ember': ['look']}.get(theme, [])
@@ -652,7 +657,7 @@ def run(who, daemon, themes, writer=True, card=True):
                 unlisted = [e['id'] for e in entries if not e['listed'] and e['zone'] != 'page']
                 if not writer:
                     check(f'  and the widget keys that write are not listed for {who} ({theme})',
-                          len(unlisted) >= 1, unlisted)
+                          len(unlisted) >= 1 or theme == 'voidgarden', unlisted)
                 bound(b, theme, who, entries, writer)
                 stray(b, theme, who, entries)
                 helped(b, theme, who, 'on the page as it opens', by_key=True)
@@ -671,7 +676,8 @@ bare = common.Daemon('gungnir2-v2')
 try:
     listed = run('a signed-in viewer', d, None)
     themes = listed if isinstance(listed, list) else ['ember']
-    check('the page lists the four themes', sorted(themes) == ['ember', 'nightdrive', 'paper', 'signal'], themes)
+    check('the page lists the five themes',
+          sorted(themes) == ['ember', 'nightdrive', 'paper', 'signal', 'voidgarden'], themes)
     run('a signed-in viewer', d, [t for t in themes if t != 'ember'])
     run('a guest', g, themes, writer=False)
     run('a viewer of a page with no player', bare, ['ember'], card=False)

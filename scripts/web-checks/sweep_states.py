@@ -74,7 +74,20 @@ class Rig:
                 common.remove_tree(home)
 
 
-def browser_of(size=DESK):
+def browser_of(size=DESK, theme=None):
+    """A browser at `size`. Void Garden's pages are swept with both 3D APIs off (its still stands for the scene): every
+    state of a sweep loads the page again, and a live scene compiles its shaders on each load, minutes of CPU a sweep.
+    The scene's own words and pictures are voidgarden_overlay.py's and the stills'."""
+    if theme == 'voidgarden':
+        # its chrome fades to nothing after a few seconds of idle: a sweep reads it awake
+        hold = "try { localStorage.setItem('svolder.theme.voidgarden.fade-after', '600'); } catch (e) {}"
+        if browser == 'chromium':
+            b = common.Chromium(size=size, args=['--disable-3d-apis'])
+        else:
+            b = common.Firefox(size=size, extra_prefs=['user_pref("webgl.disabled", true);',
+                                                       'user_pref("dom.webgpu.enabled", false);'])
+        b.preload(hold)
+        return b
     return (common.Chromium if browser == 'chromium' else common.Firefox)(size=size)
 
 

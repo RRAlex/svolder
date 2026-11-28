@@ -388,7 +388,7 @@ compared with what the binary draws and prints; a doc that drifts fails a test.
   `crates/svolder-host/src/eq/lab/tests.rs` (the short run, the long run, the trace, the
   regression sequences).
 - The safety list: `scripts/safety-tests.list`; the documentation check: `scripts/docs-check.py`.
-- The web checks: `scripts/web-checks/`.
+- The web checks: `scripts/web-checks/`; Void Garden's own are in [its checks page](web-voidgarden-checks.md), with `make voidgarden-measure`, which prints the cost of its frame budget on a real GPU and asserts nothing.
 - The programs' tests that run built binaries against the fake: `bins/svolder/tests/` and
   `bins/svolderd/tests/`; the helper that spawns the daemon is `bins/svolder/tests/common/mod.rs`.
   The TUI in a pty: `bins/svolder/tests/tui_pty/`, with [its page](tui-pty-harness.md).

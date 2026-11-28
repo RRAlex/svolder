@@ -1129,8 +1129,8 @@ fn alsa_words(
 
 /// The words for the filter chain in the path: each stage that plays, in chain order, or the
 /// flat pass-through kept while a stream plays (none for one proved untouched); `host EQ on`
-/// where the stages were not told. The
-/// Night drive's top line (`STAGE_WORDS` in bins/svolderd/web/themes/nightdrive/hud.js) picks these
+/// where the stages were not told.
+/// The web themes' path words (`STAGE_WORDS` in bins/svolderd/web/core/path-words.js) pick these
 /// words out of the path by their text: change both together.
 fn chain_words(stages: Option<svolder_host::ChainStages>) -> Vec<String> {
     let Some(stages) = stages else {

@@ -255,7 +255,7 @@ unless told otherwise: on an arm64 host, `make static ARCH=aarch64`; `make docke
 make static                 # svolder, svolderd, svolder-sim: x86_64, static, libdbus built in
 make static ARCH=aarch64    # the same for arm64, into target/dist/aarch64
 make 3rdpartylicenses       # THIRD-PARTY-LICENSES: every crate's licence, then libdbus's, musl's,
-                            # IBM Plex's, Geist's, Crimson Pro's, Caveat's, Russo One's, Mr Dafoe's and htmx's
+                            # IBM Plex's, Geist's, Crimson Pro's, Caveat's, Russo One's, Mr Dafoe's, htmx's and three.js's
 make packages               # both architectures, then PKGBUILD, SHA256SUMS and RELEASE-NOTES.md
 make packages ARCH=x86_64   # one architecture's packages (ARCH=aarch64 the other's); no combining
 make release-files          # PKGBUILD, SHA256SUMS and RELEASE-NOTES.md from both architectures
@@ -1262,7 +1262,7 @@ $ svolder daemon status
 svolderd.socket: installed, enabled, active
 svolderd.socket listens on /run/user/1000/svolder.sock
 svolderd.service: installed, enabled, active
-daemon: 0.39.12 on /run/user/1000/svolder.sock
+daemon: 0.40.0 on /run/user/1000/svolder.sock
 mqtt: connected to 192.168.1.10:1883 (read-only)
 mcp: listening on 127.0.0.1:8737 (token, read-only)
 mcp clients: 0 connections open; 2 clients in the past hour, 3 in the past day

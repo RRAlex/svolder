@@ -6,7 +6,7 @@ theme the page lists (read from the core's registry, as `contract.py` does; Nigh
 mounted on the same fake daemon at 1280 by 800, 768 by 1024, 412 by 915 and 360 by 780, once for a
 signed-in viewer and once for a guest (Ember's Sign in stands left of the button); the button's box
 must equal 44 by 44 at 8 and 8 within a pixel, and nothing the theme draws (a word, a control, an
-image; not the scene or a layer hidden from the page's reader) may overlap it.
+image; not the scene (nor its no-GPU still picture, `#vg-still > svg`) or a layer hidden from the page's reader) may overlap it.
   the_menu_button_is_the_same_in_every_theme
   nothing_stands_under_the_menu_button       at the top of the page, also with a long device name
                                              (scrolled content passes under the opaque button, by design)
@@ -39,7 +39,7 @@ UNDER = """(() => { const btn = document.querySelector('#frame .fxbtn').getBound
   const own = (e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
   const out = [];
   for (const e of document.querySelectorAll('#theme *')) {
-    if (hidden(e) || e.matches('.fxslot, .paper-slot, .sg-slot, .nd-slot, #nd-slot, .nd-scene')) continue;
+    if (hidden(e) || e.matches('.fxslot, .paper-slot, .sg-slot, .nd-slot, #nd-slot, .nd-scene, #vg-still > svg')) continue;
     if (!(own(e) || e.matches('button, a, input, select, textarea, img, [role=img], [role=slider]'))) continue;
     const cs = getComputedStyle(e);
     if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) continue;
@@ -64,7 +64,10 @@ def check(name, cond, detail=''):
 
 
 def make(size):
-    return common.Chromium(size=size) if browser == 'chromium' else common.Firefox(size=size)
+    # no 3D APIs in Chromium: Void Garden stands as its still (a live scene on software rendering blocks the page for
+    # seconds at every draw); the frame's button is not drawn by a scene
+    return (common.Chromium(size=size, args=['--disable-3d-apis']) if browser == 'chromium'
+            else common.Firefox(size=size))
 
 
 def poll(read, secs=5.0):

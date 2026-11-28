@@ -482,6 +482,8 @@ FOOTS = {
 
 
 def foot_case(b, theme):
+    if theme not in FOOTS:
+        return
     tag = f'({theme})'
     first = b.page('__core.model.page().fleet.devices.map((d) => d.url)')[0]
     for label, size in (('wide', DESK), ('at 390 px', PHONE)):
@@ -748,8 +750,9 @@ def reader_case(b, theme, who):
         with open(os.path.join(shot, f'{theme}-guest-device.png'), 'wb') as out:
             out.write(b.shot())
     shut(b)
-    # ---- the theme's foot reads *Devices…* and opens the same page, wide and at 390 px ----
-    for label, size in (('wide', DESK), ('at 390 px', PHONE)):
+    # ---- the theme's foot reads *Devices…* and opens the same page, wide and at 390 px (a theme with no foot, Void Garden,
+    # opens the popup from the menu only) ----
+    for label, size in ((('wide', DESK), ('at 390 px', PHONE)) if theme in FOOTS else ()):
         b.resize(*size)
         time.sleep(0.6)
         prepare, selector = FOOTS[theme]
@@ -1116,7 +1119,7 @@ def add_back_cases():
     for theme in THEMES:
         h = common.Daemon(blank=True, env={'SVOLDER_FAKE_MORE': f'bifrost3@{BIFROST}'})
         try:
-            b = (common.Chromium if browser == 'chromium' else common.Firefox)(size=DESK)
+            b = modal.browser_for(browser, DESK, theme)
             try:
                 b.preload(modal.HOOK + ' ' + WARNS)
                 load(b, h, theme)
@@ -1138,7 +1141,7 @@ def main():
     for theme in THEMES:
         d = common.Daemon(host='fake', more=[('Second', '1112131415161718'), ('Third', '2122232425262728')])
         try:
-            b = (common.Chromium if browser == 'chromium' else common.Firefox)(size=DESK)
+            b = modal.browser_for(browser, DESK, theme)
             try:
                 b.preload(modal.HOOK + ' ' + WARNS)
                 load(b, d, theme)
@@ -1155,7 +1158,7 @@ def main():
         # the add page, on a daemon with a unit on the air that is not configured
         a = add_daemon()
         try:
-            b = (common.Chromium if browser == 'chromium' else common.Firefox)(size=DESK)
+            b = modal.browser_for(browser, DESK, theme)
             try:
                 b.preload(modal.HOOK + ' ' + WARNS)
                 load(b, a, theme)
@@ -1169,7 +1172,7 @@ def main():
             a.stop()
     f = common.Daemon(blank=True, env={'SVOLDER_FAKE_MORE': f'bifrost3@{BIFROST}'})
     try:
-        b = (common.Chromium if browser == 'chromium' else common.Firefox)(size=DESK)
+        b = modal.browser_for(browser, DESK, THEMES[0])
         try:
             b.preload(modal.HOOK + ' ' + WARNS)
             load(b, f, THEMES[0])
@@ -1184,7 +1187,7 @@ def main():
                       more=[('Second', '1112131415161718'), ('Third', '2122232425262728')])
     try:
         for theme in THEMES:
-            b = (common.Chromium if browser == 'chromium' else common.Firefox)(size=DESK)
+            b = modal.browser_for(browser, DESK, theme)
             try:
                 b.preload(modal.HOOK + ' ' + WARNS)
                 load(b, g, theme)
@@ -1198,7 +1201,7 @@ def main():
                       more=[('Second', '1112131415161718'), ('Third', '2122232425262728')])
     try:
         for theme in THEMES:
-            b = (common.Chromium if browser == 'chromium' else common.Firefox)(size=DESK)
+            b = modal.browser_for(browser, DESK, theme)
             try:
                 b.preload(modal.HOOK + ' ' + WARNS)
                 load(b, w, theme)

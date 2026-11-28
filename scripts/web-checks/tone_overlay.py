@@ -9,6 +9,7 @@ as text) with a preset that ten narrow filters make, which the device's five ban
 so the daemon serves a target, a fit and several gap spans for it. Every number drawn is
 compared with the model route's own `tone.overlay`.
 
+Void Garden is skipped by name (NO_GRAPH: its HUD shows an EQ spark, no graph to overlay).
 Per theme (Ember, Signal and Paper at 1280 px and again at 390 px, Paper also in its dark scheme):
   the_overlay_is_the_daemons_numbers     one shaded shape per gap span the daemon serves, the
                                         target's line, the fit in words as the daemon's RMS
@@ -62,6 +63,12 @@ PARTS = {
     'ember': dict(box='#part-tone .eqg', target='.tgt', gap='.gap', fit='.fitt', point='.mk'),
     'signal': dict(box='#sg-graph', target='.sg-target', gap='.sg-gap', fit='.sg-fit', point='.sg-pt'),
     'paper': dict(box='#p-graph', target='.p-target', gap='.p-gap', fit='.p-fit', point='.pt'),
+}
+
+# themes that draw no tone graph, so there is no overlay to read: skipped by name, with the reason
+NO_GRAPH = {
+    'voidgarden': "the theme's EQ is a one-line spark in its HUD (hud.js) and the scene; it has no graph box, "
+                  "target, gap or fit words (the frame's tone graph is Ember's, Signal's and Paper's)",
 }
 
 
@@ -273,6 +280,9 @@ def main():
         check('the daemon serves an overlay with several gap spans', len(overlay['gap']) > 1 and overlay['rms_db'] > 0,
               {k: v for k, v in overlay.items() if not isinstance(v, list)})
         for theme in modal.THEMES:
+            if theme in NO_GRAPH:
+                print('skip', f'tone_overlay ({theme}): {NO_GRAPH[theme]}')
+                continue
             b = make(DESK)
             try:
                 b.preload(modal.HOOK)

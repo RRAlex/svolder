@@ -49,12 +49,24 @@ import sys
 import time
 
 import common
+from voidgarden_base import STILL
 
 browser = sys.argv[1] if len(sys.argv) > 1 else 'chromium'
 fails = []
 passed = 0
-THEMES = [t for t in ('ember', 'paper', 'signal', 'nightdrive')
-          if t in os.environ.get('WEB_CHECK_THEMES', 'ember,paper,signal,nightdrive').split(',')]
+THEMES = [t for t in ('ember', 'paper', 'signal', 'nightdrive', 'voidgarden')
+          if t in os.environ.get('WEB_CHECK_THEMES', 'ember,paper,signal,nightdrive,voidgarden').split(',')]
+
+
+def browser_for(which, size, theme):
+    """A browser of `which` at `size` for a case of `theme`. Void Garden's pages are loaded with both 3D APIs off (its still
+    stands for the scene): on software rendering a live scene blocks the page's main thread for seconds at every draw, even
+    in Still, and these checks make a driver call or a click every few hundred milliseconds. Its scene is voidgarden_*.py's."""
+    if theme == 'voidgarden':
+        if which == 'chromium':
+            return common.Chromium(size=size, args=['--disable-3d-apis'])
+        return common.Firefox(size=size, extra_prefs=['user_pref("webgl.disabled", true);', 'user_pref("dom.webgpu.enabled", false);'])
+    return (common.Chromium if which == 'chromium' else common.Firefox)(size=size)
 
 
 def check(name, cond, detail=''):
@@ -70,7 +82,9 @@ def check(name, cond, detail=''):
 # every POST the page makes is noted
 HOOK = ("window.__posts = []; const f = window.fetch; window.fetch = (...a) => {"
         " if (a[1] && a[1].method === 'POST') window.__posts.push([String(a[0]), String(a[1].body)]);"
-        " return f(...a); };")
+        " return f(...a); };"
+        # Void Garden draws once a second (its Still level), so no pass is spent on software rendering
+        + STILL)
 BOOT = """import(new URL('assets/core/boot.js', document.baseURI)).then(async (m) => {
   await m.mounted; window.__core = m.core; return m.core.theme.id; })"""
 POSTS = 'window.__posts'
@@ -136,7 +150,8 @@ def load(b, d, theme):
 
 
 # the keys a theme or the frame acts on with the focus on the page, and the POST each makes
-CONTROLS = {'ember': ('ArrowLeft', 'volume'), 'nightdrive': ('ArrowUp', 'volume')}
+CONTROLS = {'ember': ('ArrowLeft', 'volume'), 'nightdrive': ('ArrowUp', 'volume'),
+            'voidgarden': ('ArrowUp', 'volume')}
 
 
 def posted(b, what):
@@ -377,7 +392,7 @@ def phone_width(d):
     tag = 'the_popups_are_centred_up_to_the_phone_width'
     got = {}
     for width in (719, 720):
-        b = (common.Chromium if browser == 'chromium' else common.Firefox)(size=(width, 800))
+        b = browser_for(browser, (width, 800), 'ember')
         try:
             b.preload(HOOK)
             load(b, d, 'ember')
@@ -399,7 +414,7 @@ def main():
     d = common.Daemon(host='fake', more=[('Second', '1112131415161718')])
     try:
         for theme in THEMES:
-            b = (common.Chromium if browser == 'chromium' else common.Firefox)(size=(1280, 800))
+            b = browser_for(browser, (1280, 800), theme)
             try:
                 b.preload(HOOK)
                 urls = load(b, d, theme)

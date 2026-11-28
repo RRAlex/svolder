@@ -11,13 +11,14 @@
 // own: `go` (the row leads on: a `›` after its words) and `picture`, which marks the Theme row that
 // menu.js gives the theme's small preview.
 
-import { rowId, seenBy } from './popups/listed.js';
+import { hasRow, rowId, seenBy } from './popups/listed.js';
 
 /** The rows the frame adds to every theme's: a row for each of `popups` the viewer sees (the
- * entries of the page's list, in its order; `run.popup(name)` opens one), then Sign out or Sign
- * in. `viewer` is the page's (`guest`, `writes`, `sign_out`). */
+ * entries of the page's list, in its order, but those listed with `menu: false`, which a theme
+ * opens itself; `run.popup(name)` opens one), then Sign out or Sign in. `viewer` is the page's
+ * (`guest`, `writes`, `sign_out`). */
 export function frameRows({ viewer, run, popups = [] }) {
-  const out = popups.filter((popup) => seenBy(popup, viewer)).map((popup) => ({
+  const out = popups.filter((popup) => hasRow(popup) && seenBy(popup, viewer)).map((popup) => ({
     kind: 'action',
     label: popup.row.label,
     elementId: rowId(popup.name),

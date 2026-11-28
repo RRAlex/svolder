@@ -539,7 +539,7 @@ fn the_check_survives_the_wire_with_snake_case_words() {
 
 #[test]
 fn no_word_says_bit_perfect_and_none_holds_a_stage_word() {
-    // The five words themes/nightdrive/hud.js 24 (`STAGE_WORDS`) picks out of the path.
+    // The five words core/path-words.js (`STAGE_WORDS`) picks out of the path.
     const STAGE_WORDS: [&str; 5] = [
         "host EQ on",
         "loudness on",

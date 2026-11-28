@@ -8,7 +8,9 @@
 // Run: node core-menu-rows.mjs
 import assert from 'node:assert/strict';
 import * as menuRowsModule from '../../../bins/svolderd/web/core/menu-rows.js';
-import { POPUPS, checkListed, rowId, seenBy } from '../../../bins/svolderd/web/core/popups/listed.js';
+import {
+  POPUPS, checkListed, hasRow, rowId, seenBy,
+} from '../../../bins/svolderd/web/core/popups/listed.js';
 
 const { frameRows, menuRows } = menuRowsModule;
 
@@ -161,11 +163,49 @@ ok('the_pages_list_is_one_the_core_can_read_and_holds_help', () => {
   assert.deepEqual(POPUPS.map((popup) => [popup.name, popup.row.label, popup.row.sees]),
     [['devices', 'Devices…', 'everyone'], ['sound', 'Sound…', 'writer'],
       ['scenes', 'Scenes…', 'writer'], ['setup', 'PipeWire config…', 'everyone'],
-      ['help', 'Help…', 'everyone']]);
+      ['controls', 'Device controls…', 'everyone'], ['help', 'Help…', 'everyone']]);
   assert.equal(POPUPS[0].stays, true, 'Devices stays through a change of the shown device');
   assert.equal(POPUPS[2].stays, true, 'Scenes stays too: it is about every device');
-  assert.ok(!POPUPS[1].stays && !POPUPS[3].stays && !POPUPS[4].stays,
-    'Sound, PipeWire config and Help do not');
+  assert.ok(!POPUPS[1].stays && !POPUPS[3].stays, 'Sound and PipeWire config do not');
+  assert.ok(!POPUPS[4].stays, 'Device controls does not');
+  assert.ok(!POPUPS[5].stays, 'Help does not');
+});
+
+ok('a_popup_listed_with_menu_false_has_no_row_and_the_others_have_one', () => {
+  const h = hands();
+  const hidden = {
+    name: 'controls', title: 'Device controls', load: async () => ({}),
+    row: { label: 'Device controls…', sees: 'everyone', menu: false },
+  };
+  const shown = { ...LISTED[0], row: { ...LISTED[0].row, menu: true } };
+  const list = [LISTED[0], hidden, shown, { ...LISTED[1], name: 'plain' }];
+  const ids = (viewer) => frameRows({ viewer, run: h.run, popups: list }).map((def) => def.elementId);
+  assert.deepEqual(ids(WRITER), ['menu-popup-help', 'menu-popup-help', 'menu-popup-plain', 'menu-sign-out'],
+    'menu absent or true gives the row; menu false gives none');
+  assert.ok(!ids(WRITER).includes(rowId('controls')));
+  assert.deepEqual(ids(GUEST), ['menu-popup-help', 'menu-popup-help', 'menu-sign-in']);
+  assert.equal(hasRow(hidden), false);
+  assert.equal(hasRow(shown), true);
+  assert.equal(hasRow(LISTED[0]), true);
+  // the popup is still gated by who sees it: the router's gate reads `seenBy`
+  assert.equal(seenBy(hidden, GUEST), true);
+  assert.equal(seenBy({ ...hidden, row: { ...hidden.row, sees: 'writer' } }, GUEST), false);
+  // a menu of only hidden popups has no rule of the frame's own
+  const only = menuRows({
+    theme: undefined, given: [], viewer: { guest: false }, run: h.run, popups: [hidden],
+  });
+  assert.deepEqual(only.map((def) => def.elementId ?? def.kind), ['menu-theme']);
+});
+
+ok('the_list_takes_menu_absent_or_a_boolean_and_refuses_anything_else', () => {
+  const one = LISTED[0];
+  assert.doesNotThrow(() => checkListed([one]));
+  assert.doesNotThrow(() => checkListed([{ ...one, row: { ...one.row, menu: false } }]));
+  assert.doesNotThrow(() => checkListed([{ ...one, row: { ...one.row, menu: true } }]));
+  for (const bad of ['no', 'false', 0, 1, null, {}]) {
+    assert.throws(() => checkListed([{ ...one, row: { ...one.row, menu: bad } }]), /help.*menu/,
+      `menu: ${JSON.stringify(bad)}`);
+  }
 });
 
 ok('no_row_of_the_frames_names_a_device', () => {

@@ -920,9 +920,9 @@ function loader() {
 
 await ok('a_page_has_the_listed_popups_until_one_is_added_and_a_name_is_added_once', async () => {
   const r = rig({ sample: false });
-  assert.deepEqual(r.core.popups.names(), ['devices', 'sound', 'scenes', 'setup', HELP], 'the page\'s own list and no other');
+  assert.deepEqual(r.core.popups.names(), ['devices', 'sound', 'scenes', 'setup', 'controls', HELP], 'the page\'s own list and no other');
   r.core.popups.add('sample', { title: TITLE, load: async () => ({ wire }) });
-  assert.deepEqual(r.core.popups.names(), ['devices', 'sound', 'scenes', 'setup', HELP, 'sample']);
+  assert.deepEqual(r.core.popups.names(), ['devices', 'sound', 'scenes', 'setup', 'controls', HELP, 'sample']);
   assert.throws(() => r.core.popups.add('sample', { title: TITLE, load: async () => ({ wire }) }),
     /sample is added already/);
   assert.throws(() => r.core.popups.add('other', { title: 'T' }), /loader/);
@@ -1065,6 +1065,34 @@ await ok('the_page_as_shipped_adds_the_popups_of_its_list_and_no_other', () => {
   assert.deepEqual(r.core.popups.names(), POPUPS.map((popup) => popup.name));
   assert.ok(!POPUPS.some((popup) => popup.name === 'sample'), 'the sample stays unlisted');
   r.window.close();
+});
+
+await ok('device_controls_is_listed_with_no_menu_row_and_every_viewer_may_open_it', async () => {
+  const entry = POPUPS.find((popup) => popup.name === 'controls');
+  assert.deepEqual([entry.title, entry.row, entry.stays],
+    ['Device controls', { label: 'Device controls…', sees: 'everyone', menu: false }, undefined]);
+  const r = rig({ sample: false });
+  assert.ok(r.core.popups.listed().some((popup) => popup.name === 'controls'), 'listed()');
+  assert.ok(r.core.popups.names().includes('controls'), 'the core added it');
+  for (const viewer of [{ guest: false, writes: true, sign_out: true }, { guest: false, writes: false },
+    { guest: true }]) {
+    const ids = frameRows({ viewer, run: { popup() {} }, popups: r.core.popups.listed() })
+      .map((def) => def.elementId);
+    assert.ok(!ids.includes('menu-popup-controls'), `no row for ${JSON.stringify(viewer)}: ${ids}`);
+  }
+  r.window.close();
+  // a guest and a reader open it (it is everyone's) and a theme's call of the router does
+  for (const viewer of [{ guest: true, writes: false }, { guest: false, writes: false, read_only: 'Read-only' }]) {
+    const g = rig({ sample: false, model: { ...MODEL, viewer } });
+    g.$('knob').focus();
+    g.core.router.open('controls');
+    await g.settle();
+    await g.settle();
+    assert.equal(g.core.router.state().popup, 'controls', JSON.stringify(viewer));
+    assert.equal(g.$('popup-controls-title').textContent, 'Device controls');
+    assert.ok(g.$('ctl-body'), 'its page is drawn');
+    g.window.close();
+  }
 });
 
 await ok('the_frame_shows_at_once_with_the_loading_line_and_draws_when_the_module_arrives', async () => {

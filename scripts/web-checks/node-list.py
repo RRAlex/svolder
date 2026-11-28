@@ -24,6 +24,7 @@ HELPERS = {
     'look-values': "the approved look's numbers, read by the smoke's harnesses",
     'nightdrive-rig': "the core's pieces over a fixture page, for Night drive's harnesses",
     'paper-rig': "the fixture page and the core's computer, for Paper's harnesses",
+    'voidgarden-rig': "the recorded and hand-made frames, for Void Garden's feed harnesses",
 }
 # The list is the words between `for name in` and `; do` of the loop that fills `node_entries`.
 LIST = re.compile(r'^node_entries=\(\)\nfor name in (.*?); do\n\s*node_entries\+=', re.S | re.M)

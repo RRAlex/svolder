@@ -154,7 +154,7 @@ await ok('a_name_with_markup_is_text_in_the_list_and_the_questions', () => {
 });
 
 await ok('the_popup_is_listed_after_sound_for_a_writer_and_stays', () => {
-  assert.deepEqual(POPUPS.map((p) => p.name), ['devices', 'sound', 'scenes', 'setup', 'help']);
+  assert.deepEqual(POPUPS.map((p) => p.name), ['devices', 'sound', 'scenes', 'setup', 'controls', 'help']);
   const entry = POPUPS.find((p) => p.name === SCENES);
   assert.deepEqual([entry.title, entry.row, entry.stays], ['Scenes', { label: 'Scenes…', sees: 'writer' }, true]);
   const rows = (viewer) => frameRows({ viewer, run: { popup() {} }, popups: POPUPS }).map((r) => r.label);

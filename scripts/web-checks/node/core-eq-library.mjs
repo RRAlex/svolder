@@ -223,7 +223,7 @@ const refused = (status, reason, error = 'daemon words') => ({ status, body: { e
 
 await ok('the_popup_is_a_writers_between_devices_and_help_and_names_the_side_in_every_title', async () => {
   const order = POPUPS.map((one) => one.name);
-  assert.deepEqual(order, ['devices', 'sound', 'scenes', 'setup', 'help']);
+  assert.deepEqual(order, ['devices', 'sound', 'scenes', 'setup', 'controls', 'help']);
   const entry = POPUPS.find((one) => one.name === SOUND);
   assert.equal(entry.row.sees, 'writer');
   assert.equal(entry.stays, undefined, 'a change of the shown device closes it');

@@ -2831,3 +2831,13 @@ unit of halo weight inside a wide band (-0.6 to -0.02), which a fit near zero ca
   `the_amp_page_flips_to_the_computer_with_the_dac_parts`, `the_computer_side_fits_a_phone` (no sideways
   scroll at 390; the stills `target/web-shots/paper/computer-{desktop,phone}.png`). `contract.py` and
   `completeness.py` drive Paper's computer targets (every theme has a computer driver).
+
+## Void Garden (0.40.0)
+The theme's browser checks: `voidgarden_theme.py` (the page, rows, kept choices, keys, dash, driver, reduced motion, fade),
+`voidgarden_states.py` (card, lost, reading again and resting, no capture, guest, refused write, card while faded), `voidgarden_phone.py`
+(layout rules at phone widths in each panel mode and side, with the 0.40.0 phone layout's contracts: compact top panel, 44 px keys in one row, 4.5:1 text, one HUD module, the media query read as PHONE_QUERY, Tab in the Host module; a finger's first tap; a phone starts capped), `voidgarden_timing.py` (serial
+lane: hidden, the levels' paces as ceilings, a held key's pace; the 15 s idle time is on a fake clock in `voidgarden_theme.py`) `voidgarden_perf.py` (the post chain draws the scene once per frame, the `vg-debug` switches do what they say) and the layer checks of wave 2 (`voidgarden_gpu.py` the
+tier matrix, `_overlay`, `_land`, `_hero`, `_fx`), all in `run-all.sh`. `contract.py`, `completeness.py`, `keys.py`, `modal.py` (and so the
+popup, contrast, phone and menu-row checks), `playing.py`, `space_key.py`, `effects_menu.py` and the picker lists run all five themes.
+What a look change would move is the baselines and the stills, never a check: the contrast pairs, the phone sweep's known failures, and the
+pictures of `make voidgarden-shots`. Not covered in a browser: the flash cap (`node/voidgarden-director.mjs` proves it; the fake host's frames fire no flash) and the first-tap rule on Firefox (no touch in WebDriver: `node/voidgarden-dash.mjs`). contract and completeness load Void Garden with 3D off in Chromium (a live scene on software rendering made every driver call take seconds); the live scene is driven by the theme, states, gpu and layer checks on both engines, and Firefox's contract.

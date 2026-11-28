@@ -53,6 +53,46 @@
   "ratio": 1.738,
   "need": 3.0
  },
+ "ember.dark|controls|button#ctl-c-nos|edge": {
+  "ratio": 2.864,
+  "need": 3.0
+ },
+ "ember.dark|controls|button#ctl-c-phase|edge": {
+  "ratio": 2.864,
+  "need": 3.0
+ },
+ "ember.dark|controls|button#ctl-mute|edge": {
+  "ratio": 2.864,
+  "need": 3.0
+ },
+ "ember.dark|controls|button#ctl-preset-remove-4|edge": {
+  "ratio": 2.864,
+  "need": 3.0
+ },
+ "ember.dark|controls|button#ctl-preset-rename-4|edge": {
+  "ratio": 2.864,
+  "need": 3.0
+ },
+ "ember.dark|controls|button#ctl-preset-save|edge": {
+  "ratio": 2.864,
+  "need": 3.0
+ },
+ "ember.dark|controls|button#ctl-transport-next|edge": {
+  "ratio": 2.864,
+  "need": 3.0
+ },
+ "ember.dark|controls|button#ctl-transport-pause|edge": {
+  "ratio": 2.864,
+  "need": 3.0
+ },
+ "ember.dark|controls|button#ctl-transport-previous|edge": {
+  "ratio": 2.864,
+  "need": 3.0
+ },
+ "ember.dark|controls|button#popup-controls-close|edge": {
+  "ratio": 1.31,
+  "need": 3.0
+ },
  "ember.dark|devices|button#popup-devices-close|edge": {
   "ratio": 1.31,
   "need": 3.0
@@ -277,6 +317,42 @@
   "ratio": 1.003,
   "need": 3.0
  },
+ "nightdrive.dark|controls|button#ctl-c-nos|edge": {
+  "ratio": 2.792,
+  "need": 3.0
+ },
+ "nightdrive.dark|controls|button#ctl-c-phase|edge": {
+  "ratio": 2.792,
+  "need": 3.0
+ },
+ "nightdrive.dark|controls|button#ctl-mute|edge": {
+  "ratio": 2.792,
+  "need": 3.0
+ },
+ "nightdrive.dark|controls|button#ctl-preset-remove-4|edge": {
+  "ratio": 2.792,
+  "need": 3.0
+ },
+ "nightdrive.dark|controls|button#ctl-preset-rename-4|edge": {
+  "ratio": 2.792,
+  "need": 3.0
+ },
+ "nightdrive.dark|controls|button#ctl-preset-save|edge": {
+  "ratio": 2.792,
+  "need": 3.0
+ },
+ "nightdrive.dark|controls|button#ctl-transport-next|edge": {
+  "ratio": 2.792,
+  "need": 3.0
+ },
+ "nightdrive.dark|controls|button#ctl-transport-pause|edge": {
+  "ratio": 2.792,
+  "need": 3.0
+ },
+ "nightdrive.dark|controls|button#ctl-transport-previous|edge": {
+  "ratio": 2.792,
+  "need": 3.0
+ },
  "nightdrive.dark|devices|button#popup-devices-identify|edge": {
   "ratio": 2.792,
   "need": 3.0
@@ -457,6 +533,42 @@
   "ratio": 1.333,
   "need": 3.0
  },
+ "paper.light|controls|button#ctl-c-nos|edge": {
+  "ratio": 2.409,
+  "need": 3.0
+ },
+ "paper.light|controls|button#ctl-c-phase|edge": {
+  "ratio": 2.409,
+  "need": 3.0
+ },
+ "paper.light|controls|button#ctl-mute|edge": {
+  "ratio": 2.409,
+  "need": 3.0
+ },
+ "paper.light|controls|button#ctl-preset-remove-4|edge": {
+  "ratio": 2.409,
+  "need": 3.0
+ },
+ "paper.light|controls|button#ctl-preset-rename-4|edge": {
+  "ratio": 2.409,
+  "need": 3.0
+ },
+ "paper.light|controls|button#ctl-preset-save|edge": {
+  "ratio": 2.409,
+  "need": 3.0
+ },
+ "paper.light|controls|button#ctl-transport-next|edge": {
+  "ratio": 2.409,
+  "need": 3.0
+ },
+ "paper.light|controls|button#ctl-transport-pause|edge": {
+  "ratio": 2.409,
+  "need": 3.0
+ },
+ "paper.light|controls|button#ctl-transport-previous|edge": {
+  "ratio": 2.409,
+  "need": 3.0
+ },
  "paper.light|devices|button#popup-devices-identify|edge": {
   "ratio": 2.409,
   "need": 3.0
@@ -573,18 +685,6 @@
   "ratio": 1.546,
   "need": 3.0
  },
- "signal.dark|blank|button#popup-devices-close|edge": {
-  "ratio": 1.485,
-  "need": 3.0
- },
- "signal.dark|blank|button#popup-devices-walk-stop|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|blank|button.fi-btn.fpw-choice|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
  "signal.dark|config|button#fx-button|edge": {
   "ratio": 1.546,
   "need": 3.0
@@ -601,128 +701,12 @@
   "ratio": 1.765,
   "need": 3.0
  },
- "signal.dark|devices|button#popup-devices-close|edge": {
-  "ratio": 1.485,
-  "need": 3.0
- },
- "signal.dark|devices|button#popup-devices-identify|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|devices|button#popup-devices-set-default-make|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|devices|button#popup-devices-set-name-save|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|devices|button#popup-devices-set-passphrase-cancel|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|devices|button#popup-devices-set-passphrase-change|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|devices|button#popup-devices-set-passphrase-reveal|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|devices|button#popup-devices-set-passphrase-save|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|devices|button#popup-devices-set-profile-open|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|devices|button#popup-devices-set-remove-open|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|devices|button#popup-devices-show-button|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|devices|button#popup-devices-walk-back|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|devices|button#popup-devices-walk-stop|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|devices|button.fi-btn.fpw-choice|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|devices|button.fi-btn|edge": {
-  "ratio": 2.838,
-  "need": 3.0
- },
- "signal.dark|devices|input#popup-devices-set-name-field|edge": {
-  "ratio": 1.692,
-  "need": 3.0
- },
- "signal.dark|devices|input#popup-devices-set-passphrase-field|edge": {
-  "ratio": 1.692,
-  "need": 3.0
- },
  "signal.dark|eq-library|.fp-graph gap|graph": {
   "ratio": 2.758,
   "need": 3.0
  },
- "signal.dark|eq-library|button#popup-eq-library-compare-open|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|eq-library|button#popup-eq-library-import-save|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|eq-library|button#popup-eq-library-v-0-1|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|eq-library|button#popup-eq-library-v-0-2|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|eq-library|button#popup-sound-close|edge": {
-  "ratio": 1.485,
-  "need": 3.0
- },
- "signal.dark|eq-library|button.fi-btn|edge": {
-  "ratio": 2.864,
-  "need": 3.0
- },
- "signal.dark|eq-library|input#popup-eq-library-file|edge": {
-  "ratio": 1.692,
-  "need": 3.0
- },
- "signal.dark|eq-library|input#popup-eq-library-import-name|edge": {
-  "ratio": 1.692,
-  "need": 3.0
- },
- "signal.dark|eq-library|input#popup-eq-library-query|edge": {
-  "ratio": 1.692,
-  "need": 3.0
- },
- "signal.dark|eq-library|input#popup-eq-library-upload-name|edge": {
-  "ratio": 1.692,
-  "need": 3.0
- },
  "signal.dark|guest|button#fx-button|edge": {
   "ratio": 1.546,
-  "need": 3.0
- },
- "signal.dark|guest|button#popup-devices-close|edge": {
-  "ratio": 1.485,
-  "need": 3.0
- },
- "signal.dark|guest|button#popup-help-close|edge": {
-  "ratio": 1.485,
   "need": 3.0
  },
  "signal.dark|guest|button#sg-b1fm[off]|text-disabled": {
@@ -861,16 +845,8 @@
   "ratio": 3.23,
   "need": 4.5
  },
- "signal.dark|help|button#popup-help-close|edge": {
-  "ratio": 1.485,
-  "need": 3.0
- },
  "signal.dark|off|button#fx-button|edge": {
   "ratio": 1.546,
-  "need": 3.0
- },
- "signal.dark|off|button#popup-devices-close|edge": {
-  "ratio": 1.485,
   "need": 3.0
  },
  "signal.dark|off|button#sg-b1fm[off]|text-disabled": {
@@ -1008,10 +984,6 @@
  "signal.dark|off|th|text": {
   "ratio": 3.23,
   "need": 4.5
- },
- "signal.dark|page|#sg-graph gap|graph": {
-  "ratio": 2.945,
-  "need": 3.0
  },
  "signal.dark|page|button#fx-button|edge": {
   "ratio": 1.546,
@@ -1305,16 +1277,268 @@
   "ratio": 1.065,
   "need": 3.0
  },
- "signal.dark|sound|button#popup-sound-close|edge": {
-  "ratio": 1.485,
+ "signal.dark|page|#sg-graph gap|graph": {
+  "ratio": 2.945,
   "need": 3.0
  },
- "signal.dark|sound|button.fi-btn|edge": {
-  "ratio": 2.864,
+ "voidgarden.dark|blank|button#vg-ex-effect|edge": {
+  "ratio": 1.056,
   "need": 3.0
  },
- "signal.dark|sound|input#popup-eq-library-query|edge": {
-  "ratio": 1.692,
+ "voidgarden.dark|blank|button#vg-ex-scene|edge": {
+  "ratio": 1.058,
+  "need": 3.0
+ },
+ "voidgarden.dark|blank|button#vg-ex-seed|edge": {
+  "ratio": 1.058,
+  "need": 3.0
+ },
+ "voidgarden.dark|blank|p#vg-quiet|text": {
+  "ratio": 2.242,
+  "need": 4.5
+ },
+ "voidgarden.dark|config|button#vg-ex-effect|edge": {
+  "ratio": 1.058,
+  "need": 3.0
+ },
+ "voidgarden.dark|config|button#vg-ex-scene|edge": {
+  "ratio": 1.058,
+  "need": 3.0
+ },
+ "voidgarden.dark|config|button#vg-ex-seed|edge": {
+  "ratio": 1.058,
+  "need": 3.0
+ },
+ "voidgarden.dark|config|button#vg-mute|edge": {
+  "ratio": 1.058,
+  "need": 3.0
+ },
+ "voidgarden.dark|config|button#vg-tr-0|edge": {
+  "ratio": 1.382,
+  "need": 3.0
+ },
+ "voidgarden.dark|config|button#vg-tr-1|edge": {
+  "ratio": 1.382,
+  "need": 3.0
+ },
+ "voidgarden.dark|config|button#vg-tr-2|edge": {
+  "ratio": 1.382,
+  "need": 3.0
+ },
+ "voidgarden.dark|config|button#vg-vdown|edge": {
+  "ratio": 1.382,
+  "need": 3.0
+ },
+ "voidgarden.dark|config|button#vg-vup|edge": {
+  "ratio": 1.382,
+  "need": 3.0
+ },
+ "voidgarden.dark|config|p#vg-quiet|text": {
+  "ratio": 2.242,
+  "need": 4.5
+ },
+ "voidgarden.dark|controls|button#ctl-c-nos|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|controls|button#ctl-c-phase|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|controls|button#ctl-mute|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|controls|button#ctl-preset-remove-4|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|controls|button#ctl-preset-rename-4|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|controls|button#ctl-preset-save|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|controls|button#ctl-transport-next|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|controls|button#ctl-transport-pause|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|controls|button#ctl-transport-previous|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|devices|button#popup-devices-identify|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|devices|button#popup-devices-set-default-make|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|devices|button#popup-devices-set-name-save|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|devices|button#popup-devices-set-passphrase-cancel|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|devices|button#popup-devices-set-passphrase-change|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|devices|button#popup-devices-set-passphrase-reveal|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|devices|button#popup-devices-set-passphrase-save|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|devices|button#popup-devices-set-profile-open|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|devices|button#popup-devices-set-remove-open|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|devices|button#popup-devices-show-button|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|devices|button.fi-btn|edge": {
+  "ratio": 2.848,
+  "need": 3.0
+ },
+ "voidgarden.dark|eq-library|.fp-graph gap|graph": {
+  "ratio": 2.563,
+  "need": 3.0
+ },
+ "voidgarden.dark|eq-library|button#popup-eq-library-compare-open|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|eq-library|button#popup-eq-library-import-save|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|eq-library|button#popup-eq-library-v-0-1|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|eq-library|button#popup-eq-library-v-0-2|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|eq-library|button.fi-btn|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|guest|button#vg-ex-effect|edge": {
+  "ratio": 1.056,
+  "need": 3.0
+ },
+ "voidgarden.dark|guest|button#vg-ex-scene|edge": {
+  "ratio": 1.058,
+  "need": 3.0
+ },
+ "voidgarden.dark|guest|button#vg-ex-seed|edge": {
+  "ratio": 1.058,
+  "need": 3.0
+ },
+ "voidgarden.dark|guest|p#vg-quiet|text": {
+  "ratio": 2.242,
+  "need": 4.5
+ },
+ "voidgarden.dark|off|button#vg-ex-effect|edge": {
+  "ratio": 1.056,
+  "need": 3.0
+ },
+ "voidgarden.dark|off|button#vg-ex-scene|edge": {
+  "ratio": 1.058,
+  "need": 3.0
+ },
+ "voidgarden.dark|off|button#vg-ex-seed|edge": {
+  "ratio": 1.058,
+  "need": 3.0
+ },
+ "voidgarden.dark|off|p#vg-quiet|text": {
+  "ratio": 2.242,
+  "need": 4.5
+ },
+ "voidgarden.dark|page|button#vg-ex-effect|edge": {
+  "ratio": 1.058,
+  "need": 3.0
+ },
+ "voidgarden.dark|page|button#vg-ex-scene|edge": {
+  "ratio": 1.058,
+  "need": 3.0
+ },
+ "voidgarden.dark|page|button#vg-ex-seed|edge": {
+  "ratio": 1.058,
+  "need": 3.0
+ },
+ "voidgarden.dark|page|button#vg-mute|edge": {
+  "ratio": 1.058,
+  "need": 3.0
+ },
+ "voidgarden.dark|page|button#vg-tr-0|edge": {
+  "ratio": 1.382,
+  "need": 3.0
+ },
+ "voidgarden.dark|page|button#vg-tr-1|edge": {
+  "ratio": 1.382,
+  "need": 3.0
+ },
+ "voidgarden.dark|page|button#vg-tr-2|edge": {
+  "ratio": 1.382,
+  "need": 3.0
+ },
+ "voidgarden.dark|page|button#vg-vdown|edge": {
+  "ratio": 1.382,
+  "need": 3.0
+ },
+ "voidgarden.dark|page|button#vg-vup|edge": {
+  "ratio": 1.382,
+  "need": 3.0
+ },
+ "voidgarden.dark|page|p#vg-quiet|text": {
+  "ratio": 2.242,
+  "need": 4.5
+ },
+ "voidgarden.dark|scenes|button.fi-btn|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|sound|button.fi-btn|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|blank|button#popup-devices-walk-stop|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|blank|button.fi-btn.fpw-choice|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|devices|button#popup-devices-walk-back|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|devices|button#popup-devices-walk-stop|edge": {
+  "ratio": 2.852,
+  "need": 3.0
+ },
+ "voidgarden.dark|devices|button.fi-btn.fpw-choice|edge": {
+  "ratio": 2.852,
   "need": 3.0
  }
 }

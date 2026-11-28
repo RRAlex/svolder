@@ -470,7 +470,8 @@ class Chromium:
             msg = json.loads(raw)
             if 'id' in msg:
                 fut = self.waiting.pop(msg['id'], None)
-                if fut:
+                # a reply after its caller gave up (a timeout cancels the future) is dropped
+                if fut and not fut.done():
                     fut.set_result(msg)
             else:
                 self.events.append(msg)
@@ -844,3 +845,31 @@ def center(b, selector):
              f".getBoundingClientRect();"
              f" return [r.left + r.width / 2, r.top + r.height / 2]; }})()")
     return r
+
+
+if __name__ == '__main__' and '--self-test' in sys.argv:
+    # a reply that comes after its caller's timeout must not stop the reader
+    class _Ws:
+        def __init__(self, raws):
+            self.raws = raws
+
+        def __aiter__(self):
+            return self._gen()
+
+        async def _gen(self):
+            for raw in self.raws:
+                yield raw
+
+    async def _late_reply():
+        b = Chromium.__new__(Chromium)
+        b.events = []
+        loop = asyncio.get_running_loop()
+        late, live = loop.create_future(), loop.create_future()
+        b.waiting = {1: late, 2: live}
+        late.cancel()
+        b.ws = _Ws([json.dumps({'id': 1, 'result': {}}), json.dumps({'id': 2, 'result': {'ok': 1}})])
+        await b._read()
+        assert live.result() == {'id': 2, 'result': {'ok': 1}}, 'the reader goes on after a late reply'
+
+    asyncio.run(_late_reply())
+    print('common.py self-test: ok')

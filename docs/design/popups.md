@@ -81,12 +81,11 @@ closes
   each tab names in `aria-controls`, and `aria-labelledby` the tab shown, in step with each draw and
   `put`.
 
-An entry of the side list is `{ id, label, dot?, dotWords?, tag?, group? }`. Beside its label
-it may carry a state dot (`dot`: `'on'`, `'warn'` or `'off'`; `dotWords` are read by a screen
-reader when the label does not say the state), a tag after the label (`tag`: its words, as
-`Shown`) and a break before it (`group: true`: the entry starts a group). The head holds the
-title and the close button and nothing else: it is no place for lists, so a chip that opens one
-stands in the page pane.
+An entry of the side list is `{ id, label, dot?, dotWords?, tag?, group? }`. Beside its label it may
+carry a state dot (`dot`: `'on'`, `'warn'` or `'off'`; `dotWords` are read by a screen reader when
+the label does not say the state), a tag after the label (`tag`: its words, as `Shown`) and a break
+before it (`group: true`: the entry starts a group). The head holds the title and the close button
+and nothing else: it is no place for lists, so a chip that opens one stands in the page pane.
 
 What every popup draws has one class each in `frame.css`, dressed by the `--frame-*` tokens
 alone, and a pure draw in `popups/frame.js`; a popup adds classes only under its own prefix.
@@ -100,23 +99,21 @@ alone, and a pure draw in `popups/frame.js`; a popup adds classes only under its
 | `rows(list)` | `fp-rows` holding `fp-row`, `fp-row-label`, `fp-row-value` | labels and their values as one description list (`<dl>`): each `{ label, value, attrs? }`, both markup; `fp-rows` has no look of its own |
 | (markup of the popup's own) | `fp-graph`; `fp-graph-grid`, `fp-graph-series`, `fp-graph-target` | a graph's box and the three strokes a graph is drawn with |
 
-A click on the veil closes the popup only when the press and the release were both on it: a
-drag that starts in the box (text selected in a field) and ends on the veil leaves the popup and
-what was typed. The veil is a scroll container that scrolls nothing (`overflow: hidden` with
-`overscroll-behavior: contain`), so a wheel or a swipe over it does not scroll the page under
-it, in the browsers that keep the rule on a box that scrolls nothing (Chromium from 144,
-Firefox from 150). The oldest browsers the page is built for (Chromium 142, Firefox 140) do not:
-there the page under the veil still scrolls, and nothing else differs. `html` and `body` keep
-their overflow. While a popup stands, the browser tab's title names
-it after the device's words, with the page's label at a page (`Bifrost 3 · connected ·
-Devices · Kara — svolder`): a `core.title` part that reads the router and the frame's
-`titleWords(page)`, so the entries the history holds for a popup and its page read apart in the
-browser's list, and the words go however the popup closes.
+A click on the veil closes the popup only when the press and the release were both on it: a drag
+that starts in the box (text selected in a field) and ends on the veil leaves the popup and what was
+typed. The veil is a scroll container that scrolls nothing (`overflow: hidden` with
+`overscroll-behavior: contain`), so a wheel or a swipe over it does not scroll the page under it, in
+the browsers that keep the rule on a box that scrolls nothing (Chromium from 144, Firefox from 150).
+The oldest browsers the page is built for (Chromium 142, Firefox 140) do not: there the page under
+the veil still scrolls, and nothing else differs. `html` and `body` keep their overflow. While a
+popup stands, the browser tab's title names it after the device's words, with the page's label at a
+page (`Bifrost 3 · connected · Devices · Kara — svolder`): a `core.title` part that reads the router
+and the frame's `titleWords(page)`, so the entries the history holds for a popup and its page read
+apart in the browser's list, and the words go however the popup closes.
 
-How the box comes in is a theme's to say: `.fp-box` takes `animation: var(--frame-popup-in,
-none)`, and no theme sets the token, so the box stands at once. A theme sets it in its own
-sheet, to an animation of its own `@keyframes`, **inside `@media (prefers-reduced-motion:
-no-preference)`**:
+How the box comes in is a theme's to say: `.fp-box` takes `animation: var(--frame-popup-in, none)`,
+and no theme sets the token, so the box stands at once. A theme sets it in its own sheet, to an
+animation of its own `@keyframes`, **inside `@media (prefers-reduced-motion: no-preference)`**:
 
 ```css
 @media (prefers-reduced-motion: no-preference) {
@@ -142,60 +139,58 @@ window a click on the entry whose page the pane already shows (the first entry, 
 steps nowhere and pushes no entry of the history; on a phone it opens that page.
 
 A list in a popup (`openList` of `core/list.js`) needs no `within`: the page pane is the popup's
-place for lists (`data-list-place`), and the panel of a list opened from a control in the pane
-goes into it. The pane is positioned and scrolls, so the panel is placed in what the pane
-scrolls and goes with its chip. It opens where the pane shows it whole: under the chip, else
-over it, else against the bottom of what the pane shows; the sheet keeps it no taller than the
-pane, and a longer list scrolls in its panel. The panel is measured at the pane's top left
-corner, not shown, and shown once it is placed: measured where the flow would put it, under the
-pane's bottom, it would give a pane that did not scroll a scrollbar for that one layout. The
-wire hands the list its keys from `onKey`,
-before its asks, so Escape closes the list alone.
+place for lists (`data-list-place`), and the panel of a list opened from a control in the pane goes
+into it. The pane is positioned and scrolls, so the panel is placed in what the pane scrolls and
+goes with its chip. It opens where the pane shows it whole: under the chip, else over it, else
+against the bottom of what the pane shows; the sheet keeps it no taller than the pane, and a longer
+list scrolls in its panel. The panel is measured at the pane's top left corner, not shown, and shown
+once it is placed: measured where the flow would put it, under the pane's bottom, it would give a
+pane that did not scroll a scrollbar for that one layout. The wire hands the list its keys from
+`onKey`, before its asks, so Escape closes the list alone.
 
-`core/popups/sample/` is the sample popup that fills this skeleton once: two entries, a paragraph,
-a question and a form of `core/inline-ask.js`, a chip that opens a list, and a live line. The
-page never registers it, so
-no menu row, key or list reaches it and `core.router.open('sample')` opens nothing; a check
-adds it to the popups of the core it holds (`core.popups.add`). `node/core-popups.mjs` holds
-the draws and the wire. The sample is not in the binary: the daemon serves it only from a
-`SVOLDER_WEB_ASSETS` directory, the browser checks' default.
+`core/popups/sample/` is the sample popup that fills this skeleton once: two entries, a paragraph, a
+question and a form of `core/inline-ask.js`, a chip that opens a list, and a live line. The page
+never registers it, so no menu row, key or list reaches it and `core.router.open('sample')` opens
+nothing; a check adds it to the popups of the core it holds (`core.popups.add`).
+`node/core-popups.mjs` holds the draws and the wire. The sample is not in the binary: the daemon
+serves it only from a `SVOLDER_WEB_ASSETS` directory, the browser checks' default.
 
 ## The list of popups
 
-`core/popups/listed.js` is the one place a popup of the page is added: `POPUPS`, a list of `{
-name, title, entries?, stays?, load, row: { label, sees } }`. `stays: true` is a popup that is
+`core/popups/listed.js` is the one place a popup of the page is added: `POPUPS`, a list of `{ name,
+title, entries?, stays?, load, row: { label, sees, menu? } }`. `stays: true` is a popup that is
 about the devices and not about the one on show: it stands through a change of the shown device,
 where every other popup closes ([frame.md](frame.md#modals); Devices is the one such popup,
-[devices-popup.md](devices-popup.md)). An entry is the popup and its row in the
-frame's menu together: `row.label` is the row's words and `row.sees` who has the popup,
-`'everyone'` or `'writer'` (a viewer who may write: no guest, and not on a page whose writes
-are off; the core's `mayWrite`). Devices is `'everyone'`: it reads `mayWrite` itself and draws
-read-only for a reader. `createCore` adds every entry
-to `core.popups` (a list of its own may be handed in as `popups`, which the node harnesses do),
-`core.popups.listed()` gives the entries back, and `frameRows` of `core/menu-rows.js` reads the
-menu's popup rows from them, in the list's order, before Sign out (`#menu-popup-<name>`;
-a tap opens the popup through the router). So a row cannot stand without its popup: no row is
-written in `menu-rows.js`, and an entry with no `row`, no `load` or a name listed twice is
-refused as the core is made. The sample popup is not in the list. `listed()` is the list as
-the core was made with it: a copy, frozen with each entry and its `row`. `HELP` of `listed.js`
-is the Help popup's name and the id of the frame's `?` entry. An entry's `title` and `entries`
-are written in `listed.js`, never imported from the popup's folder, which loads at the first
-opening.
+[devices-popup.md](devices-popup.md)). An entry is the popup and its row in the frame's menu
+together: `row.label` is the row's words and `row.sees` who has the popup, `'everyone'` or
+`'writer'` (a viewer who may write: no guest, and not on a page whose writes are off; the core's
+`mayWrite`). `row.menu: false` is a popup a theme opens itself (`core.router.open(name)`): it is
+gated by `sees` like any other, and `frameRows` leaves its row out; `menu` absent or `true` has the
+row, and anything else is refused as the core is made. Device controls is the one such popup.
+Devices is `'everyone'`: it reads `mayWrite` itself and draws read-only for a reader. `createCore`
+adds every entry to `core.popups` (a list of its own may be handed in as `popups`, which the node
+harnesses do), `core.popups.listed()` gives the entries back, and `frameRows` of `core/menu-rows.js`
+reads the menu's popup rows from them, in the list's order, before Sign out (`#menu-popup-<name>`; a
+tap opens the popup through the router). So a row cannot stand without its popup: no row is written
+in `menu-rows.js`, and an entry with no `row`, no `load` or a name listed twice is refused as the
+core is made. The sample popup is not in the list. `listed()` is the list as the core was made with
+it: a copy, frozen with each entry and its `row`. `HELP` of `listed.js` is the Help popup's name and
+the id of the frame's `?` entry. An entry's `title` and `entries` are written in `listed.js`, never
+imported from the popup's folder, which loads at the first opening.
 
-**`sees` is the popup's, not only the row's.** Every entry is added whoever the viewer is
-(nothing loads before an open), and the gate is one place in the core: `core.popups` registers
-a listed popup with the router with `allowed()`, which asks `seenBy(entry, viewer)`, and the
-router asks it at every `open` and at every step of the history. A viewer who does not see the
-row therefore opens the popup by no path: a key, a theme's call of `core.router.open`, Back or
-Forward onto an entry that names it. Nothing is pushed, drawn or loaded. An open says what any
-write of that viewer's says (`core.actions.refuse()`: the toast `Sign in to change this` with
-the way to sign in, for a guest; the page's read-only words where writes are off); a step of
-the history makes the entry a plain one and says nothing. An entry of an earlier load of the
-page opens nothing in any case, so an address or a reload opens no popup. A viewer who loses
-the right while such a popup stands (the page's model is replaced with another viewer, or the
-rights are read again at every later event of the model, the fleet, the host or the stream
-(state, opened); a sign-out loads the page again) loses the popup: it closes. A popup added by hand
-(`core.popups.add`, the checks' sample) has no such gate.
+**`sees` is the popup's, not only the row's.** Every entry is added whoever the viewer is (nothing
+loads before an open), and the gate is one place in the core: `core.popups` registers a listed popup
+with the router with `allowed()`, which asks `seenBy(entry, viewer)`, and the router asks it at
+every `open` and at every step of the history. A viewer who does not see the row therefore opens the
+popup by no path: a key, a theme's call of `core.router.open`, Back or Forward onto an entry that
+names it. Nothing is pushed, drawn or loaded. An open says what any write of that viewer's says
+(`core.actions.refuse()`: the toast `Sign in to change this` with the way to sign in, for a guest;
+the page's read-only words where writes are off); a step of the history makes the entry a plain one
+and says nothing. An entry of an earlier load of the page opens nothing in any case, so an address
+or a reload opens no popup. A viewer who loses the right while such a popup stands (the page's model
+is replaced with another viewer, or the rights are read again at every later event of the model, the
+fleet, the host or the stream (state, opened); a sign-out loads the page again) loses the popup: it
+closes. A popup added by hand (`core.popups.add`, the checks' sample) has no such gate.
 
 ## The lazy loader
 
@@ -241,10 +236,10 @@ parsed as a browser parses it and a history; it lays nothing out, knows no `iner
 media query, so those are the browser's to prove.
 
 In a browser, one check for every popup and theme: `scripts/web-checks/popups.py` loops over the
-four themes and over the rows of its `POPUPS` table (the sample, Devices, Sound and Help; the
-PipeWire config popup has its own check, `setup_popup.py`), at 1280 px and at 390 px, in Chromium
-and Firefox. It proves what node cannot see: nothing under the popup's folder is requested before
-the first open; the box is on top at its centre and the veil at the window's corners
+four themes and over the rows of its `POPUPS` table (the sample, Devices, Sound, Device controls and
+Help; the PipeWire config popup has its own check, `setup_popup.py`), at 1280 px and at 390 px, in
+Chromium and Firefox. It proves what node cannot see: nothing under the popup's folder is requested
+before the first open; the box is on top at its centre and the veil at the window's corners
 (`elementFromPoint`, over Night drive's canvas and Ember's smoke); the page behind is inert; Tab
 stays inside, past a control the layout does not show; the list and the page stand side by side; the
 colours are the theme's tokens in each scheme; nothing scrolls sideways; a list's panel stands
@@ -311,6 +306,11 @@ seven lines in the daemon's words (`path.config` of the card), the `What changes
 (`path.row.changes`) and the limit sentence. It prints and judges nothing; the words come from
 `svolder-ipc` ([host-config-check.md](host-config-check.md)). With no config: `config not read`.
 
+## Device controls
+
+`core/popups/controls/` (`menu: false`: a theme opens it, no menu row) is the controls of a theme
+with no sheet of its own, [controls-popup.md](controls-popup.md).
+
 ## Sound
 
 The menu's *Sound…* row (`core/popups/sound/`, a writer's) is one popup with up to four tabs, *EQ
@@ -365,16 +365,15 @@ answers `missing`, is said once and the list is read once, with no retry.
 
 ## The EQ library
 
-`core/popups/eq-library/` is the first tab of the Sound popup (the row *Sound…* between *Devices…* and
-*Help…*, see above): a search of AutoEq with a preview of the chosen measurement for the device on
-show (or for
-the computer), an import that only saves, an upload of a parametric EQ file and the saved presets
-with *Overwrite with current…*. It is about the side the page shows and so is not `stays`: a change
-of the shown device closes it, and its title names the side in every draw. It has a search field
-whose answers arrive late (each is matched to its request and a stale one is dropped), a file input
-and a disclosure of variants; its compare choice is a list opened from a chip in the page pane. It
-wants nothing of the stream: the page behind follows the device. [eq-library.md](eq-library.md) has
-it whole.
+`core/popups/eq-library/` is the first tab of the Sound popup (the row *Sound…* between *Devices…*
+and *Help…*, see above): a search of AutoEq with a preview of the chosen measurement for the device
+on show (or for the computer), an import that only saves, an upload of a parametric EQ file and the
+saved presets with *Overwrite with current…*. It is about the side the page shows and so is not
+`stays`: a change of the shown device closes it, and its title names the side in every draw. It has
+a search field whose answers arrive late (each is matched to its request and a stale one is
+dropped), a file input and a disclosure of variants; its compare choice is a list opened from a chip
+in the page pane. It wants nothing of the stream: the page behind follows the device.
+[eq-library.md](eq-library.md) has it whole.
 
 ## Adding a popup
 
@@ -393,7 +392,8 @@ it whole.
    fails on one that is missing.
 4. Add it to `POPUPS` of `core/popups/listed.js`, with its row: `{ name: '<name>', title,
    entries, load: () => import('./<name>/wire.js'), row: { label, sees } }`. The core adds it
-   and the menu has its row. Open it from a tap or a key with `core.router.open('<name>')`:
+   and the menu has its row (a popup a theme opens itself says `menu: false` and has none). Open it
+   from a tap or a key with `core.router.open('<name>')`:
    never on load, never from a stream event (the router says so in the console, and `popups.py`
    fails on it).
 5. Give it a row in `POPUPS` of `scripts/web-checks/popups.py`, with `add: None` (the page adds

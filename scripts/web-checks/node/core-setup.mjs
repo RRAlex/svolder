@@ -217,7 +217,9 @@ await ok('changes_are_read_from_the_path_rows_changes_and_nowhere_else', () => {
 
 await ok('the_popup_is_listed_before_help_with_a_plain_row_for_everyone', () => {
   const at = POPUPS.findIndex((one) => one.name === SETUP);
-  assert.equal(POPUPS[at + 1].name, HELP);
+  // Device controls (opened by a theme, no menu row) stands between it and Help
+  assert.equal(POPUPS[at + 1].name, 'controls');
+  assert.equal(POPUPS[at + 2].name, HELP);
   assert.deepEqual(POPUPS[at].row, { label: 'PipeWire config…', sees: 'everyone' });
   assert.equal(POPUPS[at].title, 'PipeWire config');
   assert.equal(POPUPS[at].entries, undefined, 'one page, no side list');

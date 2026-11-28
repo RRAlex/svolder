@@ -253,6 +253,11 @@ const FILES: &[Entry] = &[
         include_bytes!("../../web/core/tone-curve.js"),
     ),
     (
+        "core/path-words.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/path-words.js"),
+    ),
+    (
         "core/plot.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/plot.js"),
@@ -406,6 +411,16 @@ const FILES: &[Entry] = &[
         "core/popups/help/wire.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/popups/help/wire.js"),
+    ),
+    (
+        "core/popups/controls/draw.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/controls/draw.js"),
+    ),
+    (
+        "core/popups/controls/wire.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/controls/wire.js"),
     ),
     (
         "core/popups/setup/draw.js",
